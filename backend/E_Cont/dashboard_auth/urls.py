@@ -12,6 +12,8 @@ from .views import (
     inscription_generate_matricula_view,
     inscription_payment_link_view,
     login_view,
+    microsoft365_create_user_view,
+    microsoft365_student_license_view,
     student_lookup_view,
 )
 
@@ -23,6 +25,8 @@ urlpatterns = [
     path('inscription/catalogs/', inscription_catalogs_view, name='inscription-catalogs'),
     path('inscription/matricula/', inscription_generate_matricula_view, name='inscription-matricula'),
     path('inscription/payment-link/', inscription_payment_link_view, name='inscription-payment-link'),
+    path('microsoft365/users/', microsoft365_create_user_view, name='microsoft365-create-user'),
+    path('microsoft365/licenses/student/', microsoft365_student_license_view, name='microsoft365-student-license'),
     path('admin/academic-catalogs/', admin_academic_catalogs_view, name='admin-academic-catalogs'),
     path('admin/carrera-status/', admin_carrera_status_view, name='admin-carrera-status'),
     path('admin/pensum/', admin_pensum_entry_view, name='admin-pensum-entry'),

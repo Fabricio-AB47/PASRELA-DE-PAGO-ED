@@ -20,4 +20,5 @@ from django.urls import include, path
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/', include('dashboard_auth.urls')),
+    path('api/microsoft365/', include('dashboard_auth.microsoft365_urls')),
 ]

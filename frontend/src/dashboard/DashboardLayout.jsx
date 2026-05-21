@@ -37,9 +37,16 @@ export default function DashboardLayout({ session, onSessionChange }) {
   return (
     <main className="dashboard-layout">
       <header className="dashboard-topbar">
-        <div>
-          <span className="eyebrow">Acceso concedido</span>
-          <h1 className="dashboard-title">Dashboard de pagos ED</h1>
+        <div className="dashboard-brand-heading">
+          <img
+            className="dashboard-logo"
+            src="/Intec-Logowithslogangray.svg"
+            alt="INTEC"
+          />
+          <div>
+            <span className="eyebrow">Acceso concedido</span>
+            <h1 className="dashboard-title">Dashboard de pagos ED</h1>
+          </div>
         </div>
         <button type="button" className="ghost-button" onClick={handleLogout}>
           Cerrar sesion

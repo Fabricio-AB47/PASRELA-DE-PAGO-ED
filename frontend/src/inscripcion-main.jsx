@@ -212,6 +212,7 @@ function InscriptionPage() {
     ) ||
     activeCoursesForSelectedCareer[0] ||
     null
+  const canSubmitRegistration = registrationForm.dataTreatment === 'si' && !isRegistrationSubmitting
 
   async function handleRegistrationSubmit(event) {
     event.preventDefault()
@@ -329,11 +330,11 @@ function InscriptionPage() {
     <main className="inscription-fullscreen">
       <section className="inscription-centered">
           <div className="auth-card lookup-mode inscription-card">
-          <div className="brand-mark" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
+          <img
+            className="inscription-logo"
+            src="/Intec-Logowithslogangray.svg"
+            alt="INTEC"
+          />
 
           <span className="eyebrow">Registro de inscripción</span>
           <h2>Formulario de inscripción</h2>
@@ -584,7 +585,11 @@ function InscriptionPage() {
 
                 {registrationErrorMessage ? <p className="form-error">{registrationErrorMessage}</p> : null}
 
-                <button className="submit-button" type="submit" disabled={isRegistrationSubmitting}>
+                <button
+                  className="submit-button"
+                  type="submit"
+                  disabled={!canSubmitRegistration}
+                >
                   {isRegistrationSubmitting ? 'Registro de Inscripcion...' : 'Registro de Inscripcion'}
               </button>
             </form>

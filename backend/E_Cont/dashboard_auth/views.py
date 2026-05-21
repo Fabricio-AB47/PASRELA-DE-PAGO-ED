@@ -13,6 +13,11 @@ from .inscription_catalogs import (
     update_pensum_status,
     upsert_pensum_entry,
 )
+from .microsoft365 import (
+    Microsoft365Error,
+    create_microsoft365_user,
+    get_student_license_summary,
+)
 from .payments import (
     PaymentGatewayError,
     admin_cancel_payment,
@@ -154,6 +159,7 @@ def inscription_payment_link_view(request):
             'email_result': result.get('email_result'),
             'provider_response': result.get('provider_response'),
             'official_sync': result.get('official_sync'),
+            'microsoft365': result.get('microsoft365'),
         }
     )
 
@@ -202,6 +208,68 @@ def inscription_catalogs_view(_request):
             'ok': True,
             'message': 'Catalogos de inscripcion cargados.',
             'catalogs': catalogs,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def microsoft365_create_user_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    try:
+        result = create_microsoft365_user(payload)
+    except Microsoft365Error as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=exc.status_code)
+    except Exception:
+        logger.exception('Unexpected error while creating Microsoft 365 user.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrio un error interno creando el usuario Microsoft 365.',
+            },
+            status=500,
+        )
+
+    return JsonResponse(
+        {
+            'ok': True,
+            'message': 'Usuario Microsoft 365 creado y licenciado correctamente.',
+            'result': result,
+        },
+        status=201,
+    )
+
+
+@require_GET
+@require_admin_session
+def microsoft365_student_license_view(_request):
+    try:
+        result = get_student_license_summary()
+    except Microsoft365Error as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=exc.status_code)
+    except Exception:
+        logger.exception('Unexpected error while loading Microsoft 365 student license.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrio un error interno consultando la licencia Microsoft 365.',
+            },
+            status=500,
+        )
+
+    return JsonResponse(
+        {
+            'ok': True,
+            'message': 'Licencia Microsoft 365 para estudiantes localizada.',
+            'license': result,
         }
     )
 

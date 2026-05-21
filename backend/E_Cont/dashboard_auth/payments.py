@@ -4,6 +4,7 @@ import json
 import os
 import re
 import secrets
+from base64 import urlsafe_b64decode
 from decimal import Decimal, InvalidOperation
 from html import escape
 from typing import Any
@@ -17,6 +18,12 @@ from .inscription_catalogs import (
     calculate_inscription_amount,
     get_pensum_status_column,
     is_catalog_value_active,
+)
+from .microsoft365 import (
+    Microsoft365Error,
+    Microsoft365ValidationError,
+    build_intec_account_identity,
+    create_microsoft365_user,
 )
 
 
@@ -32,6 +39,7 @@ class ProviderHttpError(PaymentGatewayError):
 
 
 DEFAULT_PAYMENT_RECEIPT_EMAIL = 'DeptCobranzas@intec.edu.ec'
+GRAPH_MAIL_SEND_ROLE = 'Mail.Send'
 
 
 def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
@@ -126,6 +134,36 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         payment_link='PENDIENTE',
     )
     official_sync_result: dict[str, Any] = {'ok': True, 'message': 'Sincronizacion oficial completada.'}
+    microsoft365_result: dict[str, Any] = {'ok': False, 'message': 'No ejecutado.'}
+
+    try:
+        microsoft365_user = create_microsoft365_user(
+            {
+                'nombre_completo': nombre,
+                'cedula': cedula,
+            }
+        )
+        microsoft365_result = {
+            'ok': True,
+            'message': 'Usuario Microsoft 365 creado y licenciado correctamente.',
+            'user': microsoft365_user,
+        }
+    except Microsoft365Error as exc:
+        microsoft365_result = {
+            'ok': False,
+            'message': str(exc),
+        }
+        _update_inscription_request_result(
+            inscription_id=inscription_id,
+            payment_link='ERROR_MICROSOFT365',
+            provider_response={
+                'status': 'error',
+                'source': 'microsoft365',
+                'message': str(exc),
+                'official_sync': official_sync_result,
+            },
+        )
+        raise PaymentGatewayError(f'No fue posible crear el usuario Microsoft 365: {str(exc)}') from exc
 
     provider_payload = _build_alldigital_payload(
         raw_payload=payload,
@@ -200,6 +238,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
             'provider': provider_response,
             'email_result': email_result,
             'official_sync': official_sync_result,
+            'microsoft365': microsoft365_result,
             'receipt_email': receipt_email,
             'status': 'completado',
         },
@@ -213,6 +252,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         'provider_response': provider_response,
         'email_result': email_result,
         'official_sync': official_sync_result,
+        'microsoft365': microsoft365_result,
     }
 
 
@@ -725,6 +765,11 @@ def _upsert_official_inscription_records(
     descripcion: str,
     payment_link: str,
 ) -> dict[str, str]:
+    try:
+        intec_account = build_intec_account_identity(nombre=nombre, cedula=cedula)
+    except Microsoft365ValidationError as exc:
+        raise PaymentGatewayError(str(exc)) from exc
+
     with transaction.atomic():
         codigo_estud = _resolve_or_create_datos_estud(
             cedula=cedula,
@@ -732,12 +777,15 @@ def _upsert_official_inscription_records(
             email=email,
             telefono=telefono,
             direccion=direccion,
+            correo_intec=intec_account['correo'],
         )
 
         _upsert_correos_estud_intec(
             codigo_estud=codigo_estud,
             nombre=nombre,
             email=email,
+            correo_intec=intec_account['correo'],
+            password_temporal=intec_account['password_temporal'],
             codigo_periodo=codigo_periodo,
             descripcion=descripcion,
         )
@@ -837,6 +885,7 @@ def _resolve_or_create_datos_estud(
     email: str,
     telefono: str,
     direccion: str,
+    correo_intec: str,
 ) -> str:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -862,7 +911,7 @@ def _resolve_or_create_datos_estud(
                     Estado = 'D'
                 WHERE CAST(codigo_estud AS varchar(50)) = %s
                 """,
-                [nombre, email, email, telefono or '', telefono or '', direccion or '', codigo_estud],
+                [nombre, email, correo_intec, telefono or '', telefono or '', direccion or '', codigo_estud],
             )
             return codigo_estud
 
@@ -893,7 +942,7 @@ def _resolve_or_create_datos_estud(
                 cedula,
                 nombre,
                 email,
-                email,
+                correo_intec,
                 telefono or '',
                 telefono or '',
                 direccion or '',
@@ -907,13 +956,16 @@ def _upsert_correos_estud_intec(
     codigo_estud: str,
     nombre: str,
     email: str,
+    correo_intec: str,
+    password_temporal: str,
     codigo_periodo: str,
     descripcion: str,
 ) -> None:
     nombre_corto = _trim_to_max(nombre, 100)
     email_corto = _trim_to_max(email, 100)
+    correo_intec_corto = _trim_to_max(correo_intec, 100)
     tipo_curso = _trim_to_max('E', 1)
-    password = _trim_to_max(secrets.token_urlsafe(16), 30)
+    password = _trim_to_max(password_temporal, 30)
 
     with connection.cursor() as cursor:
         cursor.execute(
@@ -933,6 +985,7 @@ def _upsert_correos_estud_intec(
                 SET Nombres = %s,
                     CorreoPersonal = %s,
                     CorreoIntec = %s,
+                    Password = %s,
                     Periodo = %s,
                     Estado = ISNULL(Estado, 'A'),
                     Descripcion = %s
@@ -941,7 +994,8 @@ def _upsert_correos_estud_intec(
                 [
                     nombre_corto,
                     email_corto,
-                    email_corto,
+                    correo_intec_corto,
+                    password,
                     _safe_int(codigo_periodo, default=0),
                     descripcion,
                     codigo_estud,
@@ -970,7 +1024,7 @@ def _upsert_correos_estud_intec(
                 codigo_estud,
                 nombre_corto,
                 email_corto,
-                email_corto,
+                correo_intec_corto,
                 password,
                 _safe_int(codigo_periodo, default=0),
                 'A',
@@ -1373,6 +1427,7 @@ def _send_payment_link_email(
         )
 
     access_token = _get_graph_access_token(tenant_id, client_id, client_secret)
+    _validate_graph_mail_send_permission(access_token)
 
     recipient_label = recipient_name or recipient_email
     safe_recipient_label = escape(recipient_label)
@@ -1469,6 +1524,12 @@ def _send_payment_link_email(
                 'Configura un usuario valido en MS_SENDER_USER_ID (Object ID/UPN) '
                 'o MS_SENDER_EMAIL y asegure permisos Mail.Send para la aplicacion.'
             ) from exc
+        if exc.status_code == 403 and 'ErrorAccessDenied' in exc.detail:
+            raise PaymentGatewayError(
+                'Microsoft Graph denego el envio de correo. La aplicacion debe tener '
+                'el permiso Application Mail.Send con Grant admin consent, y el remitente '
+                f'{sender_identity} debe ser un buzon valido con permiso para enviar.'
+            ) from exc
         raise
 
     return {
@@ -1533,6 +1594,37 @@ def _get_graph_access_token(tenant_id: str, client_id: str, client_secret: str) 
     if not token:
         raise PaymentGatewayError('Graph no devolvio access_token para envio de correo.')
     return token
+
+
+def _validate_graph_mail_send_permission(access_token: str) -> None:
+    roles = _graph_token_roles(access_token)
+    if GRAPH_MAIL_SEND_ROLE not in roles:
+        raise PaymentGatewayError(
+            'Microsoft Graph no puede enviar el correo porque el token no contiene '
+            'Mail.Send como permiso de aplicacion. En Azure Portal agrega Microsoft Graph '
+            '> Application permissions > Mail.Send y ejecuta Grant admin consent.'
+        )
+
+
+def _graph_token_roles(access_token: str) -> set[str]:
+    parts = str(access_token or '').split('.')
+    if len(parts) < 2:
+        return set()
+
+    payload_part = parts[1]
+    padded_payload = payload_part + '=' * (-len(payload_part) % 4)
+    try:
+        decoded = urlsafe_b64decode(padded_payload.encode('utf-8')).decode('utf-8')
+        payload = json.loads(decoded)
+    except (ValueError, json.JSONDecodeError):
+        return set()
+
+    roles = payload.get('roles')
+    if isinstance(roles, list):
+        return {str(role) for role in roles if str(role).strip()}
+
+    scope = str(payload.get('scp') or '')
+    return {item for item in scope.split() if item}
 
 
 def _extract_payment_link(provider_response: Any) -> str | None:
