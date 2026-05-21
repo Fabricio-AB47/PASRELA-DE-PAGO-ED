@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "sqlproj: Build INTEC",
+			"type": "process",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"c:/Users/fabri/Documents/INTEC PROYECTOS/PASRELA DE PAGO ED/INTEC/INTEC.sqlproj"
+			],
+			"problemMatcher": "$sqlproj-problem-matcher",
+			"isBackground": true,
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"detail": "Builds the INTEC SQL project"
+		}
+	]
+}

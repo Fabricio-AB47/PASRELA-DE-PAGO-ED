@@ -1,0 +1,65 @@
+:root {
+  --fintec-rojo: #931913;
+  --fintec-rojo-rgb: 147, 25, 19;
+  --fintec-celeste: #8DBBC7;
+  --fintec-celeste-rgb: 141, 187, 199;
+  --fintec-blanco: #ffffff;
+  --fintec-blanco-rgb: 255, 255, 255;
+  --fintec-gris: #C7C6C6;
+  --fintec-gris-rgb: 199, 198, 198;
+  --fintec-gris-oscuro: #777777;
+  --fintec-gris-oscuro-rgb: 119, 119, 119;
+  --text-base: var(--fintec-gris-oscuro);
+  --text-strong: var(--fintec-rojo);
+  --text-soft: rgba(var(--fintec-gris-oscuro-rgb), 0.88);
+  --muted: rgba(var(--fintec-gris-oscuro-rgb), 0.72);
+  --surface-alt: rgba(var(--fintec-celeste-rgb), 0.18);
+  font-family: 'Trebuchet MS', 'Segoe UI', 'Helvetica Neue', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--text-base);
+  background: rgba(var(--fintec-celeste-rgb), 0.16);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+body,
+button,
+input {
+  font: inherit;
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+h1,
+h2,
+h3,
+p,
+dl {
+  margin: 0;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
