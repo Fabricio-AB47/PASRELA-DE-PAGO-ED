@@ -25,6 +25,9 @@ class ProviderHttpError(PaymentGatewayError):
         super().__init__(f'Error del proveedor ({status_code}): {detail}')
 
 
+DEFAULT_PAYMENT_RECEIPT_EMAIL = 'DeptCobranzas@intec.edu.ec'
+
+
 def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
     email = str(payload.get('email') or '').strip()
     nombre = str(payload.get('nombre') or '').strip()
@@ -150,6 +153,8 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
             'Revisa la respuesta del proveedor.'
         )
 
+    receipt_email = _resolve_payment_receipt_email()
+
     try:
         email_result = _send_payment_link_email(
             recipient_email=email,
@@ -157,6 +162,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
             payment_link=payment_link,
             matricula=matricula,
             monto=monto,
+            receipt_email=receipt_email,
         )
     except PaymentGatewayError as exc:
         email_result = {
@@ -188,6 +194,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
             'provider': provider_response,
             'email_result': email_result,
             'official_sync': official_sync_result,
+            'receipt_email': receipt_email,
             'status': 'completado',
         },
     )
@@ -196,6 +203,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         'matricula': matricula,
         'monto': monto,
         'payment_link': payment_link,
+        'receipt_email': receipt_email,
         'provider_response': provider_response,
         'email_result': email_result,
         'official_sync': official_sync_result,
@@ -1335,6 +1343,7 @@ def _send_payment_link_email(
     payment_link: str,
     matricula: str,
     monto: Any,
+    receipt_email: str,
 ) -> dict[str, Any]:
     tenant_id = (os.getenv('MS_TENANT_ID') or '').strip()
     client_id = (os.getenv('MS_CLIENT_ID') or '').strip()
@@ -1354,6 +1363,17 @@ def _send_payment_link_email(
     safe_monto = escape(str(monto if monto not in (None, '') else 'No disponible'))
     safe_payment_link = escape(payment_link)
     safe_button_href = escape(payment_link if payment_link else '#', quote=True)
+    safe_receipt_email = escape(receipt_email)
+    safe_receipt_mailto = escape(f'mailto:{receipt_email}', quote=True)
+    receipt_message = ''
+    if receipt_email:
+        receipt_message = f"""
+                <p style="margin:0 0 18px 0;font-size:14px;line-height:1.6;color:#374151;">
+                  Luego de realizar el pago, envia el comprobante al correo
+                  <a href="{safe_receipt_mailto}" style="color:#4338ca;text-decoration:underline;">{safe_receipt_email}</a>
+                  indicando tu nombre completo y matricula.
+                </p>
+""".rstrip()
 
     html_content = f"""
 <html>
@@ -1384,6 +1404,8 @@ def _send_payment_link_email(
                 <p style="margin:0 0 18px 0;">
                   <a href="{safe_button_href}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;">Pagar ahora</a>
                 </p>
+
+{receipt_message}
 
                 <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;">Si el boton no funciona, copia y pega este enlace en tu navegador:</p>
                 <p style="margin:0;font-size:13px;word-break:break-all;color:#4338ca;">{safe_payment_link}</p>
@@ -1435,7 +1457,12 @@ def _send_payment_link_email(
     return {
         'sent': True,
         'message': f'Correo enviado correctamente a {recipient_email}.',
+        'receipt_email': receipt_email,
     }
+
+
+def _resolve_payment_receipt_email() -> str:
+    return DEFAULT_PAYMENT_RECEIPT_EMAIL
 
 
 def _resolve_graph_sender_identity() -> str:

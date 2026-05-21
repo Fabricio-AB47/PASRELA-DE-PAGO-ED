@@ -5,6 +5,7 @@ import './App.css'
 import { readResponsePayload } from './shared.js'
 
 const FIXED_COD_ANIO_BASICA = '13'
+const PAYMENT_RECEIPT_EMAIL = 'DeptCobranzas@intec.edu.ec'
 
 function InscriptionPage() {
   const removeNumbersFromLabel = (value) =>
@@ -35,7 +36,7 @@ function InscriptionPage() {
   const [isRegistrationSubmitting, setIsRegistrationSubmitting] = useState(false)
   const [registrationErrorMessage, setRegistrationErrorMessage] = useState('')
   const [registrationResult, setRegistrationResult] = useState(null)
-  const [isMatriculaLoading, setIsMatriculaLoading] = useState(true)
+  const [, setIsMatriculaLoading] = useState(true)
   const [catalogs, setCatalogs] = useState({
     carreras: [],
     periodos: [],
@@ -299,6 +300,9 @@ function InscriptionPage() {
     }
   }
 
+  const receiptEmail =
+    registrationResult?.receipt_email || registrationResult?.email_result?.receipt_email || PAYMENT_RECEIPT_EMAIL
+
   return (
     <main className="inscription-fullscreen">
       <section className="inscription-centered">
@@ -309,14 +313,11 @@ function InscriptionPage() {
             <span></span>
           </div>
 
-          <span className="eyebrow">Registro de inscripcion</span>
-          <h2>Formulario de inscripcion</h2>
+          <span className="eyebrow">Registro de inscripción</span>
+          <h2>Formulario de inscripción</h2>
           <p className="auth-intro">
-            Registro de Inscripcion para estudiantes del INTEC. Completa el formulario para generar tu enlace de pago y finalizar tu inscripcion.
+            Registro de Inscripción para estudiantes del INTEC. Completa el formulario para generar tu enlace de pago y finalizar tu inscripción.
           </p>
-          <a className="secondary-link" href="/login/">
-            Ir al login del dashboard
-          </a>
 
             <section className="registration-box">
               <div className="registration-box-header">
@@ -330,7 +331,7 @@ function InscriptionPage() {
                 <div className="registration-row-group">
                   <div className="registration-grid registration-grid-4">
                     <label className="field">
-                      <span>Carrera (Cod_AnioBasica) *</span>
+                      <span>Curso en: *</span>
                       <select
                         name="carrera_num"
                         value={registrationForm.carrera_num}
@@ -338,7 +339,7 @@ function InscriptionPage() {
                         required
                         disabled={isCatalogsLoading || careerLocked}
                       >
-                        <option value="">Selecciona una carrera</option>
+                        <option value="">Selecciona el Curso</option>
                         {catalogs.carreras.map((career) => (
                           <option key={career.num} value={career.num}>
                             {removeNumbersFromLabel(career.nombre_basica)}
@@ -421,7 +422,7 @@ function InscriptionPage() {
                 <div className="registration-row-group">
                   <div className="registration-grid">
                     <label className="field">
-                    <span>Correo Electronico *</span>
+                    <span>Correo Electrónico *</span>
                       <input
                         name="email"
                         type="email"
@@ -434,7 +435,7 @@ function InscriptionPage() {
                     </label>
 
                     <label className="field">
-                    <span>Numero de Telefono *</span>
+                    <span>Número de Teléfono *</span>
                       <input
                       name="telefono"
                       type="text"
@@ -462,13 +463,13 @@ function InscriptionPage() {
                   </label>
 
                   <label className="field">
-                    <span>Direccion *</span>
+                    <span>Dirección *</span>
                     <input
                       name="direccion"
                       type="text"
                       value={registrationForm.direccion}
                       onChange={handleRegistrationChange}
-                      placeholder="Direccion"
+                      placeholder="Dirección"
                       required
                     />
                   </label>
@@ -478,13 +479,13 @@ function InscriptionPage() {
                 <div className="registration-row-group">
                   <div className="registration-grid">
                     <label className="field">
-                    <span>Ocupacion</span>
+                    <span>Ocupación</span>
                     <input
                       name="ocupacion"
                       type="text"
                       value={registrationForm.ocupacion}
                       onChange={handleRegistrationChange}
-                      placeholder="Ocupacion"
+                      placeholder="Ocupación"
                     />
                   </label>
 
@@ -503,19 +504,6 @@ function InscriptionPage() {
 
                 <div className="registration-row-group">
                   <div className="registration-grid">
-                    <label className="field readonly-field">
-                    <span>Matricula *</span>
-                    <input
-                      name="matricula"
-                      type="text"
-                      value={registrationForm.matricula}
-                      placeholder={isMatriculaLoading ? 'Generando matricula unica...' : 'Matricula unica'}
-                      readOnly
-                      disabled
-                      required
-                    />
-                  </label>
-
                   <label className="field readonly-field">
                     <span>Monto *</span>
                     <input
@@ -524,7 +512,7 @@ function InscriptionPage() {
                       min="0"
                       step="0.01"
                       value={registrationForm.monto}
-                      placeholder="Monto calculado automaticamente"
+                      placeholder="Monto calculado automáticamente"
                       readOnly
                       disabled
                       required
@@ -533,10 +521,18 @@ function InscriptionPage() {
                   </div>
                 </div>
 
+                <div className="inscription-payment-notice">
+                  <p>
+                    Luego de realizar el pago, envia el comprobante de pago a{' '}
+                    <a href={`mailto:${PAYMENT_RECEIPT_EMAIL}`}>{PAYMENT_RECEIPT_EMAIL}</a>{' '}
+                    indicando tu nombre completo y matricula.
+                  </p>
+                </div>
+
                 <section className="consent-box">
                   <p>
                     Autorizo de forma libre, previa y expresa el tratamiento de mis datos
-                    personales para fines de inscripcion, gestion academica y contacto institucional.
+                    personales para fines de inscripción, gestión académica y contacto institucional.
                   </p>
                   <div className="consent-options">
                     <label>
@@ -572,12 +568,18 @@ function InscriptionPage() {
               {registrationResult?.payment_link ? (
               <div className="payment-result">
                   <p className="payment-result-title">Inscripcion completada</p>
-                  <a href={registrationResult.payment_link} target="_blank" rel="noreferrer">
+                  <a className="payment-result-link" href={registrationResult.payment_link} target="_blank" rel="noreferrer">
                     {registrationResult.payment_link}
                 </a>
                 <p className="payment-result-note">
                     {registrationResult.email_result?.message ?? 'Correo enviado correctamente.'}
                 </p>
+                {receiptEmail ? (
+                  <p className="payment-result-note payment-result-receipt">
+                    Luego de realizar el pago, envia el comprobante a{' '}
+                    <a href={`mailto:${receiptEmail}`}>{receiptEmail}</a> indicando tu nombre completo y Cedula de ciudadania.
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </section>

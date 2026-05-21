@@ -483,6 +483,26 @@
   font-weight: 700;
 }
 
+.inscription-payment-notice {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-left: 4px solid var(--fintec-rojo);
+  background: rgba(var(--fintec-rojo-rgb), 0.08);
+}
+
+.inscription-payment-notice p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.inscription-payment-notice a {
+  color: var(--fintec-rojo);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .consent-box {
   margin-bottom: 16px;
   padding: 12px 14px;
@@ -532,7 +552,7 @@
   color: var(--fintec-rojo);
 }
 
-.payment-result a {
+.payment-result-link {
   display: block;
   margin-top: 8px;
   color: var(--fintec-rojo);
@@ -542,6 +562,11 @@
 .payment-result-note {
   margin-top: 8px;
   color: var(--text-soft);
+}
+
+.payment-result-receipt a {
+  color: var(--fintec-rojo);
+  overflow-wrap: anywhere;
 }
 
 .lookup-result-header h3,

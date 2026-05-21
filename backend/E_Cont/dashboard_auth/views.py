@@ -140,6 +140,7 @@ def inscription_payment_link_view(request):
             'message': 'Enlace de pago generado.',
             'matricula': result.get('matricula'),
             'payment_link': result.get('payment_link'),
+            'receipt_email': result.get('receipt_email'),
             'email_result': result.get('email_result'),
             'provider_response': result.get('provider_response'),
             'official_sync': result.get('official_sync'),
