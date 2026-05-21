@@ -1,6 +1,9 @@
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+
+const projectRoot = dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -8,10 +11,10 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: resolve(__dirname, 'index.html'),
-        inscription: resolve(__dirname, 'inscripcion/index.html'),
-        login: resolve(__dirname, 'login/index.html'),
-        dashboard: resolve(__dirname, 'dashboard/index.html'),
+        main: resolve(projectRoot, 'index.html'),
+        inscription: resolve(projectRoot, 'inscripcion/index.html'),
+        login: resolve(projectRoot, 'login/index.html'),
+        dashboard: resolve(projectRoot, 'dashboard/index.html'),
       },
     },
   },

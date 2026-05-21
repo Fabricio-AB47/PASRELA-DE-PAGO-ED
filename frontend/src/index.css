@@ -41,12 +41,14 @@ body {
 
 body,
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
 button,
-input {
+input,
+select {
   font-family: inherit;
 }
 

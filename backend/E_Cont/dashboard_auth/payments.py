@@ -13,6 +13,12 @@ from urllib.request import Request, urlopen
 
 from django.db import IntegrityError, connection, transaction
 
+from .inscription_catalogs import (
+    calculate_inscription_amount,
+    get_pensum_status_column,
+    is_catalog_value_active,
+)
+
 
 class PaymentGatewayError(Exception):
     pass
@@ -77,7 +83,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         monto = f'{monto_calculado:.2f}'
     elif monto in (None, '', 0, '0'):
         raise PaymentGatewayError(
-            'No fue posible calcular el monto del curso con Horas x ValorHora en PENSUM.'
+            'No fue posible calcular el monto del curso con Horas x ValorHoraVirtual en PENSUM.'
         )
 
     if _cabecera_has_numcodigo(matricula):
@@ -1307,12 +1313,19 @@ def _resolve_numcodigo_column(cursor: Any) -> str:
 
 
 def _resolve_monto_from_pensum(cod_anio_basica: str, codigo_materia: str) -> Decimal | None:
+    status_column = get_pensum_status_column()
+    if status_column:
+        status_select = f"RTRIM(ISNULL([{status_column}], 'A')) AS estado_materia"
+    else:
+        status_select = "CAST('A' AS varchar(20)) AS estado_materia"
+
     with connection.cursor() as cursor:
         cursor.execute(
-            """
+            f"""
             SELECT TOP (1)
-                CAST(ISNULL(Horas, 0) AS decimal(18, 2)) AS horas,
-                CAST(ISNULL(ValorHora, 0) AS decimal(18, 2)) AS valor_hora
+                CAST(ISNULL(Horas, 0) AS decimal(18, 0)) AS horas,
+                CAST(ISNULL(ValorHoraVirtual, 0) AS decimal(18, 5)) AS valor_hora_virtual,
+                {status_select}
             FROM dbo.PENSUM
             WHERE LTRIM(RTRIM(CAST(Cod_AnioBasica AS varchar(20)))) = %s
               AND LTRIM(RTRIM(CAST(codigo_materia AS varchar(50)))) = %s
@@ -1320,14 +1333,18 @@ def _resolve_monto_from_pensum(cod_anio_basica: str, codigo_materia: str) -> Dec
             """,
             [cod_anio_basica, codigo_materia],
         )
-        row = cursor.fetchone()
+        rows = cursor.fetchall()
 
-    if not row:
+    if not rows:
+        return None
+
+    row = next((item for item in rows if is_catalog_value_active(item[2], default=True)), None)
+    if row is None:
         return None
 
     horas = _to_decimal(row[0])
-    valor_hora = _to_decimal(row[1])
-    return (horas * valor_hora).quantize(Decimal('0.01'))
+    valor_hora_virtual = _to_decimal(row[1])
+    return calculate_inscription_amount(horas, valor_hora_virtual)
 
 
 def _to_decimal(value: Any) -> Decimal:

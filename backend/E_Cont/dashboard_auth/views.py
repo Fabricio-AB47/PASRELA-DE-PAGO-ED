@@ -5,7 +5,14 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .inscription_catalogs import fetch_inscription_catalogs
+from .inscription_catalogs import (
+    AcademicCatalogError,
+    fetch_admin_academic_catalogs,
+    fetch_inscription_catalogs,
+    update_carrera_status,
+    update_pensum_status,
+    upsert_pensum_entry,
+)
 from .payments import (
     PaymentGatewayError,
     admin_cancel_payment,
@@ -13,6 +20,7 @@ from .payments import (
     create_payment_link_and_notify,
     generate_unique_numcodigo,
 )
+from .security import create_session_token, require_admin_session
 from .services import AuthError, InactiveUserError, InvalidScopeError, authenticate_user
 from .student_records import StudentLookupError, lookup_student_inscription
 
@@ -63,11 +71,13 @@ def login_view(request):
             status=500,
         )
 
+    user_payload = user.to_dict()
     return JsonResponse(
         {
             'ok': True,
             'message': 'Acceso concedido.',
-            'user': user.to_dict(),
+            'user': user_payload,
+            'session_token': create_session_token(user_payload),
         }
     )
 
@@ -196,8 +206,120 @@ def inscription_catalogs_view(_request):
     )
 
 
+@require_GET
+@require_admin_session
+def admin_academic_catalogs_view(_request):
+    try:
+        catalogs = fetch_admin_academic_catalogs()
+    except Exception:
+        logger.exception('Unexpected error while loading admin academic catalogs.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrio un error interno cargando carreras y pensum.',
+            },
+            status=500,
+        )
+
+    return JsonResponse(
+        {
+            'ok': True,
+            'message': 'Catalogos academicos cargados.',
+            'catalogs': catalogs,
+        }
+    )
+
+
 @csrf_exempt
 @require_POST
+@require_admin_session
+def admin_carrera_status_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    try:
+        result = update_carrera_status(payload)
+    except AcademicCatalogError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while updating carrera status.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrio un error interno actualizando el estado de la carrera.',
+            },
+            status=500,
+        )
+
+    return JsonResponse({'ok': True, 'message': 'Estado de carrera actualizado.', 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_pensum_entry_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    try:
+        result = upsert_pensum_entry(payload)
+    except AcademicCatalogError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while saving pensum entry.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrio un error interno guardando el pensum.',
+            },
+            status=500,
+        )
+
+    return JsonResponse({'ok': True, 'message': 'Pensum guardado.', 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_pensum_status_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    try:
+        result = update_pensum_status(payload)
+    except AcademicCatalogError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while updating pensum status.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrio un error interno actualizando el estado de la materia.',
+            },
+            status=500,
+        )
+
+    return JsonResponse({'ok': True, 'message': 'Estado de materia actualizado.', 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
 def admin_payment_info_view(request):
     try:
         payload = json.loads(request.body.decode('utf-8'))
@@ -226,6 +348,7 @@ def admin_payment_info_view(request):
 
 @csrf_exempt
 @require_POST
+@require_admin_session
 def admin_payment_cancel_view(request):
     try:
         payload = json.loads(request.body.decode('utf-8'))

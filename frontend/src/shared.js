@@ -2,7 +2,9 @@ export const SESSION_STORAGE_KEY = 'intec-dashboard-session'
 
 export function getStoredSession() {
   try {
-    const rawSession = window.localStorage.getItem(SESSION_STORAGE_KEY)
+    const rawSession =
+      window.sessionStorage.getItem(SESSION_STORAGE_KEY) ||
+      window.localStorage.getItem(SESSION_STORAGE_KEY)
     return rawSession ? JSON.parse(rawSession) : null
   } catch {
     return null
@@ -10,10 +12,12 @@ export function getStoredSession() {
 }
 
 export function setStoredSession(session) {
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
+  window.localStorage.removeItem(SESSION_STORAGE_KEY)
+  window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
 }
 
 export function clearStoredSession() {
+  window.sessionStorage.removeItem(SESSION_STORAGE_KEY)
   window.localStorage.removeItem(SESSION_STORAGE_KEY)
 }
 

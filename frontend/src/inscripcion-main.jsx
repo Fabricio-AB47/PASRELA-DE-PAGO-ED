@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
@@ -6,6 +7,8 @@ import { readResponsePayload } from './shared.js'
 
 const FIXED_COD_ANIO_BASICA = '13'
 const PAYMENT_RECEIPT_EMAIL = 'DeptCobranzas@intec.edu.ec'
+
+const onlyActiveCourses = (courses) => (courses || []).filter((course) => course.es_activo !== false)
 
 function InscriptionPage() {
   const removeNumbersFromLabel = (value) =>
@@ -107,7 +110,7 @@ function InscriptionPage() {
         const activeCareer = fixedCareer || (loadedCatalogs.carreras || []).find((item) => item.es_activo)
         const activePeriod = (loadedCatalogs.periodos || []).find((item) => item.es_activo)
         const careerCourses = activeCareer
-          ? loadedCatalogs.cursos_por_carrera?.[String(activeCareer.cod_anio_basica)] || []
+          ? onlyActiveCourses(loadedCatalogs.cursos_por_carrera?.[String(activeCareer.cod_anio_basica)])
           : []
         const defaultCourse = careerCourses[0]
 
@@ -149,7 +152,7 @@ function InscriptionPage() {
     if (name === 'carrera_num') {
       const selectedCareer = catalogs.carreras.find((item) => String(item.num) === String(value))
       const codAnio = selectedCareer?.cod_anio_basica ? String(selectedCareer.cod_anio_basica) : ''
-      const cursos = catalogs.cursos_por_carrera?.[codAnio] || []
+      const cursos = onlyActiveCourses(catalogs.cursos_por_carrera?.[codAnio])
       const firstCourse = cursos[0]
 
       setRegistrationForm((current) => ({
@@ -163,7 +166,7 @@ function InscriptionPage() {
     }
 
     if (name === 'codigo_materia') {
-      const courses = catalogs.cursos_por_carrera?.[registrationForm.cod_anio_basica] || []
+      const courses = onlyActiveCourses(catalogs.cursos_por_carrera?.[registrationForm.cod_anio_basica])
       const selectedCourse = courses.find(
         (item) => String(item.codigo_materia) === String(value),
       )
@@ -200,6 +203,15 @@ function InscriptionPage() {
   const activePeriods = catalogs.periodos.filter((period) => period.es_activo)
   const fixedActivePeriod = activePeriods[0] || null
   const periodLocked = Boolean(fixedActivePeriod)
+  const activeCoursesForSelectedCareer = onlyActiveCourses(
+    catalogs.cursos_por_carrera?.[registrationForm.cod_anio_basica],
+  )
+  const automaticSelectedCourse =
+    activeCoursesForSelectedCareer.find(
+      (item) => String(item.codigo_materia) === String(registrationForm.codigo_materia),
+    ) ||
+    activeCoursesForSelectedCareer[0] ||
+    null
 
   async function handleRegistrationSubmit(event) {
     event.preventDefault()
@@ -221,8 +233,18 @@ function InscriptionPage() {
       return
     }
 
-    const courses = catalogs.cursos_por_carrera?.[registrationForm.cod_anio_basica] || []
-    const selectedCourse = courses.find((item) => item.codigo_materia === registrationForm.codigo_materia)
+    const courses = onlyActiveCourses(catalogs.cursos_por_carrera?.[registrationForm.cod_anio_basica])
+    const selectedCourse =
+      courses.find((item) => String(item.codigo_materia) === String(registrationForm.codigo_materia)) ||
+      courses[0]
+
+    if (!selectedCourse) {
+      setRegistrationErrorMessage('No hay un curso activo disponible para completar la inscripcion.')
+      setIsRegistrationSubmitting(false)
+      return
+    }
+
+    const selectedCourseCode = String(selectedCourse.codigo_materia)
     const cleanedCourseName = String(selectedCourse?.nombre_materia || '')
       .replace(/[0-9]+/g, ' ')
       .replace(/\s+/g, ' ')
@@ -249,7 +271,7 @@ function InscriptionPage() {
           nombre_materia: selectedCourse?.nombre_materia || '',
           carrera_num: registrationForm.carrera_num,
           cod_anio_basica: registrationForm.cod_anio_basica,
-          codigo_materia: registrationForm.codigo_materia,
+          codigo_materia: selectedCourseCode,
           codigo_periodo: registrationForm.codigo_periodo,
           estado_periodo: registrationForm.estado_periodo,
           data_treatment_accepted: true,
@@ -269,7 +291,7 @@ function InscriptionPage() {
             nombre_materia: selectedCourse?.nombre_materia || '',
             carrera_num: registrationForm.carrera_num,
             cod_anio_basica: registrationForm.cod_anio_basica,
-            codigo_materia: registrationForm.codigo_materia,
+            codigo_materia: selectedCourseCode,
             codigo_periodo: registrationForm.codigo_periodo,
             estado_periodo: registrationForm.estado_periodo,
           },
@@ -348,22 +370,24 @@ function InscriptionPage() {
                       </select>
                     </label>
 
-                    <label className="field">
+                    <label className="field readonly-field">
                       <span>Curso a seguir *</span>
-                      <select
-                        name="codigo_materia"
-                        value={registrationForm.codigo_materia}
-                        onChange={handleRegistrationChange}
+                      <input
+                        type="text"
+                        value={
+                          automaticSelectedCourse
+                            ? removeNumbersFromLabel(automaticSelectedCourse.nombre_materia)
+                            : ''
+                        }
+                        placeholder={
+                          isCatalogsLoading
+                            ? 'Cargando curso activo'
+                            : 'No hay curso activo disponible'
+                        }
+                        readOnly
                         required
-                        disabled={isCatalogsLoading || !registrationForm.cod_anio_basica}
-                      >
-                        <option value="">Selecciona un curso</option>
-                        {(catalogs.cursos_por_carrera?.[registrationForm.cod_anio_basica] || []).map((course) => (
-                          <option key={course.codigo_materia} value={course.codigo_materia}>
-                            {removeNumbersFromLabel(course.nombre_materia)}
-                          </option>
-                        ))}
-                      </select>
+                      />
+                      <input name="codigo_materia" type="hidden" value={registrationForm.codigo_materia} readOnly />
                     </label>
 
                     <label className="field">
