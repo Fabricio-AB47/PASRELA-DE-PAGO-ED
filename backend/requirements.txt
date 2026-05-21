@@ -1,0 +1,14 @@
+Django>=5.2
+pandas
+openpyxl
+sqlalchemy
+pyodbc
+django-environ>=0.9.0
+requests
+gunicorn
+python-docx
+reportlab
+docx2pdf
+mssql-django
+uvicorn
+wfastcgi

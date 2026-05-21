@@ -548,9 +548,9 @@ function InscriptionPage() {
 
                 <div className="inscription-payment-notice">
                   <p>
-                    Luego de realizar el pago, envia el comprobante de pago a{' '}
+                    Luego de realizar el pago, envia el comprobante a{' '}
                     <a href={`mailto:${PAYMENT_RECEIPT_EMAIL}`}>{PAYMENT_RECEIPT_EMAIL}</a>{' '}
-                    indicando tu nombre completo y matricula.
+                    indicando tu nombre completo y Cedula de ciudadania.
                   </p>
                 </div>
 
@@ -594,21 +594,21 @@ function InscriptionPage() {
               </button>
             </form>
 
-              {registrationResult?.payment_link ? (
+              {registrationResult ? (
               <div className="payment-result">
                   <p className="payment-result-title">Inscripcion completada</p>
+                {registrationResult.payment_link ? (
                   <a className="payment-result-link" href={registrationResult.payment_link} target="_blank" rel="noreferrer">
                     {registrationResult.payment_link}
-                </a>
+                  </a>
+                ) : null}
                 <p className="payment-result-note">
                     {registrationResult.email_result?.message ?? 'Correo enviado correctamente.'}
                 </p>
-                {receiptEmail ? (
-                  <p className="payment-result-note payment-result-receipt">
-                    Luego de realizar el pago, envia el comprobante a{' '}
-                    <a href={`mailto:${receiptEmail}`}>{receiptEmail}</a> indicando tu nombre completo y Cedula de ciudadania.
-                  </p>
-                ) : null}
+                <p className="payment-result-note payment-result-receipt">
+                  Luego de realizar el pago, envia el comprobante a{' '}
+                  <a href={`mailto:${receiptEmail}`}>{receiptEmail}</a> indicando tu nombre completo y Cedula de ciudadania.
+                </p>
               </div>
             ) : null}
           </section>

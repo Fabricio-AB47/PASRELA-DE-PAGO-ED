@@ -55,6 +55,7 @@ def get_sql_server_database_config() -> dict:
         'PORT': get_required_env('DB_PORT'),
         'OPTIONS': {
             'driver': os.getenv('DB_ODBC_DRIVER', 'ODBC Driver 18 for SQL Server').strip(),
+            'host_is_server': True,
         },
     }
 
@@ -81,6 +82,11 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = get_bool_env('DEBUG', True)
 
 ALLOWED_HOSTS = get_list_env('DJANGO_ALLOWED_HOSTS')
+CSRF_TRUSTED_ORIGINS = get_list_env('DJANGO_CSRF_TRUSTED_ORIGINS')
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = get_bool_env('DJANGO_SECURE_SSL_REDIRECT', False)
+SESSION_COOKIE_SECURE = get_bool_env('DJANGO_SESSION_COOKIE_SECURE', not DEBUG)
+CSRF_COOKIE_SECURE = get_bool_env('DJANGO_CSRF_COOKIE_SECURE', not DEBUG)
 
 
 # Application definition
