@@ -235,3 +235,14 @@ OSError: [Errno 22] Invalid argument
 OSError: [Errno 22] Invalid argument
 2026-05-21 15:21:30.474497: Running on_exit tasks
 2026-05-21 15:21:30.483994: wfastcgi.py 3.0.0 closed
+2026-05-21 15:41:05.860346: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-21 15:41:05.869496: wfastcgi.py 3.0.0 initialized
+2026-05-21 15:41:05.869537: wfastcgi.py 3.0.0 initialized
+2026-05-21 15:46:20.310778: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-05-21 15:46:20.320356: Running on_exit tasks
+2026-05-21 15:46:20.328444: wfastcgi.py 3.0.0 closed

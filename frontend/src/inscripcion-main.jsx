@@ -392,7 +392,7 @@ function InscriptionPage() {
                     </label>
 
                     <label className="field">
-                      <span>Periodo *</span>
+                      <span>Período *</span>
                       <select
                         name="codigo_periodo"
                         value={registrationForm.codigo_periodo}
@@ -400,7 +400,7 @@ function InscriptionPage() {
                         required
                         disabled={isCatalogsLoading || periodLocked}
                       >
-                        <option value="">Selecciona un periodo</option>
+                        <option value="">Selecciona un período</option>
                         {(fixedActivePeriod ? [fixedActivePeriod] : [])
                           .map((period) => (
                             <option key={period.cod_periodo} value={period.cod_periodo}>
@@ -428,13 +428,13 @@ function InscriptionPage() {
                   </label>
 
                     <label className="field">
-                      <span>Cedula *</span>
+                      <span>Cédula *</span>
                       <input
                         name="cedula"
                         type="text"
                         inputMode="numeric"
                         pattern="[0-9]{6,20}"
-                        title="Ingresa una cedula numerica valida"
+                        title="Ingresa una cédula numérica válida"
                         value={registrationForm.cedula}
                         onChange={handleRegistrationChange}
                         placeholder="Ej. 00123456789"
