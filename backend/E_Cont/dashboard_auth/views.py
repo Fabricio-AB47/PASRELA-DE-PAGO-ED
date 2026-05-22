@@ -1,10 +1,17 @@
 import json
 import logging
 
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
+from .bulk_enrollment import (
+    BulkEnrollmentError,
+    TEMPLATE_FILE_NAME,
+    build_bulk_enrollment_template,
+    excel_upload_from_json,
+    process_bulk_enrollment_excel,
+)
 from .inscription_catalogs import (
     AcademicCatalogError,
     fetch_admin_academic_catalogs,
@@ -383,6 +390,63 @@ def admin_pensum_status_view(request):
         )
 
     return JsonResponse({'ok': True, 'message': 'Estado de materia actualizado.', 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_bulk_enrollment_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    defaults = {
+        'carrera_num': payload.get('carrera_num', ''),
+        'cod_anio_basica': payload.get('cod_anio_basica', ''),
+        'codigo_materia': payload.get('codigo_materia', ''),
+        'codigo_periodo': payload.get('codigo_periodo', ''),
+        'estado_periodo': payload.get('estado_periodo', ''),
+        'nombre_materia': payload.get('nombre_materia', ''),
+    }
+
+    try:
+        uploaded_file = excel_upload_from_json(payload)
+        result = process_bulk_enrollment_excel(uploaded_file, defaults)
+    except BulkEnrollmentError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while processing bulk enrollment upload.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrio un error interno procesando la matricula masiva.',
+            },
+            status=500,
+        )
+
+    return JsonResponse(
+        {
+            'ok': True,
+            'message': 'Carga masiva procesada.',
+            'result': result,
+        }
+    )
+
+
+@require_GET
+@require_admin_session
+def admin_bulk_enrollment_template_view(_request):
+    content = build_bulk_enrollment_template()
+    response = HttpResponse(
+        content,
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = f'attachment; filename="{TEMPLATE_FILE_NAME}"'
+    return response
 
 
 @csrf_exempt

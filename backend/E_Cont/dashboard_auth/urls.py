@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import (
     admin_academic_catalogs_view,
+    admin_bulk_enrollment_template_view,
+    admin_bulk_enrollment_view,
     admin_carrera_status_view,
     admin_payment_cancel_view,
     admin_payment_info_view,
@@ -31,6 +33,8 @@ urlpatterns = [
     path('admin/carrera-status/', admin_carrera_status_view, name='admin-carrera-status'),
     path('admin/pensum/', admin_pensum_entry_view, name='admin-pensum-entry'),
     path('admin/pensum-status/', admin_pensum_status_view, name='admin-pensum-status'),
+    path('admin/bulk-enrollment/template/', admin_bulk_enrollment_template_view, name='admin-bulk-enrollment-template'),
+    path('admin/bulk-enrollment/', admin_bulk_enrollment_view, name='admin-bulk-enrollment'),
     path('admin/payment-info/', admin_payment_info_view, name='admin-payment-info'),
     path('admin/payment-cancel/', admin_payment_cancel_view, name='admin-payment-cancel'),
 ]

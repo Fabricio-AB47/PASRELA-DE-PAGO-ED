@@ -10,7 +10,7 @@ from django.http import JsonResponse
 
 SESSION_TOKEN_SALT = 'dashboard-auth-session'
 DEFAULT_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
-MAX_ADMIN_JSON_BODY_BYTES = 32 * 1024
+MAX_ADMIN_JSON_BODY_BYTES = int(os.getenv('MAX_ADMIN_JSON_BODY_BYTES') or str(8 * 1024 * 1024))
 
 
 def create_session_token(user: dict[str, Any]) -> str:

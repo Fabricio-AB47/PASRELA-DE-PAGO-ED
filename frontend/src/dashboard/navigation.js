@@ -22,6 +22,14 @@ export const DASHBOARD_ROUTES = [
     title: 'Pagos',
     description: 'Consulta transacciones y ejecuta anulaciones desde un modulo independiente.',
   },
+  {
+    id: 'bulk-enrollment',
+    hash: '#bulk-enrollment',
+    aliases: ['#admin-bulk-enrollment'],
+    label: 'Matricula masiva',
+    title: 'Matricula masiva',
+    description: 'Procesa estudiantes por Excel, matricula materias y envia credenciales INTEC.',
+  },
 ]
 
 export function routeFromHash(hash) {
