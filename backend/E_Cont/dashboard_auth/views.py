@@ -2,6 +2,7 @@ import json
 import logging
 
 from django.http import HttpResponse, JsonResponse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -172,6 +173,7 @@ def inscription_payment_link_view(request):
 
 
 @require_GET
+@never_cache
 def inscription_generate_matricula_view(_request):
     try:
         matricula = generate_unique_numcodigo()
@@ -197,6 +199,7 @@ def inscription_generate_matricula_view(_request):
 
 
 @require_GET
+@never_cache
 def inscription_catalogs_view(_request):
     try:
         catalogs = fetch_inscription_catalogs()
@@ -283,6 +286,7 @@ def microsoft365_student_license_view(_request):
 
 @require_GET
 @require_admin_session
+@never_cache
 def admin_academic_catalogs_view(_request):
     try:
         catalogs = fetch_admin_academic_catalogs()

@@ -13,6 +13,7 @@ export function adminFetch(url, options = {}) {
   headers.set('Authorization', `Bearer ${sessionToken}`)
 
   return fetch(url, {
+    cache: 'no-store',
     ...options,
     headers,
   }).then((response) => {

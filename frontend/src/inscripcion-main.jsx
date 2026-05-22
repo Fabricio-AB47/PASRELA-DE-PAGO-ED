@@ -52,7 +52,9 @@ function InscriptionPage() {
 
     async function loadMatricula() {
       try {
-        const response = await fetch('/api/auth/inscription/matricula/')
+        const response = await fetch('/api/auth/inscription/matricula/', {
+          cache: 'no-store',
+        })
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok || !payload.matricula) {
@@ -90,7 +92,9 @@ function InscriptionPage() {
 
     async function loadCatalogs() {
       try {
-        const response = await fetch('/api/auth/inscription/catalogs/')
+        const response = await fetch('/api/auth/inscription/catalogs/', {
+          cache: 'no-store',
+        })
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok || !payload.catalogs) {
