@@ -3,7 +3,9 @@
 .venv/
 __pycache__/
 *.py[cod]
-backend/logs/
+/backend/logs/
+/frontend/vite-dev.err.log
+/frontend/vite-dev.out.log
 frontend/dist/
 frontend/node_modules/
 frontend/vite-dev.*.log
