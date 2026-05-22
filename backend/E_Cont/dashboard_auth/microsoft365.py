@@ -28,6 +28,7 @@ CREATE_USER_ROLES = {'User.ReadWrite.All', 'Directory.ReadWrite.All'}
 ASSIGN_LICENSE_ROLES = {'LicenseAssignment.ReadWrite.All'}
 VERIFY_USER_ROLES = {'User.Read.All', 'User.ReadWrite.All', 'Directory.Read.All', 'Directory.ReadWrite.All'}
 GRAPH_RETRY_DELAYS_SECONDS = (1.0, 2.0, 4.0)
+DEFAULT_ALIAS_MAX_ATTEMPTS = 100
 
 
 class Microsoft365Error(Exception):
@@ -76,6 +77,7 @@ def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
         subscribed_skus = _fetch_subscribed_skus(config, token)
         student_license = _resolve_student_license(subscribed_skus)
         _validate_requested_sku(payload, student_license['skuId'])
+        profile = _resolve_available_user_profile(config, token, profile)
 
         user_payload = {
             'accountEnabled': True,
@@ -117,6 +119,8 @@ def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
             'usageLocation': config['usage_location'],
             'license': _license_summary(student_license),
             'accountCreated': created_new_user,
+            'emailCollisionResolved': bool(profile.get('alias_suffix')),
+            'baseCorreo': profile.get('correo_base') or profile['correo'],
             'createdUser': _safe_user_payload(created_user),
             'verifiedUser': _safe_user_payload(verified_user),
         }
@@ -450,27 +454,55 @@ def _create_or_prepare_active_user(
         )
         return created_user, True
     except Microsoft365GraphError as exc:
-        if not _is_existing_user_error(exc):
-            raise
+        if _is_existing_user_error(exc):
+            raise Microsoft365GraphError(
+                'El correo institucional ya existe en Microsoft 365. '
+                'Vuelve a intentar para generar una variante numerada disponible.',
+                graph_status_code=exc.graph_status_code,
+            ) from exc
+        raise
 
-    existing_user = _fetch_user_for_license(config, token, profile['correo'])
-    existing_identifier = _graph_user_identifier(existing_user, profile['correo'])
-    _graph_request(
-        'PATCH',
-        f"{config['base_url']}/users/{quote(existing_identifier, safe='')}",
-        token,
-        body={
-            'accountEnabled': True,
-            'displayName': profile['display_name'],
-            'givenName': profile['nombres'],
-            'surname': profile['apellidos'],
-            'mailNickname': profile['alias'],
-            'usageLocation': config['usage_location'],
-            'passwordProfile': _build_password_profile(profile),
-        },
-        operation='actualizar usuario Microsoft 365 existente',
+
+def _resolve_available_user_profile(
+    config: dict[str, str],
+    token: str,
+    profile: dict[str, str],
+) -> dict[str, str]:
+    base_alias = _email_local_part(profile.get('correo')) or profile['alias']
+    domain = _email_domain(profile.get('correo')) or config['domain']
+    max_attempts = _alias_max_attempts()
+
+    for index in range(max_attempts):
+        suffix = '' if index == 0 else str(index)
+        candidate_alias = f'{base_alias}{suffix}'
+        candidate_email = f'{candidate_alias}@{domain}'.lower()
+        if not _graph_user_exists(config, token, candidate_email):
+            resolved = dict(profile)
+            resolved['alias'] = candidate_alias
+            resolved['correo'] = candidate_email
+            resolved['correo_base'] = str(profile.get('correo') or candidate_email).lower()
+            resolved['alias_suffix'] = suffix
+            return resolved
+
+    raise Microsoft365ValidationError(
+        'No fue posible generar un correo INTEC disponible. '
+        f'Se probaron {max_attempts} variantes para {base_alias}@{domain}.'
     )
-    return _fetch_user_for_license(config, token, existing_identifier), False
+
+
+def _graph_user_exists(config: dict[str, str], token: str, user_identifier: str) -> bool:
+    try:
+        _graph_request(
+            'GET',
+            f"{config['base_url']}/users/{quote(user_identifier, safe='')}?$select=id,userPrincipalName",
+            token,
+            operation='verificar correo Microsoft 365 existente',
+        )
+        return True
+    except Microsoft365GraphError as exc:
+        if exc.graph_status_code == 404:
+            return False
+        raise
 
 
 def _build_password_profile(profile: dict[str, str]) -> dict[str, Any]:
@@ -726,6 +758,21 @@ def _email_component(value: str) -> str:
     return re.sub(r'[^a-z0-9]', '', normalized)
 
 
+def _email_local_part(value: Any) -> str:
+    text = str(value or '').strip().lower()
+    if '@' not in text:
+        return ''
+    local_part = text.split('@', 1)[0].strip()
+    return re.sub(r'[^a-z0-9._-]', '', _normalize_ascii(local_part).lower())
+
+
+def _email_domain(value: Any) -> str:
+    text = str(value or '').strip().lower()
+    if '@' not in text:
+        return ''
+    return _clean_domain(text.rsplit('@', 1)[1])
+
+
 def _password_component(value: str) -> str:
     normalized = _normalize_ascii(value)
     cleaned = re.sub(r'[^A-Za-z0-9]', '', normalized)
@@ -764,6 +811,16 @@ def _env_first_named(*keys: str) -> tuple[str, str]:
         if value:
             return value, key
     return '', ''
+
+
+def _alias_max_attempts() -> int:
+    value = str(os.getenv('MICROSOFT_ALIAS_MAX_ATTEMPTS') or '').strip()
+    if not value:
+        return DEFAULT_ALIAS_MAX_ATTEMPTS
+    try:
+        return max(2, int(value))
+    except ValueError:
+        return DEFAULT_ALIAS_MAX_ATTEMPTS
 
 
 def _graph_error_message(raw: str) -> str:

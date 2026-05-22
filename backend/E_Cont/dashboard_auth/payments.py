@@ -4,9 +4,10 @@ import json
 import os
 import re
 import secrets
-from base64 import urlsafe_b64decode
+from base64 import b64encode, urlsafe_b64decode
 from decimal import Decimal, InvalidOperation
 from html import escape
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -135,6 +136,11 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
     )
     official_sync_result: dict[str, Any] = {'ok': True, 'message': 'Sincronizacion oficial completada.'}
     microsoft365_result: dict[str, Any] = {'ok': False, 'message': 'No ejecutado.'}
+    welcome_email_result: dict[str, Any] = {'sent': False, 'message': 'No ejecutado.'}
+    try:
+        intec_account = build_intec_account_identity(nombre=nombre, cedula=cedula)
+    except Microsoft365ValidationError as exc:
+        raise PaymentGatewayError(str(exc)) from exc
 
     try:
         microsoft365_user = create_microsoft365_user(
@@ -148,6 +154,31 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
             'message': 'Usuario Microsoft 365 creado y licenciado correctamente.',
             'user': microsoft365_user,
         }
+        resolved_intec_email = str(microsoft365_user.get('correo') or intec_account['correo']).strip()
+        if resolved_intec_email:
+            intec_account['correo'] = resolved_intec_email
+            if official_record:
+                _update_official_intec_credentials(
+                    codigo_estud=official_record['codigo_estud'],
+                    correo_intec=resolved_intec_email,
+                    password_temporal=intec_account['password_temporal'],
+                )
+        try:
+            welcome_email_result = _send_intec_welcome_email(
+                recipient_email=email,
+                recipient_name=nombre,
+                intec_email=intec_account['correo'],
+                password=intec_account['password_temporal'],
+                course_name=_resolve_welcome_course_name(payload),
+            )
+            if welcome_email_result.get('sent') and official_record:
+                _mark_correos_estud_intec_sent(official_record['codigo_estud'])
+        except PaymentGatewayError as exc:
+            welcome_email_result = {
+                'sent': False,
+                'message': f'Usuario Microsoft 365 creado, pero no fue posible enviar bienvenida: {str(exc)}',
+            }
+        microsoft365_result['welcome_email'] = welcome_email_result
     except Microsoft365Error as exc:
         microsoft365_result = {
             'ok': False,
@@ -237,6 +268,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         provider_response={
             'provider': provider_response,
             'email_result': email_result,
+            'welcome_email_result': welcome_email_result,
             'official_sync': official_sync_result,
             'microsoft365': microsoft365_result,
             'receipt_email': receipt_email,
@@ -251,7 +283,150 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         'receipt_email': receipt_email,
         'provider_response': provider_response,
         'email_result': email_result,
+        'welcome_email_result': welcome_email_result,
         'official_sync': official_sync_result,
+        'microsoft365': microsoft365_result,
+    }
+
+
+def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[str, Any]:
+    email = str(payload.get('email') or '').strip()
+    nombre = str(payload.get('nombre') or '').strip()
+    cedula = str(payload.get('cedula') or '').strip()
+    matricula = str(payload.get('matricula') or '').strip()
+    monto = '0.00'
+    descripcion = str(payload.get('descripcion') or 'Matricula masiva').strip()
+    cod_anio_basica = str(payload.get('cod_anio_basica') or '').strip()
+    codigo_materia = str(payload.get('codigo_materia') or '').strip()
+    codigo_periodo = str(payload.get('codigo_periodo') or '').strip()
+    estado_periodo = str(payload.get('estado_periodo') or '').strip().lower()
+
+    if not email:
+        raise PaymentGatewayError('Debes enviar el correo del estudiante para completar la matricula masiva.')
+
+    if not cedula:
+        raise PaymentGatewayError('Debes registrar el numero de cedula para completar la matricula masiva.')
+
+    if not re.fullmatch(r'\d{6,20}', cedula):
+        raise PaymentGatewayError('La cedula debe contener solo numeros (entre 6 y 20 digitos).')
+
+    if not cod_anio_basica:
+        raise PaymentGatewayError('Debes seleccionar la carrera (Cod_AnioBasica) para registrar el curso.')
+
+    if not codigo_materia:
+        raise PaymentGatewayError('Debes seleccionar el curso antes de continuar.')
+
+    if not codigo_periodo:
+        raise PaymentGatewayError('Debes seleccionar el periodo para continuar con la matricula masiva.')
+
+    if estado_periodo and estado_periodo != 'activo':
+        raise PaymentGatewayError('El periodo seleccionado esta inactivo. Debes elegir un periodo con estado Activo.')
+
+    if not matricula:
+        matricula = generate_unique_numcodigo()
+
+    if _cabecera_has_numcodigo(matricula):
+        raise PaymentGatewayError(
+            'El numero de matricula generado ya existe en CABECERA_MATRICULA. '
+            'Solicita un nuevo numero para continuar.'
+        )
+
+    descripcion = _compose_mass_matriculation_description(payload, descripcion)
+    try:
+        intec_account = build_intec_account_identity(nombre=nombre, cedula=cedula)
+    except Microsoft365ValidationError as exc:
+        raise PaymentGatewayError(str(exc)) from exc
+
+    official_record = _upsert_official_inscription_records(
+        cedula=cedula,
+        nombre=nombre,
+        email=email,
+        telefono=_first_non_empty(
+            payload.get('telefono'),
+            payload.get('provider_payload', {}).get('telefono') if isinstance(payload.get('provider_payload'), dict) else None,
+        ),
+        direccion=_first_non_empty(
+            payload.get('direccion'),
+            payload.get('provider_payload', {}).get('direccion') if isinstance(payload.get('provider_payload'), dict) else None,
+        ),
+        cod_anio_basica=cod_anio_basica,
+        codigo_materia=codigo_materia,
+        codigo_periodo=codigo_periodo,
+        matricula=matricula,
+        monto=monto,
+        descripcion=descripcion,
+        payment_link='',
+        create_payment_record=False,
+    )
+
+    microsoft365_result: dict[str, Any] = {'ok': False, 'message': 'No ejecutado.'}
+    welcome_email_result: dict[str, Any] = {'sent': False, 'message': 'No ejecutado.'}
+
+    try:
+        microsoft365_user = create_microsoft365_user(
+            {
+                'nombre_completo': nombre,
+                'cedula': cedula,
+            }
+        )
+        microsoft365_result = {
+            'ok': True,
+            'message': 'Usuario Microsoft 365 creado y licenciado correctamente.',
+            'user': microsoft365_user,
+        }
+        resolved_intec_email = str(microsoft365_user.get('correo') or intec_account['correo']).strip()
+        if resolved_intec_email:
+            intec_account['correo'] = resolved_intec_email
+            _update_official_intec_credentials(
+                codigo_estud=official_record['codigo_estud'],
+                correo_intec=resolved_intec_email,
+                password_temporal=intec_account['password_temporal'],
+            )
+    except Microsoft365Error as exc:
+        microsoft365_result = {
+            'ok': False,
+            'message': str(exc),
+        }
+        raise PaymentGatewayError(f'No fue posible crear el usuario Microsoft 365: {str(exc)}') from exc
+
+    try:
+        welcome_email_result = _send_intec_welcome_email(
+            recipient_email=email,
+            recipient_name=nombre,
+            intec_email=intec_account['correo'],
+            password=intec_account['password_temporal'],
+            course_name=_resolve_welcome_course_name(payload),
+        )
+        if welcome_email_result.get('sent'):
+            _mark_correos_estud_intec_sent(official_record['codigo_estud'])
+    except PaymentGatewayError as exc:
+        welcome_email_result = {
+            'sent': False,
+            'message': f'Usuario Microsoft 365 creado, pero no fue posible enviar bienvenida: {str(exc)}',
+        }
+    microsoft365_result['welcome_email'] = welcome_email_result
+
+    provider_response = {
+        'status': 'completado',
+        'source': 'matricula-masiva-sin-cargo',
+        'official_record': official_record,
+        'microsoft365': microsoft365_result,
+        'welcome_email_result': welcome_email_result,
+    }
+
+    return {
+        'matricula': matricula,
+        'monto': monto,
+        'payment_link': '',
+        'receipt_email': '',
+        'provider_response': provider_response,
+        'email_result': {'sent': False, 'message': 'No aplica para matricula masiva.'},
+        'welcome_email_result': welcome_email_result,
+        'official_sync': {
+            'ok': True,
+            'message': 'Matricula oficial registrada.',
+            'record': official_record,
+        },
         'microsoft365': microsoft365_result,
     }
 
@@ -503,6 +678,40 @@ def _compose_course_payment_description(raw_payload: dict[str, Any], fallback: s
 
     clean_fallback = str(fallback or '').strip()
     return clean_fallback or 'Pago de inscripcion'
+
+
+def _compose_mass_matriculation_description(raw_payload: dict[str, Any], fallback: str) -> str:
+    provider_payload = raw_payload.get('provider_payload')
+    provider_payload = provider_payload if isinstance(provider_payload, dict) else {}
+
+    course_name = _first_non_empty(
+        provider_payload.get('nombre_materia'),
+        raw_payload.get('nombre_materia'),
+        provider_payload.get('curso_nombre'),
+        raw_payload.get('curso_nombre'),
+    )
+    course_name = _remove_numbers_and_trim(course_name)
+
+    if course_name:
+        return f'Matricula masiva del curso {course_name}'
+
+    clean_fallback = str(fallback or '').strip()
+    return clean_fallback or 'Matricula masiva'
+
+
+def _resolve_welcome_course_name(raw_payload: dict[str, Any]) -> str:
+    provider_payload = raw_payload.get('provider_payload')
+    provider_payload = provider_payload if isinstance(provider_payload, dict) else {}
+
+    course_name = _first_non_empty(
+        provider_payload.get('nombre_materia'),
+        raw_payload.get('nombre_materia'),
+        provider_payload.get('curso_nombre'),
+        raw_payload.get('curso_nombre'),
+        raw_payload.get('descripcion'),
+    )
+    course_name = _remove_numbers_and_trim(course_name)
+    return course_name or 'el curso seleccionado'
 
 
 def _remove_numbers_and_trim(value: str) -> str:
@@ -764,11 +973,14 @@ def _upsert_official_inscription_records(
     monto: Any,
     descripcion: str,
     payment_link: str,
+    create_payment_record: bool = True,
 ) -> dict[str, str]:
     try:
         intec_account = build_intec_account_identity(nombre=nombre, cedula=cedula)
     except Microsoft365ValidationError as exc:
         raise PaymentGatewayError(str(exc)) from exc
+
+    pensum_template = _get_pensum_subject_template(cod_anio_basica, codigo_materia)
 
     with transaction.atomic():
         codigo_estud = _resolve_or_create_datos_estud(
@@ -802,14 +1014,28 @@ def _upsert_official_inscription_records(
                 'num_matricula': str(_safe_int(existing_materia.get('Num_Matricula'), default=0)),
                 'num_reg_pago': str(_safe_int(existing_materia.get('Num'), default=0)),
                 'already_enrolled': '1',
+                'payment_record_created': '0',
+                'codigo_materia': str(codigo_materia),
+                'materia': str(pensum_template.get('materia') or ''),
             }
 
         cabecera_template = _get_cabecera_template(cod_anio_basica, codigo_periodo)
-        materia_template = _get_carreraxestud_template(cod_anio_basica, codigo_materia, codigo_periodo)
+        if not create_payment_record:
+            cabecera_template = {
+                **cabecera_template,
+                'InscripValor': Decimal('0'),
+                'MatriValor': Decimal('0'),
+            }
+        materia_template = _get_carreraxestud_template(
+            cod_anio_basica,
+            codigo_materia,
+            codigo_periodo,
+            pensum_template=pensum_template,
+        )
 
         num_matricula = _next_num_matricula(codigo_estud, cod_anio_basica, codigo_periodo)
-        num_reg_pago = _next_num_registro_pago(codigo_estud, codigo_periodo)
-        valor_decimal = _to_decimal(monto)
+        num_reg_pago = _next_num_registro_pago(codigo_estud, codigo_periodo) if create_payment_record else 0
+        valor_decimal = _to_decimal(monto) if create_payment_record else Decimal('0')
 
         _insert_cabecera_matricula(
             codigo_estud=codigo_estud,
@@ -830,19 +1056,23 @@ def _upsert_official_inscription_records(
             template=materia_template,
         )
 
-        _insert_registropagos(
-            codigo_estud=codigo_estud,
-            cod_anio_basica=cod_anio_basica,
-            codigo_periodo=codigo_periodo,
-            num=num_reg_pago,
-            valor=valor_decimal,
-            detalle=descripcion,
-        )
+        if create_payment_record:
+            _insert_registropagos(
+                codigo_estud=codigo_estud,
+                cod_anio_basica=cod_anio_basica,
+                codigo_periodo=codigo_periodo,
+                num=num_reg_pago,
+                valor=valor_decimal,
+                detalle=descripcion,
+            )
 
         return {
             'codigo_estud': str(codigo_estud),
             'num_matricula': str(num_matricula),
-            'num_reg_pago': str(num_reg_pago),
+            'num_reg_pago': str(num_reg_pago) if create_payment_record else '',
+            'payment_record_created': '1' if create_payment_record else '0',
+            'codigo_materia': str(codigo_materia),
+            'materia': str(pensum_template.get('materia') or ''),
         }
 
 
@@ -1034,6 +1264,45 @@ def _upsert_correos_estud_intec(
         )
 
 
+def _mark_correos_estud_intec_sent(codigo_estud: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE dbo.CorreosEstudIntec
+            SET CorreoEnviado = 1
+            WHERE CAST(codestud AS varchar(50)) = %s
+            """,
+            [str(codigo_estud)],
+        )
+
+
+def _update_official_intec_credentials(
+    codigo_estud: str,
+    correo_intec: str,
+    password_temporal: str,
+) -> None:
+    correo_intec_corto = _trim_to_max(correo_intec, 100)
+    password = _trim_to_max(password_temporal, 30)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE dbo.DATOS_ESTUD
+            SET correointec = %s
+            WHERE CAST(codigo_estud AS varchar(50)) = %s
+            """,
+            [correo_intec_corto, str(codigo_estud)],
+        )
+        cursor.execute(
+            """
+            UPDATE dbo.CorreosEstudIntec
+            SET CorreoIntec = %s,
+                Password = %s
+            WHERE CAST(codestud AS varchar(50)) = %s
+            """,
+            [correo_intec_corto, password, str(codigo_estud)],
+        )
+
+
 def _official_materia_exists(
     codigo_estud: str,
     cod_anio_basica: str,
@@ -1115,7 +1384,59 @@ def _get_cabecera_template(cod_anio_basica: str, codigo_periodo: str) -> dict[st
     }
 
 
-def _get_carreraxestud_template(cod_anio_basica: str, codigo_materia: str, codigo_periodo: str) -> dict[str, Any]:
+def _get_pensum_subject_template(cod_anio_basica: str, codigo_materia: str) -> dict[str, Any]:
+    status_column = get_pensum_status_column()
+    if status_column:
+        status_select = f"RTRIM(ISNULL([{status_column}], 'A')) AS estado_materia"
+    else:
+        status_select = "CAST('A' AS varchar(20)) AS estado_materia"
+
+    query = f"""
+        SELECT TOP (1)
+            RTRIM(ISNULL(Nomb_Materia, '')) AS materia,
+            CAST(ISNULL(Creditos, 0) AS decimal(18, 2)) AS creditos,
+            CAST(ISNULL(Orden, 1) AS decimal(18, 0)) AS orden,
+            CAST(ISNULL(Semestre, 1) AS decimal(18, 0)) AS semestre,
+            CAST(ISNULL(NumMalla, 0) AS decimal(18, 0)) AS num_malla,
+            RTRIM(ISNULL(CAST(cod_materia AS varchar(50)), '')) AS cod_materia,
+            RTRIM(ISNULL(CAST(tipomateria AS varchar(20)), '')) AS tipo_materia,
+            {status_select}
+        FROM dbo.PENSUM
+        WHERE LTRIM(RTRIM(CAST(Cod_AnioBasica AS varchar(20)))) = %s
+          AND LTRIM(RTRIM(CAST(codigo_materia AS varchar(50)))) = %s
+        ORDER BY Orden ASC
+    """
+    row = _fetch_one_row(query, [str(cod_anio_basica), str(codigo_materia)])
+    if not row:
+        raise PaymentGatewayError(
+            'No se encontro en PENSUM la materia seleccionada para la carrera indicada.'
+        )
+    if not is_catalog_value_active(row.get('estado_materia'), default=True):
+        raise PaymentGatewayError(
+            'La materia seleccionada esta inactiva en PENSUM y no puede matricularse.'
+        )
+
+    credits = _to_decimal(row.get('creditos'))
+    if credits <= 0:
+        credits = Decimal('1')
+
+    return {
+        'materia': str(row.get('materia') or '').strip(),
+        'Num_Creditos': credits,
+        'num': _safe_int(row.get('orden'), default=1),
+        'Semestre': _safe_int(row.get('semestre'), default=1),
+        'NumMalla': _safe_int(row.get('num_malla'), default=0),
+        'cod_materia': str(row.get('cod_materia') or '').strip(),
+        'tipo_materia': str(row.get('tipo_materia') or '').strip(),
+    }
+
+
+def _get_carreraxestud_template(
+    cod_anio_basica: str,
+    codigo_materia: str,
+    codigo_periodo: str,
+    pensum_template: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     query = """
         SELECT TOP (1)
             paralelo,
@@ -1135,11 +1456,13 @@ def _get_carreraxestud_template(cod_anio_basica: str, codigo_materia: str, codig
     """
     row = _fetch_one_row(query, [str(cod_anio_basica), str(codigo_materia), str(codigo_periodo)])
     if row:
+        if pensum_template and _to_decimal(row.get('Num_Creditos')) <= 0:
+            row['Num_Creditos'] = pensum_template.get('Num_Creditos')
         return row
-    return {
+    template = {
         'paralelo': 'A',
         'NumGrupo': 1,
-        'Num_Creditos': 1,
+        'Num_Creditos': Decimal('1'),
         'num': 1,
         'TipoMatricula': 'N',
         'ControlMatricula': 1,
@@ -1147,6 +1470,14 @@ def _get_carreraxestud_template(cod_anio_basica: str, codigo_materia: str, codig
         'gcer': 0,
         'NumMatricuMod': 0,
     }
+    if pensum_template:
+        template.update(
+            {
+                'Num_Creditos': pensum_template.get('Num_Creditos') or Decimal('1'),
+                'num': pensum_template.get('num') or 1,
+            }
+        )
+    return template
 
 
 def _next_num_matricula(codigo_estud: str, cod_anio_basica: str, codigo_periodo: str) -> int:
@@ -1249,6 +1580,10 @@ def _insert_carreraxestud(
     num_matricula: int,
     template: dict[str, Any],
 ) -> None:
+    num_creditos = _to_decimal(template.get('Num_Creditos'))
+    if num_creditos <= 0:
+        num_creditos = Decimal('1')
+
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -1279,7 +1614,7 @@ def _insert_carreraxestud(
                 num_matricula,
                 str(template.get('paralelo') or 'A'),
                 _safe_int(template.get('NumGrupo'), default=1),
-                _safe_int(template.get('Num_Creditos'), default=1),
+                num_creditos,
                 str(template.get('TipoMatricula') or 'N'),
                 _safe_int(template.get('ControlMatricula'), default=1),
                 _safe_int(template.get('NumCertificado'), default=0),
@@ -1416,19 +1751,6 @@ def _send_payment_link_email(
     monto: Any,
     receipt_email: str,
 ) -> dict[str, Any]:
-    tenant_id = (os.getenv('MS_TENANT_ID') or '').strip()
-    client_id = (os.getenv('MS_CLIENT_ID') or '').strip()
-    client_secret = (os.getenv('MS_CLIENT_SECRET') or '').strip()
-    sender_identity = _resolve_graph_sender_identity()
-
-    if not tenant_id or not client_id or not client_secret:
-        raise PaymentGatewayError(
-            'No se encontraron credenciales MS_TENANT_ID/MS_CLIENT_ID/MS_CLIENT_SECRET para envio de correo.'
-        )
-
-    access_token = _get_graph_access_token(tenant_id, client_id, client_secret)
-    _validate_graph_mail_send_permission(access_token)
-
     recipient_label = recipient_name or recipient_email
     safe_recipient_label = escape(recipient_label)
     safe_matricula = escape(matricula or 'No disponible')
@@ -1437,12 +1759,22 @@ def _send_payment_link_email(
     safe_button_href = escape(payment_link if payment_link else '#', quote=True)
     safe_receipt_email = escape(receipt_email)
     safe_receipt_mailto = escape(f'mailto:{receipt_email}', quote=True)
+    logo_attachment = _build_intec_logo_attachment()
+    logo_html = ''
+    if logo_attachment:
+        logo_html = """
+            <tr>
+              <td align="center" style="padding:24px 28px 8px 28px;background:#ffffff;">
+                <img src="cid:intec-logo" width="230" alt="INTEC" style="display:block;width:230px;max-width:78%;height:auto;border:0;" />
+              </td>
+            </tr>
+""".rstrip()
     receipt_message = ''
     if receipt_email:
         receipt_message = f"""
                 <p style="margin:0 0 18px 0;font-size:14px;line-height:1.6;color:#374151;">
                   Luego de realizar el pago, envia el comprobante al correo
-                  <a href="{safe_receipt_mailto}" style="color:#4338ca;text-decoration:underline;">{safe_receipt_email}</a>
+                  <a href="{safe_receipt_mailto}" style="color:#9B0E0E;text-decoration:underline;">{safe_receipt_email}</a>
                   indicando tu nombre completo y matricula.
                 </p>
 """.rstrip()
@@ -1454,8 +1786,9 @@ def _send_payment_link_email(
       <tr>
         <td align="center">
           <table role="presentation" width="620" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 8px 26px rgba(15,23,42,0.12);">
+            {logo_html}
             <tr>
-              <td style="background:linear-gradient(120deg,#4f46e5,#7c3aed);padding:20px 28px;color:#ffffff;">
+              <td style="background:#9B0E0E;padding:20px 28px;color:#ffffff;">
                 <h2 style="margin:0;font-size:22px;font-weight:700;">Pago de inscripcion</h2>
               </td>
             </tr>
@@ -1474,13 +1807,13 @@ def _send_payment_link_email(
                 </table>
 
                 <p style="margin:0 0 18px 0;">
-                  <a href="{safe_button_href}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;">Pagar ahora</a>
+                  <a href="{safe_button_href}" style="display:inline-block;background:#9B0E0E;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;">Pagar ahora</a>
                 </p>
 
 {receipt_message}
 
                 <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;">Si el boton no funciona, copia y pega este enlace en tu navegador:</p>
-                <p style="margin:0;font-size:13px;word-break:break-all;color:#4338ca;">{safe_payment_link}</p>
+                <p style="margin:0;font-size:13px;word-break:break-all;color:#9B0E0E;">{safe_payment_link}</p>
               </td>
             </tr>
           </table>
@@ -1508,6 +1841,140 @@ def _send_payment_link_email(
         },
         'saveToSentItems': True,
     }
+    if logo_attachment:
+        mail_payload['message']['attachments'] = [logo_attachment]
+
+    _send_graph_mail(mail_payload)
+
+    return {
+        'sent': True,
+        'message': f'Correo enviado correctamente a {recipient_email}.',
+        'receipt_email': receipt_email,
+    }
+
+
+def _send_intec_welcome_email(
+    recipient_email: str,
+    recipient_name: str,
+    intec_email: str,
+    password: str,
+    course_name: str,
+) -> dict[str, Any]:
+    recipient_label = recipient_name or recipient_email
+    safe_recipient_label = escape(recipient_label)
+    safe_intec_email = escape(intec_email)
+    safe_password = escape(password)
+    safe_course_name = escape(course_name or 'el curso seleccionado')
+    logo_attachment = _build_intec_logo_attachment()
+    logo_html = ''
+    if logo_attachment:
+        logo_html = """
+            <tr>
+              <td align="center" style="padding:24px 28px 8px 28px;background:#ffffff;">
+                <img src="cid:intec-logo" width="230" alt="INTEC" style="display:block;width:230px;max-width:78%;height:auto;border:0;" />
+              </td>
+            </tr>
+""".rstrip()
+
+    html_content = f"""
+<html>
+  <body style="margin:0;padding:0;background:#f3f4f6;font-family:Segoe UI,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="620" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 8px 26px rgba(15,23,42,0.12);">
+            {logo_html}
+            <tr>
+              <td style="background:#9B0E0E;padding:20px 28px;color:#ffffff;">
+                <h2 style="margin:0;font-size:22px;font-weight:700;">Credenciales INTEC</h2>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:26px 28px;color:#111827;">
+                <p style="margin:0 0 12px 0;font-size:16px;">Hola {safe_recipient_label},</p>
+                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Te damos la bienvenida al Instituto Superior Tecnologico de Tecnicas Empresariales y del Conocimiento INTEC. Has sido matriculado en el curso <strong>{safe_course_name}</strong>, en el cual continuaras con tu preparacion profesional para lograr tu exito.</p>
+                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Tu cuenta institucional ha sido creada correctamente.</p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 18px 0;border:1px solid #e5e7eb;border-radius:10px;">
+                  <tr>
+                    <td style="padding:14px 16px;font-size:14px;color:#111827;"><strong>Usuario:</strong> {safe_intec_email}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:14px 16px;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;"><strong>Contraseña:</strong> {safe_password}</td>
+                  </tr>
+                </table>
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#6b7280;">Conserva estas credenciales en un lugar seguro y no las compartas con terceros.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+""".strip()
+
+    mail_payload = {
+        'message': {
+            'subject': 'Credenciales de acceso INTEC',
+            'body': {
+                'contentType': 'HTML',
+                'content': html_content,
+            },
+            'toRecipients': [
+                {
+                    'emailAddress': {
+                        'address': recipient_email,
+                    }
+                }
+            ],
+        },
+        'saveToSentItems': True,
+    }
+    if logo_attachment:
+        mail_payload['message']['attachments'] = [logo_attachment]
+
+    _send_graph_mail(mail_payload)
+    return {
+        'sent': True,
+        'message': f'Credenciales INTEC enviadas correctamente a {recipient_email}.',
+    }
+
+
+def _build_intec_logo_attachment() -> dict[str, Any] | None:
+    logo_path = (
+        Path(__file__).resolve().parents[3]
+        / 'frontend'
+        / 'public'
+        / 'Intec-Logowithslogangray.svg'
+    )
+    try:
+        content = logo_path.read_bytes()
+    except OSError:
+        return None
+
+    return {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        'name': 'Intec-Logowithslogangray.svg',
+        'contentType': 'image/svg+xml',
+        'contentBytes': b64encode(content).decode('ascii'),
+        'isInline': True,
+        'contentId': 'intec-logo',
+    }
+
+
+def _send_graph_mail(mail_payload: dict[str, Any]) -> None:
+    tenant_id = (os.getenv('MS_TENANT_ID') or '').strip()
+    client_id = (os.getenv('MS_CLIENT_ID') or '').strip()
+    client_secret = (os.getenv('MS_CLIENT_SECRET') or '').strip()
+    sender_identity = _resolve_graph_sender_identity()
+
+    if not tenant_id or not client_id or not client_secret:
+        raise PaymentGatewayError(
+            'No se encontraron credenciales MS_TENANT_ID/MS_CLIENT_ID/MS_CLIENT_SECRET para envio de correo.'
+        )
+
+    access_token = _get_graph_access_token(tenant_id, client_id, client_secret)
+    _validate_graph_mail_send_permission(access_token)
 
     endpoint = f'https://graph.microsoft.com/v1.0/users/{quote(sender_identity, safe="")}/sendMail'
     headers = {
@@ -1531,12 +1998,6 @@ def _send_payment_link_email(
                 f'{sender_identity} debe ser un buzon valido con permiso para enviar.'
             ) from exc
         raise
-
-    return {
-        'sent': True,
-        'message': f'Correo enviado correctamente a {recipient_email}.',
-        'receipt_email': receipt_email,
-    }
 
 
 def _resolve_payment_receipt_email() -> str:
