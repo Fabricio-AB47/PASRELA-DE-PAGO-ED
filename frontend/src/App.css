@@ -1012,17 +1012,87 @@ textarea {
   font-size: 0.92rem;
 }
 
-.admin-bulk-enrollment {
+.admin-bulk-enrollment,
+.admin-course-cuts {
   display: grid;
   gap: 18px;
   scroll-margin-top: 24px;
 }
 
 .bulk-enrollment-card,
-.bulk-result-card {
+.bulk-result-card,
+.course-cut-card {
   display: grid;
   gap: 18px;
   min-width: 0;
+}
+
+.course-cut-card h4 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1rem;
+}
+
+.course-cut-card p {
+  margin-top: 6px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.course-subject-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.82);
+  border-radius: 18px;
+  background: rgba(var(--fintec-celeste-rgb), 0.1);
+}
+
+.course-subject-picker legend {
+  padding: 0 6px;
+  color: var(--fintec-rojo);
+  font-size: 0.94rem;
+}
+
+.course-subject-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.course-subject-list p {
+  margin: 0;
+}
+
+.course-subject-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.18);
+  border-radius: 14px;
+  background: var(--fintec-blanco);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.course-subject-option.is-selected {
+  border-color: rgba(var(--fintec-rojo-rgb), 0.48);
+  background: rgba(var(--fintec-rojo-rgb), 0.08);
+}
+
+.course-subject-option input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--fintec-rojo);
+}
+
+.course-subject-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.94rem;
 }
 
 .bulk-enrollment-form {
@@ -1141,7 +1211,8 @@ textarea {
 }
 
 .admin-academic,
-.admin-payments {
+.admin-payments,
+.admin-course-cuts {
   scroll-margin-top: 24px;
 }
 
@@ -1405,6 +1476,47 @@ textarea {
   color: var(--text-strong);
 }
 
+.course-cut-table td strong,
+.course-cut-table td span {
+  display: block;
+}
+
+.course-cut-table td strong {
+  margin-bottom: 4px;
+}
+
+.course-cut-table td span {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.cut-status-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 88px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(var(--fintec-gris-rgb), 0.42);
+  color: var(--text-strong);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.cut-status-badge.is-open {
+  background: rgba(var(--fintec-celeste-rgb), 0.28);
+  color: var(--fintec-rojo);
+}
+
+.cut-status-badge.is-unavailable {
+  background: rgba(var(--fintec-rojo-rgb), 0.12);
+  color: var(--fintec-rojo);
+}
+
+.cut-status-badge.is-closed {
+  background: rgba(var(--fintec-gris-oscuro-rgb), 0.12);
+  color: var(--text-soft);
+}
+
 .form-success {
   margin: 16px 0 0;
   padding: 12px 14px;
@@ -1588,6 +1700,7 @@ textarea {
 
   .lookup-grid,
   .admin-form-grid,
+  .course-subject-list,
   .rate-mode-grid,
   .catalog-filter-grid,
   .pensum-filter-grid,

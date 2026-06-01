@@ -20,6 +20,7 @@ from .inscription_catalogs import (
     get_pensum_status_column,
     is_catalog_value_active,
 )
+from .course_cuts import CourseCutError, assign_matricula_to_open_cut, ensure_open_cut_for_enrollment
 from .microsoft365 import (
     Microsoft365Error,
     Microsoft365ValidationError,
@@ -83,6 +84,12 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         raise PaymentGatewayError(
             'El período seleccionado está inactivo. Debes elegir un período con estado Activo.'
         )
+
+    _ensure_open_cut_for_request(
+        cod_anio_basica=cod_anio_basica,
+        codigo_materia=codigo_materia,
+        codigo_periodo=codigo_periodo,
+    )
 
     if not matricula:
         matricula = generate_unique_numcodigo()
@@ -317,6 +324,12 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
 
     if estado_periodo and estado_periodo != 'activo':
         raise PaymentGatewayError('El período seleccionado está inactivo. Debes elegir un período con estado Activo.')
+
+    _ensure_open_cut_for_request(
+        cod_anio_basica=cod_anio_basica,
+        codigo_materia=codigo_materia,
+        codigo_periodo=codigo_periodo,
+    )
 
     if not matricula:
         matricula = generate_unique_numcodigo()
@@ -1033,16 +1046,28 @@ def _upsert_official_inscription_records(
         )
         if existing_materia:
             existing_numcodigo = str(existing_materia.get('numcodigo') or '').strip()
+            existing_num_matricula = _safe_int(existing_materia.get('Num_Matricula'), default=0)
+            cut_assignment = _assign_open_cut_for_matricula(
+                codigo_estud=codigo_estud,
+                cod_anio_basica=cod_anio_basica,
+                codigo_materia=codigo_materia,
+                codigo_periodo=codigo_periodo,
+                num_matricula=existing_num_matricula,
+                descripcion=descripcion,
+            )
             return {
                 'codigo_estud': str(codigo_estud),
                 'matricula': existing_numcodigo,
                 'numcodigo': existing_numcodigo,
-                'num_matricula': str(_safe_int(existing_materia.get('Num_Matricula'), default=0)),
+                'num_matricula': str(existing_num_matricula),
                 'num_reg_pago': str(_safe_int(existing_materia.get('Num'), default=0)),
                 'already_enrolled': '1',
                 'payment_record_created': '0',
+                'cod_anio_basica': str(cod_anio_basica),
+                'codigo_periodo': str(codigo_periodo),
                 'codigo_materia': str(codigo_materia),
                 'materia': str(pensum_template.get('materia') or ''),
+                **cut_assignment,
             }
 
         cabecera_template = _get_cabecera_template(cod_anio_basica, codigo_periodo)
@@ -1100,6 +1125,15 @@ def _upsert_official_inscription_records(
                 detalle=descripcion,
             )
 
+        cut_assignment = _assign_open_cut_for_matricula(
+            codigo_estud=codigo_estud,
+            cod_anio_basica=cod_anio_basica,
+            codigo_materia=codigo_materia,
+            codigo_periodo=codigo_periodo,
+            num_matricula=num_matricula,
+            descripcion=descripcion,
+        )
+
         return {
             'codigo_estud': str(codigo_estud),
             'matricula': resolved_numcodigo,
@@ -1107,9 +1141,57 @@ def _upsert_official_inscription_records(
             'num_matricula': str(num_matricula),
             'num_reg_pago': str(num_reg_pago) if create_payment_record else '',
             'payment_record_created': '1' if create_payment_record else '0',
+            'cod_anio_basica': str(cod_anio_basica),
+            'codigo_periodo': str(codigo_periodo),
             'codigo_materia': str(codigo_materia),
             'materia': str(pensum_template.get('materia') or ''),
+            **cut_assignment,
         }
+
+
+def _assign_open_cut_for_matricula(
+    *,
+    codigo_estud: str,
+    cod_anio_basica: str,
+    codigo_materia: str,
+    codigo_periodo: str,
+    num_matricula: int,
+    descripcion: str,
+) -> dict[str, str]:
+    try:
+        assignment = assign_matricula_to_open_cut(
+            codigo_estud=str(codigo_estud),
+            cod_anio_basica=str(cod_anio_basica),
+            codigo_materia=str(codigo_materia),
+            codigo_periodo=str(codigo_periodo),
+            num_matricula=_safe_int(num_matricula, default=0),
+            usuario_registro='SISTEMA',
+            observacion=descripcion,
+        )
+    except CourseCutError as exc:
+        raise PaymentGatewayError(str(exc)) from exc
+
+    return {
+        'corte_id': str(assignment.get('corte_id') or ''),
+        'tipo_oferta_corte': str(assignment.get('tipo_oferta') or ''),
+        'numero_corte': str(assignment.get('numero_corte') or ''),
+        'nombre_corte': str(assignment.get('nombre_corte') or ''),
+        'fecha_inicio': str(assignment.get('fecha_inicio') or ''),
+        'fecha_inicio_iso': str(assignment.get('fecha_inicio_iso') or ''),
+        'codigo_materia_corte': str(assignment.get('codigo_materia') or ''),
+        'materia_corte': str(assignment.get('materia_pensum') or assignment.get('materias_label') or ''),
+    }
+
+
+def _ensure_open_cut_for_request(*, cod_anio_basica: str, codigo_materia: str, codigo_periodo: str) -> None:
+    try:
+        ensure_open_cut_for_enrollment(
+            cod_anio_basica=str(cod_anio_basica),
+            codigo_materia=str(codigo_materia),
+            codigo_periodo=str(codigo_periodo),
+        )
+    except CourseCutError as exc:
+        raise PaymentGatewayError(str(exc)) from exc
 
 
 def _update_official_links_after_payment(

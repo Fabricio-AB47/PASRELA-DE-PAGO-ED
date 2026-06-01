@@ -13,6 +13,12 @@ from .bulk_enrollment import (
     excel_upload_from_json,
     process_bulk_enrollment_excel,
 )
+from .course_cuts import (
+    CourseCutError,
+    close_course_cut,
+    create_course_cut,
+    list_course_cuts,
+)
 from .inscription_catalogs import (
     AcademicCatalogError,
     fetch_admin_academic_catalogs,
@@ -424,6 +430,85 @@ def admin_academic_catalogs_view(_request):
     )
 
 
+@require_GET
+@require_admin_session
+@never_cache
+def admin_course_cuts_view(_request):
+    try:
+        cuts = list_course_cuts()
+    except CourseCutError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while loading course cuts.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno cargando las cortes.',
+            },
+            status=500,
+        )
+
+    return JsonResponse({'ok': True, 'message': 'Cortes cargadas.', 'cuts': cuts})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_course_cut_create_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    try:
+        result = create_course_cut(payload, user_login=_dashboard_user_login(request))
+    except CourseCutError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while creating course cut.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno creando la corte.',
+            },
+            status=500,
+        )
+
+    return JsonResponse({'ok': True, 'message': 'Corte creada.', 'cut': result}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_course_cut_close_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    try:
+        result = close_course_cut(payload, user_login=_dashboard_user_login(request))
+    except CourseCutError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while closing course cut.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno cerrando la corte.',
+            },
+            status=500,
+        )
+
+    return JsonResponse({'ok': True, 'message': 'Corte cerrada.', 'cut': result})
+
+
 @csrf_exempt
 @require_POST
 @require_admin_session
@@ -624,3 +709,8 @@ def admin_payment_cancel_view(request):
         )
 
     return JsonResponse({'ok': True, 'message': 'Anulacion ejecutada.', 'result': result})
+
+
+def _dashboard_user_login(request) -> str:
+    user = getattr(request, 'dashboard_user', {}) or {}
+    return str(user.get('login') or user.get('email') or 'SISTEMA').strip()

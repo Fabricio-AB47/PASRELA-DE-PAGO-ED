@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { clearStoredSession } from '../shared.js'
 import AdminAcademicPanel from './AdminAcademicPanel.jsx'
 import AdminBulkEnrollmentPanel from './AdminBulkEnrollmentPanel.jsx'
+import AdminCourseCutsPanel from './AdminCourseCutsPanel.jsx'
 import AdminPaymentsPanel from './AdminPaymentsPanel.jsx'
 import DashboardHome from './DashboardHome.jsx'
 import { DASHBOARD_ROUTES, routeById, routeFromHash } from './navigation.js'
@@ -94,6 +95,7 @@ export default function DashboardLayout({ session, onSessionChange }) {
         <section className="dashboard-main">
           {activeRouteId === 'home' ? <DashboardHome user={user} /> : null}
           {activeRouteId === 'academic' && user.category === 'staff' ? <AdminAcademicPanel /> : null}
+          {activeRouteId === 'course-cuts' && user.category === 'staff' ? <AdminCourseCutsPanel /> : null}
           {activeRouteId === 'payments' && user.category === 'staff' ? <AdminPaymentsPanel /> : null}
           {activeRouteId === 'bulk-enrollment' && user.category === 'staff' ? <AdminBulkEnrollmentPanel /> : null}
         </section>

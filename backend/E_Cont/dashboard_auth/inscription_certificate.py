@@ -10,12 +10,14 @@ from html import escape
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from django.conf import settings
 from django.core import signing
+from django.db import connection
 from django.utils import timezone
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
@@ -28,12 +30,14 @@ class InscriptionCertificateError(Exception):
 
 CERTIFICATE_CONTENT_TYPE = 'application/pdf'
 CERTIFICATE_STORAGE_DIR_NAME = 'certificados_inscripcion'
-DEFAULT_INSTITUTION_NAME = 'Instituto Superior Tecnológico INTEC'
+CERTIFICATE_INSTITUTION_NAME = 'Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento INTEC'
 CERTIFICATE_SIGNING_SALT = 'dashboard_auth.inscription_certificate'
-CERTIFICATE_VERSION = '2026-07-20-logo-signature-v5'
+CERTIFICATE_VERSION = '2026-07-20-logo-signature-code-db-cuts-v11'
 DEFAULT_COURSE_START_DATE = '20 de julio de 2026'
 LOGO_FILE_NAME = 'Intec-Logowithslogangray.svg'
 SIGNATURE_FILE_NAME = 'firma veronica.jpeg'
+CERTIFICATE_CODE_PREFIX = 'INTEC-VGA-CER'
+CERTIFICATE_CODE_PADDING = 3
 
 
 def build_certificate_payload(
@@ -85,7 +89,7 @@ def build_certificate_payload(
 
     return {
         'source': source,
-        'institution_name': _first_non_empty(payload.get('institution_name'), DEFAULT_INSTITUTION_NAME),
+        'institution_name': _clean_text(payload.get('institution_name')),
         'nombre_materia': _clean_text(course_name),
         'codigo_materia': _clean_text(
             _first_non_empty(
@@ -100,7 +104,12 @@ def build_certificate_payload(
             _first_non_empty(official_record.get('num_matricula'), payload.get('numero_matricula'))
         ),
         'fecha_inscripcion': _first_non_empty(payload.get('fecha_inscripcion'), _today_label()),
-        'fecha_inicio': _first_non_empty(payload.get('fecha_inicio'), DEFAULT_COURSE_START_DATE),
+        'fecha_inicio': _first_non_empty(
+            official_record.get('fecha_inicio'),
+            official_record.get('fecha_inicio_corte'),
+            payload.get('fecha_inicio'),
+            DEFAULT_COURSE_START_DATE,
+        ),
         'nombre': _clean_text(_first_non_empty(payload.get('nombre'), provider_payload.get('nombre'))),
         'cedula': _clean_text(_first_non_empty(payload.get('cedula'), provider_payload.get('cedula'))),
         'email': _clean_text(_first_non_empty(payload.get('email'), provider_payload.get('email'))),
@@ -112,6 +121,13 @@ def build_certificate_payload(
         'codigo_periodo': _clean_text(
             _first_non_empty(payload.get('codigo_periodo'), provider_payload.get('codigo_periodo'))
         ),
+        'cod_anio_basica': _clean_text(
+            _first_non_empty(
+                official_record.get('cod_anio_basica'),
+                payload.get('cod_anio_basica'),
+                provider_payload.get('cod_anio_basica'),
+            )
+        ),
         'estado_periodo': _clean_text(
             _first_non_empty(payload.get('estado_periodo'), provider_payload.get('estado_periodo'))
         ),
@@ -120,23 +136,33 @@ def build_certificate_payload(
         'payment_link': _clean_text(payment_link),
         'data_treatment_accepted': data_treatment_accepted,
         'inscripcion_aprobada': 'Sí',
+        'codigo_certificado': _clean_text(
+            _first_non_empty(payload.get('codigo_certificado'), payload.get('certificate_code'))
+        ),
+        'codigo_verificacion': _clean_text(payload.get('codigo_verificacion')),
+        'corte_id': _clean_text(_first_non_empty(official_record.get('corte_id'), payload.get('corte_id'))),
+        'numero_corte': _clean_text(_first_non_empty(official_record.get('numero_corte'), payload.get('numero_corte'))),
+        'nombre_corte': _clean_text(_first_non_empty(official_record.get('nombre_corte'), payload.get('nombre_corte'))),
         'responsable_recepcion': 'Sistema de inscripciones INTEC',
         'observaciones_internas': _default_internal_observations(source, payment_link),
     }
 
 
 def create_stored_certificate_record(payload: dict[str, Any]) -> dict[str, str]:
-    certificate_payload = _normalize_certificate_payload(payload)
+    certificate_payload = _ensure_certificate_code(_normalize_certificate_payload(payload))
     content, filename = build_inscription_certificate(certificate_payload)
     stored_filename = _safe_filename(filename)
     storage_path = _certificate_storage_dir() / stored_filename
     storage_path.parent.mkdir(parents=True, exist_ok=True)
     storage_path.write_bytes(content)
+    stored_relative_path = f'{CERTIFICATE_STORAGE_DIR_NAME}/{stored_filename}'
+    registry_record = _register_certificate_generation(certificate_payload, stored_relative_path)
+    certificate_payload.update(registry_record)
 
     signed_payload = {
         **certificate_payload,
         'stored_filename': stored_filename,
-        'stored_relative_path': f'{CERTIFICATE_STORAGE_DIR_NAME}/{stored_filename}',
+        'stored_relative_path': stored_relative_path,
         'stored_at': timezone.now().isoformat(),
         'certificate_version': CERTIFICATE_VERSION,
     }
@@ -144,6 +170,9 @@ def create_stored_certificate_record(payload: dict[str, Any]) -> dict[str, str]:
         'filename': stored_filename,
         'token': sign_certificate_payload(signed_payload),
         'stored_path': signed_payload['stored_relative_path'],
+        'certificate_code': certificate_payload.get('codigo_certificado', ''),
+        'verification_code': certificate_payload.get('codigo_verificacion', ''),
+        'certificate_id': str(certificate_payload.get('certificado_id') or ''),
     }
 
 
@@ -244,7 +273,7 @@ def send_certificate_email(
 
 
 def build_inscription_certificate(payload: dict[str, Any]) -> tuple[bytes, str]:
-    certificate_payload = _normalize_certificate_payload(payload)
+    certificate_payload = _ensure_certificate_code(_normalize_certificate_payload(payload))
     _validate_certificate_payload(certificate_payload)
 
     output = BytesIO()
@@ -256,7 +285,7 @@ def build_inscription_certificate(payload: dict[str, Any]) -> tuple[bytes, str]:
         topMargin=0.48 * inch,
         bottomMargin=0.48 * inch,
         title='Certificado de Inscripción',
-        author=certificate_payload.get('institution_name') or DEFAULT_INSTITUTION_NAME,
+        author=certificate_payload.get('institution_name') or 'INTEC',
     )
     story = _build_pdf_story(certificate_payload)
     document.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
@@ -272,6 +301,7 @@ def load_or_create_stored_certificate(payload: dict[str, Any]) -> tuple[bytes, s
     if storage_path.exists() and certificate_payload.get('certificate_version') == CERTIFICATE_VERSION:
         return storage_path.read_bytes(), filename
 
+    certificate_payload = _ensure_certificate_code(certificate_payload)
     content, generated_filename = build_inscription_certificate(certificate_payload)
     filename = _safe_filename(generated_filename)
     storage_path = _certificate_storage_dir() / filename
@@ -281,8 +311,11 @@ def load_or_create_stored_certificate(payload: dict[str, Any]) -> tuple[bytes, s
 
 
 def build_certificate_filename(payload: dict[str, Any]) -> str:
+    certificate_code = _slug_part(_certificate_code(payload))
     matricula = _slug_part(payload.get('matricula')) or 'sin-codigo'
-    cedula = _slug_part(payload.get('cedula')) or 'sin-cedula'
+    cedula = _slug_part(_last_four_digits(payload.get('cedula'))) or 'sin-cedula'
+    if certificate_code:
+        return f'certificado_inscripcion_{certificate_code}_{matricula}_{cedula}.pdf'
     return f'certificado_inscripcion_{matricula}_{cedula}.pdf'
 
 
@@ -305,7 +338,6 @@ def load_signed_certificate_payload(token: str) -> dict[str, Any]:
 
 def _normalize_certificate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     certificate_payload = build_certificate_payload(payload) if not payload.get('nombre') else dict(payload)
-    certificate_payload.setdefault('institution_name', DEFAULT_INSTITUTION_NAME)
     certificate_payload.setdefault('fecha_inicio', DEFAULT_COURSE_START_DATE)
     certificate_payload.setdefault('responsable_recepcion', 'Sistema de inscripciones INTEC')
     certificate_payload.setdefault('observaciones_internas', _default_internal_observations(
@@ -314,6 +346,10 @@ def _normalize_certificate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     ))
     certificate_payload.setdefault('monto', '$ 0.00')
     certificate_payload.setdefault('modalidad', 'Virtual')
+    certificate_code = _certificate_code(certificate_payload)
+    if certificate_code:
+        certificate_payload['codigo_certificado'] = certificate_code
+        certificate_payload['certificate_code'] = certificate_code
     return certificate_payload
 
 
@@ -365,10 +401,13 @@ def _build_pdf_story(payload: dict[str, Any]) -> list[Any]:
     if logo:
         story.extend([logo, Spacer(1, 0.07 * inch)])
 
+    certificate_code = _certificate_code(payload)
+    if certificate_code:
+        story.extend([Paragraph(_safe_html(certificate_code), styles['CertificateCode']), Spacer(1, 0.04 * inch)])
+
     story.extend(
         [
             Paragraph('CERTIFICADO DE INSCRIPCIÓN', styles['CertificateTitle']),
-            Paragraph(_safe_html(payload.get('institution_name') or DEFAULT_INSTITUTION_NAME), styles['Institution']),
             Spacer(1, 0.14 * inch),
             Paragraph(_certificate_statement(payload), styles['BodyJustified']),
             Spacer(1, 0.12 * inch),
@@ -380,7 +419,7 @@ def _build_pdf_story(payload: dict[str, Any]) -> list[Any]:
             'DATOS DEL ESTUDIANTE',
             [
                 ('Nombre completo', payload.get('nombre')),
-                ('Cédula de ciudadanía/pasaporte/identidad', payload.get('cedula')),
+                ('Cédula de ciudadanía/identidad/pasaporte', payload.get('cedula')),
                 ('Correo electrónico', payload.get('email')),
                 ('Teléfono', payload.get('telefono')),
                 ('Ciudad / localidad', payload.get('localidad')),
@@ -448,7 +487,7 @@ def _section_table(title: str, rows: list[tuple[str, Any]], styles: dict[str, Pa
     ]
 
 
-def _signature_block(_styles: dict[str, ParagraphStyle]) -> list[Any]:
+def _signature_block(styles: dict[str, ParagraphStyle]) -> list[Any]:
     signature = _signature_flowable()
     if not signature:
         return []
@@ -473,14 +512,14 @@ def _signature_block(_styles: dict[str, ParagraphStyle]) -> list[Any]:
 
 
 def _certificate_statement(payload: dict[str, Any]) -> str:
-    institution = _safe_html(_fallback(payload.get('institution_name')))
+    institution = _safe_html(_fallback(_first_non_empty(payload.get('institution_name'), CERTIFICATE_INSTITUTION_NAME)))
     student = _safe_html(_fallback(payload.get('nombre')))
     cedula = _safe_html(_fallback(payload.get('cedula')))
     course = _safe_html(_fallback(payload.get('nombre_materia')))
     start_date = _safe_html(_fallback(payload.get('fecha_inicio')))
     return (
-        f'Por medio del presente, el <b>{institution}</b> certifica que el/la señor/a/ita'
-        f'<b>{student}</b>, portador de la cédula de ciudadanía/pasaporte/identidad <b>{cedula}</b>, se encuentra legalmente '
+        f'Por medio del presente, el <b>{institution}</b> certifica que el/la señor/a/ita&nbsp;'
+        f'<b>{student}</b>, portador de la cédula de ciudadanía/identidad/pasaporte: <b>{cedula}</b>, se encuentra legalmente '
         f'inscrito/a en el curso <b>{course}</b>, que inicia el <b>{start_date}</b>, '
         'de acuerdo con la información registrada en el sistema '
         'institucional académico.'
@@ -509,6 +548,15 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
             leading=11,
             textColor=colors.HexColor('#777777'),
         ),
+        'CertificateCode': ParagraphStyle(
+            'CertificateCode',
+            parent=base_styles['Normal'],
+            alignment=TA_RIGHT,
+            fontName='Helvetica-Bold',
+            fontSize=9.2,
+            leading=11,
+            textColor=colors.HexColor('#333333'),
+        ),
         'BodyJustified': ParagraphStyle(
             'BodyJustified',
             parent=base_styles['BodyText'],
@@ -517,6 +565,15 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
             fontSize=8.8,
             leading=12.2,
             textColor=colors.HexColor('#333333'),
+        ),
+        'SignatureInstitution': ParagraphStyle(
+            'SignatureInstitution',
+            parent=base_styles['Normal'],
+            alignment=TA_CENTER,
+            fontName='Helvetica',
+            fontSize=8.2,
+            leading=10,
+            textColor=colors.HexColor('#111111'),
         ),
         'SectionTitle': ParagraphStyle(
             'SectionTitle',
@@ -868,6 +925,118 @@ def _validate_certificate_payload(payload: dict[str, Any]) -> None:
             raise InscriptionCertificateError(message)
 
 
+def _ensure_certificate_code(payload: dict[str, Any]) -> dict[str, Any]:
+    certificate_payload = dict(payload)
+    certificate_code = _certificate_code(certificate_payload)
+    if not certificate_code:
+        certificate_code = _next_certificate_code()
+
+    certificate_payload['codigo_certificado'] = certificate_code
+    certificate_payload['certificate_code'] = certificate_code
+    return certificate_payload
+
+
+def _certificate_code(payload: dict[str, Any]) -> str:
+    return _clean_text(_first_non_empty(payload.get('codigo_certificado'), payload.get('certificate_code')))
+
+
+def _next_certificate_code() -> str:
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT NEXT VALUE FOR dbo.SeqCertificadosGenerados")
+            row = cursor.fetchone()
+    except Exception as exc:
+        raise InscriptionCertificateError(
+            'No fue posible reservar el código del certificado en la base de datos.'
+        ) from exc
+
+    sequence = _safe_int(row[0] if row else None, default=0)
+    if sequence <= 0:
+        raise InscriptionCertificateError('La secuencia de certificados devolvió un valor inválido.')
+    return _format_certificate_code(sequence)
+
+
+def _register_certificate_generation(payload: dict[str, Any], stored_relative_path: str) -> dict[str, str]:
+    certificate_code = _certificate_code(payload)
+    if not certificate_code:
+        raise InscriptionCertificateError('No fue posible registrar el certificado sin número de certificado.')
+
+    verification_code = _clean_text(payload.get('codigo_verificacion')) or str(uuid4())
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO dbo.CERTIFICADOS_GENERADOS (
+                    TipoCertificado,
+                    TipoOrigen,
+                    NumeroCertificado,
+                    CodigoEstud,
+                    CedulaEst,
+                    ApellidosNombre,
+                    Cod_AnioBasica,
+                    CodigoPeriodo,
+                    CodigoMateria,
+                    Num_Matricula,
+                    CodCurso,
+                    UsuarioGenero,
+                    RutaArchivo,
+                    CodigoVerificacion,
+                    Observacion
+                )
+                OUTPUT INSERTED.CertificadoId
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                [
+                    'INSCRIPCION',
+                    _certificate_origin(payload),
+                    certificate_code,
+                    _numeric_or_none(payload.get('codigo_estud')),
+                    _trim_to_max(payload.get('cedula'), 50) or None,
+                    _trim_to_max(payload.get('nombre'), 150) or None,
+                    _numeric_or_none(payload.get('cod_anio_basica')),
+                    _numeric_or_none(payload.get('codigo_periodo')),
+                    _numeric_or_none(payload.get('codigo_materia')),
+                    _numeric_or_none(payload.get('numero_matricula')),
+                    _numeric_or_none(payload.get('cod_curso')),
+                    'SISTEMA',
+                    _trim_to_max(stored_relative_path, 500) or None,
+                    _trim_to_max(verification_code, 100),
+                    _trim_to_max(_certificate_registry_observation(payload), 500) or None,
+                ],
+            )
+            row = cursor.fetchone()
+    except Exception as exc:
+        raise InscriptionCertificateError(
+            'No fue posible registrar el historial del certificado generado.'
+        ) from exc
+
+    return {
+        'certificado_id': str(row[0]) if row and row[0] is not None else '',
+        'codigo_certificado': certificate_code,
+        'certificate_code': certificate_code,
+        'codigo_verificacion': verification_code,
+    }
+
+
+def _certificate_origin(payload: dict[str, Any]) -> str:
+    source = _clean_text(payload.get('source'))
+    if source in {'matricula_masiva', 'inscripcion'}:
+        return 'MATRICULA'
+    return 'OTRO'
+
+
+def _certificate_registry_observation(payload: dict[str, Any]) -> str:
+    cut_label = _clean_text(payload.get('nombre_corte'))
+    course_label = _clean_text(payload.get('nombre_materia'))
+    if cut_label and course_label:
+        return f'{cut_label} - {course_label}'
+    return cut_label or course_label or 'Certificado de inscripción generado por el sistema.'
+
+
+def _format_certificate_code(sequence: int) -> str:
+    return f'{CERTIFICATE_CODE_PREFIX}-{sequence:0{CERTIFICATE_CODE_PADDING}d}'
+
+
 def _certificate_storage_dir() -> Path:
     custom_path = os.getenv('INSCRIPTION_CERTIFICATE_STORAGE_DIR', '').strip()
     if custom_path:
@@ -907,6 +1076,21 @@ def _format_money(value: Any) -> str:
         return f'$ {text}' if text else '$ 0.00'
 
 
+def _numeric_or_none(value: Any) -> int | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    number = _safe_int(text, default=-1)
+    return number if number >= 0 else None
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(Decimal(str(value)))
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+
+
 def _first_non_empty(*values: Any) -> Any:
     for value in values:
         if _clean_text(value):
@@ -924,6 +1108,10 @@ def _clean_text(value: Any) -> str:
     return re.sub(r'\s+', ' ', str(value).replace('\r', ' ').replace('\n', ' ')).strip()
 
 
+def _trim_to_max(value: Any, max_length: int) -> str:
+    return _clean_text(value)[:max_length]
+
+
 def _safe_html(value: Any) -> str:
     return escape(_clean_text(value), quote=False)
 
@@ -932,6 +1120,11 @@ def _slug_part(value: Any) -> str:
     text = _clean_text(value).lower()
     text = re.sub(r'[^a-z0-9]+', '-', text)
     return text.strip('-')[:60]
+
+
+def _last_four_digits(value: Any) -> str:
+    digits = re.sub(r'\D+', '', _clean_text(value))
+    return digits[-4:] if digits else ''
 
 
 def _safe_filename(value: Any) -> str:

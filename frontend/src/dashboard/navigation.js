@@ -4,7 +4,7 @@ export const DASHBOARD_ROUTES = [
     hash: '#dashboard',
     label: 'Dashboard',
     title: 'Dashboard general',
-    description: 'Selecciona una opcion para administrar procesos institucionales.',
+    description: 'Selecciona una opción para administrar procesos institucionales.',
   },
   {
     id: 'academic',
@@ -12,7 +12,15 @@ export const DASHBOARD_ROUTES = [
     aliases: ['#admin-academic'],
     label: 'Carreras y pensum',
     title: 'Carreras y pensum',
-    description: 'Administra carreras, materias, estados y filtros academicos.',
+    description: 'Administra carreras, materias, estados y filtros académicos.',
+  },
+  {
+    id: 'course-cuts',
+    hash: '#course-cuts',
+    aliases: ['#admin-course-cuts'],
+    label: 'Cortes',
+    title: 'Cortes de inscripción',
+    description: 'Abre y cierra cortes para organizar matrículas, certificados y cargas Excel.',
   },
   {
     id: 'payments',
@@ -20,7 +28,7 @@ export const DASHBOARD_ROUTES = [
     aliases: ['#admin-payments'],
     label: 'Pagos',
     title: 'Pagos',
-    description: 'Consulta transacciones y ejecuta anulaciones desde un modulo independiente.',
+    description: 'Consulta transacciones y ejecuta anulaciones desde un módulo independiente.',
   },
   {
     id: 'bulk-enrollment',
