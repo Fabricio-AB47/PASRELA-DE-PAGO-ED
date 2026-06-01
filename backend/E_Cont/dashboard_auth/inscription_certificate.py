@@ -380,9 +380,9 @@ def _build_pdf_story(payload: dict[str, Any]) -> list[Any]:
             'DATOS DEL ESTUDIANTE',
             [
                 ('Nombre completo', payload.get('nombre')),
-                ('Cédula / identificación', payload.get('cedula')),
-                ('Correo electronico', payload.get('email')),
-                ('Telefono', payload.get('telefono')),
+                ('Cédula de ciudadanía/pasaporte/identidad', payload.get('cedula')),
+                ('Correo electrónico', payload.get('email')),
+                ('Teléfono', payload.get('telefono')),
                 ('Ciudad / localidad', payload.get('localidad')),
                 ('Dirección', payload.get('direccion')),
                 ('Ocupación', payload.get('ocupacion')),
@@ -479,11 +479,11 @@ def _certificate_statement(payload: dict[str, Any]) -> str:
     course = _safe_html(_fallback(payload.get('nombre_materia')))
     start_date = _safe_html(_fallback(payload.get('fecha_inicio')))
     return (
-        f'Por medio del presente documento, <b>{institution}</b> certifica que '
-        f'<b>{student}</b>, con identificación No. <b>{cedula}</b>, se encuentra '
-        f'ya inscrito/a en el curso <b>{course}</b>, que inicia el <b>{start_date}</b>, '
+        f'Por medio del presente, el <b>{institution}</b> certifica que el/la señor/a/ita'
+        f'<b>{student}</b>, portador de la cédula de ciudadanía/pasaporte/identidad <b>{cedula}</b>, se encuentra legalmente '
+        f'inscrito/a en el curso <b>{course}</b>, que inicia el <b>{start_date}</b>, '
         'de acuerdo con la información registrada en el sistema '
-        'institucional de inscripciones.'
+        'institucional académico.'
     )
 
 
