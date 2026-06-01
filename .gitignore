@@ -1,4 +1,9 @@
 .env
 .env.*
 .venv/
-scripts/
+__pycache__/
+*.py[cod]
+backend/logs/
+frontend/dist/
+frontend/node_modules/
+frontend/vite-dev.*.log

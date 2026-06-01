@@ -3,7 +3,7 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import './App.css'
-import { readResponsePayload } from './shared.js'
+import { downloadBlobResponse, readResponsePayload } from './shared.js'
 
 const FIXED_COD_ANIO_BASICA = '13'
 const PAYMENT_RECEIPT_EMAIL = 'DeptCobranzas@intec.edu.ec'
@@ -33,12 +33,15 @@ function InscriptionPage() {
     estado_periodo: '',
     matricula: '',
     monto: '',
-    descripcion: 'Pago de inscripcion',
+    descripcion: 'Pago de inscripción',
     dataTreatment: '',
   })
   const [isRegistrationSubmitting, setIsRegistrationSubmitting] = useState(false)
+  const [isCertificateDownloading, setIsCertificateDownloading] = useState(false)
   const [registrationErrorMessage, setRegistrationErrorMessage] = useState('')
+  const [certificateErrorMessage, setCertificateErrorMessage] = useState('')
   const [registrationResult, setRegistrationResult] = useState(null)
+  const [registeredUserNotice, setRegisteredUserNotice] = useState(null)
   const [, setIsMatriculaLoading] = useState(true)
   const [catalogs, setCatalogs] = useState({
     carreras: [],
@@ -52,11 +55,13 @@ function InscriptionPage() {
 
     async function loadMatricula() {
       try {
-        const response = await fetch('/api/auth/inscription/matricula/')
+        const response = await fetch('/api/auth/inscription/matricula/', {
+          cache: 'no-store',
+        })
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok || !payload.matricula) {
-          throw new Error(payload?.message ?? 'No fue posible generar la matricula unica.')
+          throw new Error(payload?.message ?? 'No fue posible generar la matrícula única.')
         }
 
         if (!isMounted) {
@@ -90,7 +95,9 @@ function InscriptionPage() {
 
     async function loadCatalogs() {
       try {
-        const response = await fetch('/api/auth/inscription/catalogs/')
+        const response = await fetch('/api/auth/inscription/catalogs/', {
+          cache: 'no-store',
+        })
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok || !payload.catalogs) {
@@ -149,6 +156,10 @@ function InscriptionPage() {
 
   function handleRegistrationChange(event) {
     const { name, value } = event.target
+    if (registeredUserNotice) {
+      setRegisteredUserNotice(null)
+    }
+
     if (name === 'carrera_num') {
       const selectedCareer = catalogs.carreras.find((item) => String(item.num) === String(value))
       const codAnio = selectedCareer?.cod_anio_basica ? String(selectedCareer.cod_anio_basica) : ''
@@ -218,18 +229,20 @@ function InscriptionPage() {
     event.preventDefault()
     setIsRegistrationSubmitting(true)
     setRegistrationErrorMessage('')
+    setCertificateErrorMessage('')
     setRegistrationResult(null)
+    setRegisteredUserNotice(null)
 
     if (registrationForm.dataTreatment !== 'si') {
       setRegistrationErrorMessage(
-        'Para completar la inscripcion debes aceptar el tratamiento de datos personales.',
+        'Para completar la inscripción debes aceptar el tratamiento de datos personales.',
       )
       setIsRegistrationSubmitting(false)
       return
     }
 
     if (!registrationForm.matricula) {
-      setRegistrationErrorMessage('No se pudo generar la matricula unica. Recarga la pagina.')
+      setRegistrationErrorMessage('No se pudo generar la matrícula única. Recarga la página.')
       setIsRegistrationSubmitting(false)
       return
     }
@@ -240,7 +253,7 @@ function InscriptionPage() {
       courses[0]
 
     if (!selectedCourse) {
-      setRegistrationErrorMessage('No hay un curso activo disponible para completar la inscripcion.')
+      setRegistrationErrorMessage('No hay un curso activo disponible para completar la inscripción.')
       setIsRegistrationSubmitting(false)
       return
     }
@@ -251,8 +264,8 @@ function InscriptionPage() {
       .replace(/\s+/g, ' ')
       .trim()
     const paymentDescription = cleanedCourseName
-      ? `Pago de inscripcion del curso ${cleanedCourseName}`
-      : 'Pago de inscripcion'
+      ? `Pago de inscripción del curso ${cleanedCourseName}`
+      : 'Pago de inscripción'
 
     try {
       const response = await fetch('/api/auth/inscription/payment-link/', {
@@ -301,13 +314,22 @@ function InscriptionPage() {
 
       const payload = await readResponsePayload(response)
       if (!payload) {
-        throw new Error(`El servidor devolvio una respuesta vacia (${response.status}).`)
+        throw new Error(`El servidor devolvió una respuesta vacía (${response.status}).`)
       }
 
       if (!response.ok || !payload.ok) {
+        if (response.status === 409 && payload.message === 'Usuario registrado') {
+          setRegisteredUserNotice(
+            payload.registered_user || {
+              cedula: registrationForm.cedula,
+              message: 'Usuario registrado',
+            },
+          )
+          return
+        }
         throw new Error(
           payload.message ??
-            `No fue posible finalizar la inscripcion (${response.status}).`,
+            `No fue posible finalizar la inscripción (${response.status}).`,
         )
       }
 
@@ -323,11 +345,65 @@ function InscriptionPage() {
     }
   }
 
+  async function handleCertificateDownload() {
+    const certificateToken = registrationResult?.certificate?.token
+    if (!certificateToken) {
+      setCertificateErrorMessage('No hay datos disponibles para generar el certificado.')
+      return
+    }
+
+    setIsCertificateDownloading(true)
+    setCertificateErrorMessage('')
+
+    try {
+      const response = await fetch('/api/auth/inscription/certificate/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          certificate: {
+            token: certificateToken,
+          },
+        }),
+      })
+
+      if (!response.ok) {
+        const payload = await readResponsePayload(response)
+        throw new Error(payload?.message ?? `No fue posible generar el certificado (${response.status}).`)
+      }
+
+      await downloadBlobResponse(
+        response,
+        registrationResult?.certificate?.filename ||
+          `certificado_inscripcion_${registrationResult?.matricula || registrationForm.cedula || 'registro'}.pdf`,
+      )
+    } catch (error) {
+      setCertificateErrorMessage(error.message)
+    } finally {
+      setIsCertificateDownloading(false)
+    }
+  }
+
   const receiptEmail =
     registrationResult?.receipt_email || registrationResult?.email_result?.receipt_email || PAYMENT_RECEIPT_EMAIL
 
   return (
     <main className="inscription-fullscreen">
+      {registeredUserNotice ? (
+        <div className="modal-backdrop registered-user-backdrop" role="dialog" aria-modal="true" aria-labelledby="registered-user-title">
+          <section className="registered-user-modal">
+            <h2 id="registered-user-title">Usuario registrado</h2>
+            <button
+              type="button"
+              className="submit-button registered-user-action"
+              onClick={() => setRegisteredUserNotice(null)}
+            >
+              Cerrar
+            </button>
+          </section>
+        </div>
+      ) : null}
       <section className="inscription-centered">
           <div className="auth-card lookup-mode inscription-card">
           <img
@@ -466,7 +542,7 @@ function InscriptionPage() {
                       type="text"
                       value={registrationForm.telefono}
                       onChange={handleRegistrationChange}
-                      placeholder="Telefono"
+                      placeholder="Teléfono"
                       required
                       />
                     </label>
@@ -548,9 +624,9 @@ function InscriptionPage() {
 
                 <div className="inscription-payment-notice">
                   <p>
-                    Luego de realizar el pago, envia el comprobante a{' '}
+                    Luego de realizar el pago, envía el comprobante a{' '}
                     <a href={`mailto:${PAYMENT_RECEIPT_EMAIL}`}>{PAYMENT_RECEIPT_EMAIL}</a>{' '}
-                    indicando tu nombre completo y Cedula de ciudadania.
+                    indicando tu nombre completo y cédula de ciudadanía.
                   </p>
                 </div>
 
@@ -590,13 +666,13 @@ function InscriptionPage() {
                   type="submit"
                   disabled={!canSubmitRegistration}
                 >
-                  {isRegistrationSubmitting ? 'Registro de Inscripcion...' : 'Registro de Inscripcion'}
+                  {isRegistrationSubmitting ? 'Registro de inscripción...' : 'Registro de inscripción'}
               </button>
             </form>
 
               {registrationResult ? (
               <div className="payment-result">
-                  <p className="payment-result-title">Inscripcion completada</p>
+                  <p className="payment-result-title">Inscripción completada</p>
                 {registrationResult.payment_link ? (
                   <a className="payment-result-link" href={registrationResult.payment_link} target="_blank" rel="noreferrer">
                     {registrationResult.payment_link}
@@ -606,9 +682,27 @@ function InscriptionPage() {
                     {registrationResult.email_result?.message ?? 'Correo enviado correctamente.'}
                 </p>
                 <p className="payment-result-note payment-result-receipt">
-                  Luego de realizar el pago, envia el comprobante a{' '}
-                  <a href={`mailto:${receiptEmail}`}>{receiptEmail}</a> indicando tu nombre completo y Cedula de ciudadania.
+                  Luego de realizar el pago, envía el comprobante a{' '}
+                  <a href={`mailto:${receiptEmail}`}>{receiptEmail}</a> indicando tu nombre completo y cédula de ciudadanía.
                 </p>
+                {registrationResult.certificate ? (
+                  <div className="payment-result-actions">
+                    <button
+                      type="button"
+                      className="ghost-button compact-button"
+                      onClick={handleCertificateDownload}
+                      disabled={isCertificateDownloading}
+                    >
+                      {isCertificateDownloading ? 'Generando certificado...' : 'Descargar certificado PDF'}
+                    </button>
+                  </div>
+                ) : null}
+                {registrationResult.certificate_email_result ? (
+                  <p className="payment-result-note">
+                    {registrationResult.certificate_email_result.message}
+                  </p>
+                ) : null}
+                {certificateErrorMessage ? <p className="form-error">{certificateErrorMessage}</p> : null}
               </div>
             ) : null}
           </section>

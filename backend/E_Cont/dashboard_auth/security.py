@@ -28,7 +28,7 @@ def require_admin_session(view_func: Callable) -> Callable:
     def wrapped(request, *args, **kwargs):
         token = _extract_session_token(request)
         if not token:
-            return _auth_response('Debes iniciar sesion para acceder al dashboard administrativo.', 401)
+            return _auth_response('Debes iniciar sesión para acceder al dashboard administrativo.', 401)
 
         try:
             session_user = signing.loads(
@@ -37,9 +37,9 @@ def require_admin_session(view_func: Callable) -> Callable:
                 max_age=_session_max_age_seconds(),
             )
         except signing.SignatureExpired:
-            return _auth_response('La sesion expiro. Inicia sesion nuevamente.', 401)
+            return _auth_response('La sesión expiró. Inicia sesión nuevamente.', 401)
         except signing.BadSignature:
-            return _auth_response('Sesion invalida. Inicia sesion nuevamente.', 401)
+            return _auth_response('Sesión inválida. Inicia sesión nuevamente.', 401)
 
         if str(session_user.get('category') or '').lower() != 'staff':
             return _auth_response('No tienes permisos para ejecutar esta accion.', 403)
@@ -81,7 +81,7 @@ def _validate_admin_request_shape(request) -> JsonResponse | None:
                     status=413,
                 )
         except ValueError:
-            return JsonResponse({'ok': False, 'message': 'Solicitud invalida.'}, status=400)
+            return JsonResponse({'ok': False, 'message': 'Solicitud inválida.'}, status=400)
 
     return None
 

@@ -15,7 +15,7 @@ def lookup_student_inscription(email: str, matricula: str) -> dict[str, Any]:
     clean_matricula = _clean_text(matricula)
 
     if not clean_email or not clean_matricula:
-        raise StudentLookupError('Debes completar el correo y la matricula para consultar la inscripcion.')
+        raise StudentLookupError('Debes completar el correo y la matrícula para consultar la inscripción.')
 
     student = _find_registered_student(clean_email, clean_matricula)
     if student is None:
@@ -36,7 +36,7 @@ def lookup_student_inscription(email: str, matricula: str) -> dict[str, Any]:
             'fuente': student.get('source') or 'Registro institucional',
         },
         'inscription': {
-            'estado': enrollment.get('estado') if enrollment else 'Sin matricula registrada',
+            'estado': enrollment.get('estado') if enrollment else 'Sin matrícula registrada',
             'tipo_matricula': enrollment.get('control_detalle') if enrollment else 'No disponible',
             'numero_matricula': enrollment.get('num_matricula') if enrollment else 'No disponible',
             'fecha_pago': enrollment.get('fecha_pago') if enrollment else 'No disponible',
@@ -157,7 +157,7 @@ def _build_mismatch_message(email: str, matricula: str) -> str:
     row = _fetch_one(matricula_query, [matricula])
     if row is not None:
         return (
-            'La matricula fue localizada, pero el correo no coincide con el registro de preinscripcion '
+            'La matrícula fue localizada, pero el correo no coincide con el registro de preinscripción '
             'del estudiante.'
         )
 
@@ -169,7 +169,7 @@ def _build_mismatch_message(email: str, matricula: str) -> str:
     row = _fetch_one(student_query, [matricula])
     if row is not None:
         return (
-            'La matricula existe en el sistema academico, pero el correo enviado no coincide con el '
+            'La matrícula existe en el sistema académico, pero el correo enviado no coincide con el '
             'correo registrado del estudiante.'
         )
 
@@ -181,9 +181,9 @@ def _build_mismatch_message(email: str, matricula: str) -> str:
     """
     row = _fetch_one(email_query, [email])
     if row is not None:
-        return 'El correo fue localizado, pero la matricula no corresponde al registro del estudiante.'
+        return 'El correo fue localizado, pero la matrícula no corresponde al registro del estudiante.'
 
-    return 'No encontramos una inscripcion con ese correo y matricula.'
+    return 'No encontramos una inscripción con ese correo y matrícula.'
 
 
 def _fetch_enrollment_header(matricula: str) -> dict[str, Any] | None:
@@ -302,7 +302,7 @@ def _serialize_payment_row(row: dict[str, Any]) -> dict[str, Any]:
 def _build_documents(student: dict[str, Any], enrollment: dict[str, Any] | None) -> list[dict[str, str]]:
     documents = []
     for label, key in [
-        ('Cedula', 'urlcedula'),
+        ('Cédula', 'urlcedula'),
         ('Titulo', 'urltitulo'),
         ('Deposito', 'urldeposito'),
         ('Convenio', 'urlconvenio'),

@@ -61,7 +61,7 @@ def authenticate_user(identifier: str, password: str, scope: str = 'auto') -> Au
         raise InvalidScopeError('El tipo de acceso solicitado no es valido.')
 
     if not clean_identifier or not clean_password:
-        raise AuthError('Debes enviar el usuario y la contrasena.')
+        raise AuthError('Debes enviar el usuario y la contraseña.')
 
     matchers = {
         'student': _find_student,
@@ -132,7 +132,7 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
         role_code=None,
         role_name='ESTUDIANTE',
         summary=[
-            {'label': 'Matricula', 'value': student_code},
+            {'label': 'Matrícula', 'value': student_code},
             {'label': 'Correo INTEC', 'value': intec_email or 'No disponible'},
             {'label': 'Periodo', 'value': _clean_text(row.get('Periodo')) or 'No disponible'},
         ],
@@ -198,7 +198,7 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
         role_name='DOCENTE',
         summary=[
             {'label': 'Codigo', 'value': teacher_code},
-            {'label': 'Cedula', 'value': teacher_id},
+            {'label': 'Cédula', 'value': teacher_id},
             {'label': 'Tipo docente', 'value': _clean_text(row.get('tipo_usuario')) or 'No disponible'},
         ],
         modules=[
@@ -302,7 +302,7 @@ def _resolve_staff_role_name(role_code: int | None) -> str:
 def _staff_modules(role_name: str) -> list[dict[str, str]]:
     modules = {
         'ADMINISTRADOR': [
-            {'title': 'Control general', 'description': 'Administra usuarios, accesos, catalogos y reglas del dashboard.'},
+            {'title': 'Control general', 'description': 'Administra usuarios, accesos, catálogos y reglas del dashboard.'},
             {'title': 'Conciliacion', 'description': 'Supervisa pagos, estados y trazabilidad operativa en tiempo real.'},
             {'title': 'Configuracion', 'description': 'Ajusta parametros, conexiones y vistas institucionales.'},
         ],
@@ -317,8 +317,8 @@ def _staff_modules(role_name: str) -> list[dict[str, str]]:
             {'title': 'Atencion', 'description': 'Centraliza solicitudes y acompanamiento institucional.'},
         ],
         'ACADEMICO': [
-            {'title': 'Carga academica', 'description': 'Relaciona periodos, inscripciones y eventos de pago por cohorte.'},
-            {'title': 'Validaciones', 'description': 'Revisa estados y desbloqueos para continuidad academica.'},
+            {'title': 'Carga académica', 'description': 'Relaciona períodos, inscripciones y eventos de pago por cohorte.'},
+            {'title': 'Validaciones', 'description': 'Revisa estados y desbloqueos para continuidad académica.'},
             {'title': 'Indicadores', 'description': 'Consulta paneles de avance y cumplimiento por programa.'},
         ],
         'ADMISIONES': [
@@ -337,7 +337,7 @@ def _staff_modules(role_name: str) -> list[dict[str, str]]:
             {'title': 'Seguimiento', 'description': 'Prioriza pendientes de alto impacto para cada equipo.'},
         ],
         'SOPORTE': [
-            {'title': 'Incidentes', 'description': 'Atiende errores, caidas y validaciones tecnicas del sistema.'},
+            {'title': 'Incidentes', 'description': 'Atiende errores, caídas y validaciones técnicas del sistema.'},
             {'title': 'Bitacora', 'description': 'Consulta accesos, eventos y rastreo de transacciones.'},
             {'title': 'Salud del sistema', 'description': 'Monitorea integraciones y conectividad operativa.'},
         ],

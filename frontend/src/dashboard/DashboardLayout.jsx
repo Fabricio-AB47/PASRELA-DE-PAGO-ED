@@ -50,7 +50,7 @@ export default function DashboardLayout({ session, onSessionChange }) {
           </div>
         </div>
         <button type="button" className="ghost-button" onClick={handleLogout}>
-          Cerrar sesion
+          Cerrar sesión
         </button>
       </header>
 

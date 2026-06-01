@@ -2,6 +2,7 @@ import json
 import logging
 
 from django.http import HttpResponse, JsonResponse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -20,6 +21,15 @@ from .inscription_catalogs import (
     update_pensum_status,
     upsert_pensum_entry,
 )
+from .inscription_certificate import (
+    CERTIFICATE_CONTENT_TYPE,
+    InscriptionCertificateError,
+    build_certificate_payload,
+    create_stored_certificate_record,
+    load_signed_certificate_payload,
+    load_or_create_stored_certificate,
+    send_certificate_email,
+)
 from .microsoft365 import (
     Microsoft365Error,
     create_microsoft365_user,
@@ -34,6 +44,11 @@ from .payments import (
 )
 from .security import create_session_token, require_admin_session
 from .services import AuthError, InactiveUserError, InvalidScopeError, authenticate_user
+from .student_registration import (
+    RegisteredUserExistsError,
+    USER_REGISTERED_MESSAGE,
+    ensure_user_is_not_registered,
+)
 from .student_records import StudentLookupError, lookup_student_inscription
 
 logger = logging.getLogger(__name__)
@@ -61,7 +76,7 @@ def login_view(request):
 
     if not identifier or not password:
         return JsonResponse(
-            {'ok': False, 'message': 'Debes completar el usuario y la contrasena.'},
+            {'ok': False, 'message': 'Debes completar el usuario y la contraseña.'},
             status=400,
         )
 
@@ -117,7 +132,7 @@ def student_lookup_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrio un error interno consultando la inscripcion del estudiante.',
+                'message': 'Ocurrió un error interno consultando la inscripción del estudiante.',
             },
             status=500,
         )
@@ -125,7 +140,7 @@ def student_lookup_view(request):
     return JsonResponse(
         {
             'ok': True,
-            'message': 'Registro de inscripcion localizado.',
+            'message': 'Registro de inscripción localizado.',
             'record': record,
         }
     )
@@ -143,6 +158,32 @@ def inscription_payment_link_view(request):
         )
 
     try:
+        ensure_user_is_not_registered(
+            payload.get('cedula'),
+            cod_anio_basica=payload.get('cod_anio_basica'),
+            codigo_materia=payload.get('codigo_materia'),
+            codigo_periodo=payload.get('codigo_periodo'),
+        )
+    except RegisteredUserExistsError:
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': USER_REGISTERED_MESSAGE,
+                'registered_user': {'exists': True, 'message': USER_REGISTERED_MESSAGE},
+            },
+            status=409,
+        )
+    except Exception:
+        logger.exception('Unexpected error while validating registered user from inscription flow.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrio un error interno validando si el usuario ya esta registrado.',
+            },
+            status=500,
+        )
+
+    try:
         result = create_payment_link_and_notify(payload)
     except PaymentGatewayError as exc:
         return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
@@ -156,6 +197,33 @@ def inscription_payment_link_view(request):
             status=500,
         )
 
+    try:
+        certificate_payload = build_certificate_payload(payload, result, source='inscripcion')
+        certificate_record = create_stored_certificate_record(certificate_payload)
+    except InscriptionCertificateError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while storing inscription certificate.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno generando el certificado de inscripción.',
+            },
+            status=500,
+        )
+    try:
+        certificate_email_result = send_certificate_email(
+            recipient_email=str(payload.get('email') or '').strip(),
+            recipient_name=str(payload.get('nombre') or '').strip(),
+            certificate_record=certificate_record,
+        )
+    except Exception as exc:
+        certificate_email_result = {
+            'sent': False,
+            'message': f'Certificado generado, pero no fue posible enviarlo por correo: {str(exc)}',
+            'filename': certificate_record.get('filename'),
+        }
+
     return JsonResponse(
         {
             'ok': True,
@@ -167,11 +235,60 @@ def inscription_payment_link_view(request):
             'provider_response': result.get('provider_response'),
             'official_sync': result.get('official_sync'),
             'microsoft365': result.get('microsoft365'),
+            'certificate': certificate_record,
+            'certificate_email_result': certificate_email_result,
         }
     )
 
 
+@csrf_exempt
+@require_POST
+@never_cache
+def inscription_certificate_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    try:
+        certificate_payload = _certificate_payload_from_request(payload)
+        content, filename = load_or_create_stored_certificate(certificate_payload)
+    except InscriptionCertificateError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while generating inscription certificate.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno generando el certificado de inscripción.',
+            },
+            status=500,
+        )
+
+    response = HttpResponse(content, content_type=CERTIFICATE_CONTENT_TYPE)
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _certificate_payload_from_request(payload: dict) -> dict:
+    certificate = payload.get('certificate') if isinstance(payload, dict) else None
+    token = ''
+    if isinstance(certificate, dict):
+        token = str(certificate.get('token') or '')
+    if not token and isinstance(payload, dict):
+        token = str(payload.get('certificate_token') or '')
+    if not token:
+        raise InscriptionCertificateError(
+            'Debes enviar un token de certificado generado por el sistema.'
+        )
+    return load_signed_certificate_payload(token)
+
+
 @require_GET
+@never_cache
 def inscription_generate_matricula_view(_request):
     try:
         matricula = generate_unique_numcodigo()
@@ -182,7 +299,7 @@ def inscription_generate_matricula_view(_request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrio un error interno generando la matricula unica.',
+                'message': 'Ocurrió un error interno generando la matrícula única.',
             },
             status=500,
         )
@@ -190,13 +307,14 @@ def inscription_generate_matricula_view(_request):
     return JsonResponse(
         {
             'ok': True,
-            'message': 'Matricula unica generada.',
+            'message': 'Matrícula única generada.',
             'matricula': matricula,
         }
     )
 
 
 @require_GET
+@never_cache
 def inscription_catalogs_view(_request):
     try:
         catalogs = fetch_inscription_catalogs()
@@ -213,7 +331,7 @@ def inscription_catalogs_view(_request):
     return JsonResponse(
         {
             'ok': True,
-            'message': 'Catalogos de inscripcion cargados.',
+            'message': 'Catálogos de inscripción cargados.',
             'catalogs': catalogs,
         }
     )
@@ -283,6 +401,7 @@ def microsoft365_student_license_view(_request):
 
 @require_GET
 @require_admin_session
+@never_cache
 def admin_academic_catalogs_view(_request):
     try:
         catalogs = fetch_admin_academic_catalogs()
@@ -423,7 +542,7 @@ def admin_bulk_enrollment_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrio un error interno procesando la matricula masiva.',
+                'message': 'Ocurrió un error interno procesando la matrícula masiva.',
             },
             status=500,
         )

@@ -11,7 +11,7 @@ export default function AdminPaymentsPanel() {
   const [cancelForm, setCancelForm] = useState({
     transaccion_id: '',
     plataforma_id: '',
-    motivo: 'Anulacion solicitada por administrador',
+    motivo: 'Anulación solicitada por administrador',
   })
   const [isLoadingInfo, setIsLoadingInfo] = useState(false)
   const [isLoadingCancel, setIsLoadingCancel] = useState(false)
@@ -54,7 +54,7 @@ export default function AdminPaymentsPanel() {
 
       const payload = await readResponsePayload(response)
       if (!payload) {
-        throw new Error(`El servidor devolvio una respuesta vacia (${response.status}).`)
+        throw new Error(`El servidor devolvió una respuesta vacía (${response.status}).`)
       }
       if (!response.ok || !payload.ok) {
         throw new Error(payload.message ?? `No fue posible consultar (${response.status}).`)
@@ -85,7 +85,7 @@ export default function AdminPaymentsPanel() {
 
       const payload = await readResponsePayload(response)
       if (!payload) {
-        throw new Error(`El servidor devolvio una respuesta vacia (${response.status}).`)
+        throw new Error(`El servidor devolvió una respuesta vacía (${response.status}).`)
       }
       if (!response.ok || !payload.ok) {
         throw new Error(payload.message ?? `No fue posible anular (${response.status}).`)
@@ -104,15 +104,15 @@ export default function AdminPaymentsPanel() {
       <div className="admin-section-heading">
         <div>
           <h3>Pagos</h3>
-          <p>Consulta informacion de transacciones o ejecuta anulaciones del proveedor.</p>
+          <p>Consulta información de transacciones o ejecuta anulaciones del proveedor.</p>
         </div>
       </div>
 
       <div className="payment-module-grid">
         <article className="module-card payment-module-card">
           <div>
-            <h4>Consultar transaccion All Digital</h4>
-            <p>Busca una transaccion por ID, plataforma o cliente.</p>
+            <h4>Consultar transacción All Digital</h4>
+            <p>Busca una transacción por ID, plataforma o cliente.</p>
           </div>
           <button
             type="button"
@@ -129,8 +129,8 @@ export default function AdminPaymentsPanel() {
 
         <article className="module-card payment-module-card">
           <div>
-            <h4>Anular transaccion</h4>
-            <p>Registra una solicitud de anulacion contra la pasarela.</p>
+            <h4>Anular transacción</h4>
+            <p>Registra una solicitud de anulación contra la pasarela.</p>
           </div>
           <button
             type="button"
@@ -156,8 +156,8 @@ export default function AdminPaymentsPanel() {
           >
             <div className="career-modal-header">
               <div>
-                <h4 id="payment-info-modal-title">Consultar transaccion All Digital</h4>
-                <p>Ingresa los datos disponibles para solicitar informacion al proveedor.</p>
+                <h4 id="payment-info-modal-title">Consultar transacción All Digital</h4>
+                <p>Ingresa los datos disponibles para solicitar información al proveedor.</p>
               </div>
               <button
                 type="button"
@@ -171,7 +171,7 @@ export default function AdminPaymentsPanel() {
               <form className="auth-form" onSubmit={handleInfoSubmit}>
                 <div className="lookup-grid">
                   <label className="field">
-                    <span>ID transaccion</span>
+                    <span>ID transacción</span>
                     <input
                       name="transaccion_id"
                       type="text"
@@ -197,13 +197,13 @@ export default function AdminPaymentsPanel() {
                       type="text"
                       value={queryForm.cliente}
                       onChange={handleQueryChange}
-                      placeholder="Correo, cedula o identificador"
+                      placeholder="Correo, cédula o identificador"
                     />
                   </label>
                 </div>
                 {infoError ? <p className="form-error">{infoError}</p> : null}
                 <button type="submit" className="submit-button" disabled={isLoadingInfo}>
-                  {isLoadingInfo ? 'Consultando...' : 'Obtener informacion'}
+                  {isLoadingInfo ? 'Consultando...' : 'Obtener información'}
                 </button>
               </form>
               {infoResult ? (
@@ -224,8 +224,8 @@ export default function AdminPaymentsPanel() {
           >
             <div className="career-modal-header">
               <div>
-                <h4 id="payment-cancel-modal-title">Anular transaccion</h4>
-                <p>Ingresa la referencia y el motivo para ejecutar la anulacion.</p>
+                <h4 id="payment-cancel-modal-title">Anular transacción</h4>
+                <p>Ingresa la referencia y el motivo para ejecutar la anulación.</p>
               </div>
               <button
                 type="button"

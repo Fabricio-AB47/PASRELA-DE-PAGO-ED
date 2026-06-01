@@ -4,6 +4,13 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 
 
+def parse_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
 def load_env_file(env_path: Path) -> None:
     if not env_path.exists():
         return
@@ -15,8 +22,10 @@ def load_env_file(env_path: Path) -> None:
 
         key, value = line.split('=', 1)
         key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
+        if not key:
+            continue
+
+        os.environ[key] = parse_env_value(value)
 
 
 def get_bool_env(key: str, default: bool = False) -> bool:

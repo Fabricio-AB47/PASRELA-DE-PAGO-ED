@@ -158,7 +158,7 @@ def build_intec_account_identity(
     name_parts = _resolve_name_parts(nombre=nombre, nombres=nombres, apellidos=apellidos)
     cedula_digits = re.sub(r'\D+', '', str(cedula or ''))
     if len(cedula_digits) < 4:
-        raise Microsoft365ValidationError('La cedula debe tener al menos 4 digitos para generar la contrasena temporal.')
+        raise Microsoft365ValidationError('La cédula debe tener al menos 4 dígitos para generar la contraseña temporal.')
 
     alias = _email_alias(name_parts['primer_nombre'], name_parts['primer_apellido'])
     generated_email = f'{alias}@{configured_domain}'
@@ -288,11 +288,11 @@ def _get_access_token(config: dict[str, str]) -> str:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise Microsoft365GraphError('Graph devolvio una respuesta invalida al solicitar token.') from exc
+        raise Microsoft365GraphError('Graph devolvió una respuesta inválida al solicitar token.') from exc
 
     token = str(payload.get('access_token') or '').strip()
     if not token:
-        raise Microsoft365GraphError('Graph no devolvio access_token.')
+        raise Microsoft365GraphError('Graph no devolvió access_token.')
     return token
 
 
@@ -366,7 +366,7 @@ def _fetch_subscribed_skus(config: dict[str, str], token: str) -> list[dict[str,
     )
     values = payload.get('value') if isinstance(payload, dict) else None
     if not isinstance(values, list):
-        raise Microsoft365GraphError('Graph no devolvio la lista de subscribedSkus.')
+        raise Microsoft365GraphError('Graph no devolvió la lista de subscribedSkus.')
     return values
 
 
@@ -641,7 +641,7 @@ def _graph_request(
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise Microsoft365GraphError('Microsoft Graph devolvio una respuesta JSON invalida.') from exc
+        raise Microsoft365GraphError('Microsoft Graph devolvió una respuesta JSON inválida.') from exc
 
 
 def _license_summary(license_row: dict[str, Any]) -> dict[str, Any]:

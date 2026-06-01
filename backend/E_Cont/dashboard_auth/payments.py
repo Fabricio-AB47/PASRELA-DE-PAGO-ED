@@ -49,7 +49,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
     cedula = str(payload.get('cedula') or '').strip()
     matricula = str(payload.get('matricula') or '').strip()
     monto = payload.get('monto')
-    descripcion = str(payload.get('descripcion') or 'Pago de inscripcion').strip()
+    descripcion = str(payload.get('descripcion') or 'Pago de inscripción').strip()
     data_treatment_accepted = bool(payload.get('data_treatment_accepted'))
     cod_anio_basica = str(payload.get('cod_anio_basica') or '').strip()
     codigo_materia = str(payload.get('codigo_materia') or '').strip()
@@ -58,17 +58,17 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
 
     if not data_treatment_accepted:
         raise PaymentGatewayError(
-            'No es posible completar la inscripcion sin aceptar el tratamiento de datos personales.'
+            'No es posible completar la inscripción sin aceptar el tratamiento de datos personales.'
         )
 
     if not email:
         raise PaymentGatewayError('Debes enviar el correo del estudiante para generar y enviar el pago.')
 
     if not cedula:
-        raise PaymentGatewayError('Debes registrar el numero de cedula para completar la inscripcion.')
+        raise PaymentGatewayError('Debes registrar el número de cédula para completar la inscripción.')
 
     if not re.fullmatch(r'\d{6,20}', cedula):
-        raise PaymentGatewayError('La cedula debe contener solo numeros (entre 6 y 20 digitos).')
+        raise PaymentGatewayError('La cédula debe contener solo números (entre 6 y 20 dígitos).')
 
     if not cod_anio_basica:
         raise PaymentGatewayError('Debes seleccionar la carrera (Cod_AnioBasica) para registrar el curso.')
@@ -77,11 +77,11 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         raise PaymentGatewayError('Debes seleccionar el curso a seguir antes de continuar.')
 
     if not codigo_periodo:
-        raise PaymentGatewayError('Debes seleccionar el periodo para continuar con la inscripcion.')
+        raise PaymentGatewayError('Debes seleccionar el período para continuar con la inscripción.')
 
     if estado_periodo and estado_periodo != 'activo':
         raise PaymentGatewayError(
-            'El periodo seleccionado esta inactivo. Debes elegir un periodo con estado Activo.'
+            'El período seleccionado está inactivo. Debes elegir un período con estado Activo.'
         )
 
     if not matricula:
@@ -97,8 +97,8 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
 
     if _cabecera_has_numcodigo(matricula):
         raise PaymentGatewayError(
-            'El numero de matricula generado ya existe en CABECERA_MATRICULA. '
-            'Solicita un nuevo numero para continuar.'
+            'El número de matrícula generado ya existe en CABECERA_MATRICULA. '
+            'Solicita un nuevo número para continuar.'
         )
 
     _ensure_inscription_registry_table()
@@ -134,7 +134,13 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         descripcion=descripcion,
         payment_link='PENDIENTE',
     )
-    official_sync_result: dict[str, Any] = {'ok': True, 'message': 'Sincronizacion oficial completada.'}
+    matricula = _payment_email_matricula_label(official_record, matricula)
+    _update_inscription_request_matricula(inscription_id, matricula)
+    official_sync_result: dict[str, Any] = {
+        'ok': True,
+        'message': 'Sincronización oficial completada.',
+        'record': official_record,
+    }
     microsoft365_result: dict[str, Any] = {'ok': False, 'message': 'No ejecutado.'}
     welcome_email_result: dict[str, Any] = {'sent': False, 'message': 'No ejecutado.'}
     try:
@@ -184,17 +190,6 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
             'ok': False,
             'message': str(exc),
         }
-        _update_inscription_request_result(
-            inscription_id=inscription_id,
-            payment_link='ERROR_MICROSOFT365',
-            provider_response={
-                'status': 'error',
-                'source': 'microsoft365',
-                'message': str(exc),
-                'official_sync': official_sync_result,
-            },
-        )
-        raise PaymentGatewayError(f'No fue posible crear el usuario Microsoft 365: {str(exc)}') from exc
 
     provider_payload = _build_alldigital_payload(
         raw_payload=payload,
@@ -224,7 +219,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
             provider_response=provider_response,
         )
         raise PaymentGatewayError(
-            'La pasarela no devolvio una direccion de pago utilizable. '
+            'La pasarela no devolvió una dirección de pago utilizable. '
             'Revisa la respuesta del proveedor.'
         )
 
@@ -235,7 +230,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
             recipient_email=email,
             recipient_name=nombre,
             payment_link=payment_link,
-            matricula=matricula,
+            matricula=_payment_email_matricula_label(official_record, matricula),
             monto=monto,
             receipt_email=receipt_email,
         )
@@ -243,7 +238,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         email_result = {
             'sent': False,
             'message': (
-                'Se genero el enlace de pago, pero no fue posible enviar el correo: '
+                'Se generó el enlace de pago, pero no fue posible enviar el correo: '
                 f'{str(exc)}'
             ),
         }
@@ -259,7 +254,8 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             official_sync_result = {
                 'ok': False,
-                'message': f'Enlace generado, pero no se actualizo referencia oficial: {str(exc)}',
+                'message': f'Enlace generado, pero no se actualizó referencia oficial: {str(exc)}',
+                'record': official_record,
             }
 
     _update_inscription_request_result(
@@ -295,20 +291,20 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
     cedula = str(payload.get('cedula') or '').strip()
     matricula = str(payload.get('matricula') or '').strip()
     monto = '0.00'
-    descripcion = str(payload.get('descripcion') or 'Matricula masiva').strip()
+    descripcion = str(payload.get('descripcion') or 'Matrícula masiva').strip()
     cod_anio_basica = str(payload.get('cod_anio_basica') or '').strip()
     codigo_materia = str(payload.get('codigo_materia') or '').strip()
     codigo_periodo = str(payload.get('codigo_periodo') or '').strip()
     estado_periodo = str(payload.get('estado_periodo') or '').strip().lower()
 
     if not email:
-        raise PaymentGatewayError('Debes enviar el correo del estudiante para completar la matricula masiva.')
+        raise PaymentGatewayError('Debes enviar el correo del estudiante para completar la matrícula masiva.')
 
     if not cedula:
-        raise PaymentGatewayError('Debes registrar el numero de cedula para completar la matricula masiva.')
+        raise PaymentGatewayError('Debes registrar el número de cédula para completar la matrícula masiva.')
 
     if not re.fullmatch(r'\d{6,20}', cedula):
-        raise PaymentGatewayError('La cedula debe contener solo numeros (entre 6 y 20 digitos).')
+        raise PaymentGatewayError('La cédula debe contener solo números (entre 6 y 20 dígitos).')
 
     if not cod_anio_basica:
         raise PaymentGatewayError('Debes seleccionar la carrera (Cod_AnioBasica) para registrar el curso.')
@@ -317,18 +313,18 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
         raise PaymentGatewayError('Debes seleccionar el curso antes de continuar.')
 
     if not codigo_periodo:
-        raise PaymentGatewayError('Debes seleccionar el periodo para continuar con la matricula masiva.')
+        raise PaymentGatewayError('Debes seleccionar el período para continuar con la matrícula masiva.')
 
     if estado_periodo and estado_periodo != 'activo':
-        raise PaymentGatewayError('El periodo seleccionado esta inactivo. Debes elegir un periodo con estado Activo.')
+        raise PaymentGatewayError('El período seleccionado está inactivo. Debes elegir un período con estado Activo.')
 
     if not matricula:
         matricula = generate_unique_numcodigo()
 
     if _cabecera_has_numcodigo(matricula):
         raise PaymentGatewayError(
-            'El numero de matricula generado ya existe en CABECERA_MATRICULA. '
-            'Solicita un nuevo numero para continuar.'
+            'El número de matrícula generado ya existe en CABECERA_MATRICULA. '
+            'Solicita un nuevo número para continuar.'
         )
 
     descripcion = _compose_mass_matriculation_description(payload, descripcion)
@@ -358,6 +354,7 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
         payment_link='',
         create_payment_record=False,
     )
+    matricula = _payment_email_matricula_label(official_record, matricula)
 
     microsoft365_result: dict[str, Any] = {'ok': False, 'message': 'No ejecutado.'}
     welcome_email_result: dict[str, Any] = {'sent': False, 'message': 'No ejecutado.'}
@@ -420,11 +417,11 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
         'payment_link': '',
         'receipt_email': '',
         'provider_response': provider_response,
-        'email_result': {'sent': False, 'message': 'No aplica para matricula masiva.'},
+        'email_result': {'sent': False, 'message': 'No aplica para matrícula masiva.'},
         'welcome_email_result': welcome_email_result,
         'official_sync': {
             'ok': True,
-            'message': 'Matricula oficial registrada.',
+            'message': 'Matrícula oficial registrada.',
             'record': official_record,
         },
         'microsoft365': microsoft365_result,
@@ -432,13 +429,15 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
 
 
 def generate_unique_numcodigo(length: int = 5, max_attempts: int = 200) -> str:
+    min_value = 10 ** (length - 1) if length > 1 else 0
+    value_range = (10 ** length) - min_value
     for _ in range(max_attempts):
-        number = secrets.randbelow(10 ** length)
-        candidate = f'{number:0{length}d}'
+        number = min_value + secrets.randbelow(value_range)
+        candidate = str(number)
         if not _cabecera_has_numcodigo(candidate):
             return candidate
     raise PaymentGatewayError(
-        'No fue posible generar un numero de matricula unico. Intenta nuevamente.'
+        'No fue posible generar un número de matrícula único. Intenta nuevamente.'
     )
 
 
@@ -682,10 +681,10 @@ def _compose_course_payment_description(raw_payload: dict[str, Any], fallback: s
     course_name = _remove_numbers_and_trim(course_name)
 
     if course_name:
-        return f'Pago de inscripcion del curso {course_name}'
+        return f'Pago de inscripción del curso {course_name}'
 
     clean_fallback = str(fallback or '').strip()
-    return clean_fallback or 'Pago de inscripcion'
+    return clean_fallback or 'Pago de inscripción'
 
 
 def _compose_mass_matriculation_description(raw_payload: dict[str, Any], fallback: str) -> str:
@@ -701,10 +700,10 @@ def _compose_mass_matriculation_description(raw_payload: dict[str, Any], fallbac
     course_name = _remove_numbers_and_trim(course_name)
 
     if course_name:
-        return f'Matricula masiva del curso {course_name}'
+        return f'Matrícula masiva del curso {course_name}'
 
     clean_fallback = str(fallback or '').strip()
-    return clean_fallback or 'Matricula masiva'
+    return clean_fallback or 'Matrícula masiva'
 
 
 def _resolve_welcome_course_name(raw_payload: dict[str, Any]) -> str:
@@ -923,7 +922,7 @@ def _register_inscription_request(
             row = cursor.fetchone()
             if row and row[0]:
                 return int(row[0])
-            raise PaymentGatewayError('No fue posible confirmar el registro de inscripcion en la base de datos.')
+            raise PaymentGatewayError('No fue posible confirmar el registro de inscripción en la base de datos.')
     except IntegrityError:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -940,7 +939,7 @@ def _register_inscription_request(
             row = cursor.fetchone()
             if row and row[0]:
                 return int(row[0])
-        raise PaymentGatewayError('No fue posible reutilizar la solicitud de inscripcion existente.')
+        raise PaymentGatewayError('No fue posible reutilizar la solicitud de inscripción existente.')
 
 
 def _update_inscription_request_result(
@@ -958,6 +957,22 @@ def _update_inscription_request_result(
             WHERE Id = %s
             """,
             [payment_link, serialized_provider_response, inscription_id],
+        )
+
+
+def _update_inscription_request_matricula(inscription_id: int, matricula: str) -> None:
+    clean_matricula = str(matricula or '').strip()
+    if not inscription_id or not clean_matricula:
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE dbo.INSCRIPCION_SOLICITUD_PAGO
+            SET Matricula = %s
+            WHERE Id = %s
+            """,
+            [clean_matricula, inscription_id],
         )
 
 
@@ -1017,8 +1032,11 @@ def _upsert_official_inscription_records(
             codigo_periodo=codigo_periodo,
         )
         if existing_materia:
+            existing_numcodigo = str(existing_materia.get('numcodigo') or '').strip()
             return {
                 'codigo_estud': str(codigo_estud),
+                'matricula': existing_numcodigo,
+                'numcodigo': existing_numcodigo,
                 'num_matricula': str(_safe_int(existing_materia.get('Num_Matricula'), default=0)),
                 'num_reg_pago': str(_safe_int(existing_materia.get('Num'), default=0)),
                 'already_enrolled': '1',
@@ -1049,11 +1067,19 @@ def _upsert_official_inscription_records(
             codigo_estud=codigo_estud,
             cod_anio_basica=cod_anio_basica,
             codigo_periodo=codigo_periodo,
+            numcodigo=matricula,
             num_matricula=num_matricula,
             valor=valor_decimal,
             payment_link=payment_link,
             template=cabecera_template,
         )
+        cabecera_record = _get_cabecera_matricula_record(
+            codigo_estud=codigo_estud,
+            cod_anio_basica=cod_anio_basica,
+            codigo_periodo=codigo_periodo,
+            num_matricula=num_matricula,
+        )
+        resolved_numcodigo = str((cabecera_record or {}).get('numcodigo') or matricula).strip()
 
         _insert_carreraxestud(
             codigo_estud=codigo_estud,
@@ -1076,6 +1102,8 @@ def _upsert_official_inscription_records(
 
         return {
             'codigo_estud': str(codigo_estud),
+            'matricula': resolved_numcodigo,
+            'numcodigo': resolved_numcodigo,
             'num_matricula': str(num_matricula),
             'num_reg_pago': str(num_reg_pago) if create_payment_record else '',
             'payment_record_created': '1' if create_payment_record else '0',
@@ -1341,8 +1369,14 @@ def _get_existing_official_materia(
     query = """
         SELECT TOP (1)
             cx.Num_Matricula,
+            cm.numcodigo,
             rp.Num
         FROM dbo.CARRERAXESTUD cx
+        LEFT JOIN dbo.CABECERA_MATRICULA cm
+          ON CAST(cm.codigo_estud AS varchar(50)) = CAST(cx.codigo_estud AS varchar(50))
+         AND CAST(cm.cod_anio_Basica AS varchar(20)) = CAST(cx.cod_anio_Basica AS varchar(20))
+         AND CAST(cm.codigo_periodo AS varchar(20)) = CAST(cx.codigo_periodo AS varchar(20))
+         AND CAST(cm.Num_Matricula AS varchar(20)) = CAST(cx.Num_Matricula AS varchar(20))
         LEFT JOIN dbo.REGISTROPAGOS rp
           ON CAST(rp.Codestu AS varchar(50)) = CAST(cx.codigo_estud AS varchar(50))
          AND CAST(rp.cod_anio_Basica AS varchar(20)) = CAST(cx.cod_anio_Basica AS varchar(20))
@@ -1421,7 +1455,7 @@ def _get_pensum_subject_template(cod_anio_basica: str, codigo_materia: str) -> d
         )
     if not is_catalog_value_active(row.get('estado_materia'), default=True):
         raise PaymentGatewayError(
-            'La materia seleccionada esta inactiva en PENSUM y no puede matricularse.'
+            'La materia seleccionada está inactiva en PENSUM y no puede matricularse.'
         )
 
     credits = _to_decimal(row.get('creditos'))
@@ -1527,23 +1561,28 @@ def _insert_cabecera_matricula(
     codigo_estud: str,
     cod_anio_basica: str,
     codigo_periodo: str,
+    numcodigo: str,
     num_matricula: int,
     valor: Decimal,
     payment_link: str,
     template: dict[str, Any],
 ) -> None:
     with connection.cursor() as cursor:
+        numcodigo_column = _resolve_numcodigo_column(cursor)
+        insert_numcodigo = not _cabecera_numcodigo_is_identity(cursor, numcodigo_column)
+        numcodigo_column_sql = f'                    [{numcodigo_column}],\n' if insert_numcodigo else ''
+        numcodigo_value_sql = ', %s' if insert_numcodigo else ''
         try:
             # Bypass broken trigger scope on CABECERA_MATRICULA while keeping insert transactional.
             cursor.execute("EXEC sys.sp_set_session_context @key = N'SYNC_ESTADO_TRIGGER', @value = 1")
             cursor.execute(
-                """
+                f"""
                 INSERT INTO dbo.CABECERA_MATRICULA (
                     codigo_estud,
                     cod_anio_Basica,
                     codigo_periodo,
                     Num_Matricula,
-                    fecha_pago,
+{numcodigo_column_sql}                    fecha_pago,
                     valor,
                     InscripValor,
                     MatriValor,
@@ -1556,13 +1595,14 @@ def _insert_cabecera_matricula(
                     Jornada,
                     linkUrl
                 )
-                VALUES (%s, %s, %s, %s, GETDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s{numcodigo_value_sql}, GETDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 [
                     codigo_estud,
                     _safe_int(cod_anio_basica, default=0),
                     _safe_int(codigo_periodo, default=0),
                     num_matricula,
+                    *([_safe_int(numcodigo, default=0)] if insert_numcodigo else []),
                     valor,
                     _to_decimal(template.get('InscripValor')),
                     _to_decimal(template.get('MatriValor')),
@@ -1578,6 +1618,35 @@ def _insert_cabecera_matricula(
             )
         finally:
             cursor.execute("EXEC sys.sp_set_session_context @key = N'SYNC_ESTADO_TRIGGER', @value = NULL")
+
+
+def _get_cabecera_matricula_record(
+    codigo_estud: str,
+    cod_anio_basica: str,
+    codigo_periodo: str,
+    num_matricula: int,
+) -> dict[str, Any] | None:
+    with connection.cursor() as cursor:
+        numcodigo_column = _resolve_numcodigo_column(cursor)
+        cursor.execute(
+            f"""
+            SELECT TOP (1)
+                CAST([{numcodigo_column}] AS varchar(50)) AS numcodigo,
+                Num_Matricula
+            FROM dbo.CABECERA_MATRICULA
+            WHERE CAST(codigo_estud AS varchar(50)) = %s
+              AND CAST(cod_anio_Basica AS varchar(20)) = %s
+              AND CAST(codigo_periodo AS varchar(20)) = %s
+              AND CAST(Num_Matricula AS varchar(20)) = %s
+            ORDER BY fecha_pago DESC
+            """,
+            [str(codigo_estud), str(cod_anio_basica), str(codigo_periodo), str(num_matricula)],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [col[0] for col in cursor.description]
+        return {columns[idx]: row[idx] for idx in range(len(columns))}
 
 
 def _insert_carreraxestud(
@@ -1709,6 +1778,20 @@ def _resolve_numcodigo_column(cursor: Any) -> str:
     return 'numcodigo'
 
 
+def _cabecera_numcodigo_is_identity(cursor: Any, column_name: str) -> bool:
+    cursor.execute(
+        """
+        SELECT CONVERT(int, c.is_identity)
+        FROM sys.columns c
+        WHERE c.object_id = OBJECT_ID('dbo.CABECERA_MATRICULA')
+          AND c.name = %s
+        """,
+        [column_name],
+    )
+    row = cursor.fetchone()
+    return bool(row and row[0])
+
+
 def _resolve_monto_from_pensum(cod_anio_basica: str, codigo_materia: str) -> Decimal | None:
     status_column = get_pensum_status_column()
     if status_column:
@@ -1751,6 +1834,15 @@ def _to_decimal(value: Any) -> Decimal:
         return Decimal('0')
 
 
+def _payment_email_matricula_label(official_record: dict[str, Any] | None, fallback: Any) -> str:
+    if isinstance(official_record, dict):
+        for key in ('numcodigo', 'matricula'):
+            value = str(official_record.get(key) or '').strip()
+            if value and value != '0':
+                return value
+    return str(fallback or '').strip()
+
+
 def _send_payment_link_email(
     recipient_email: str,
     recipient_name: str,
@@ -1781,9 +1873,9 @@ def _send_payment_link_email(
     if receipt_email:
         receipt_message = f"""
                 <p style="margin:0 0 18px 0;font-size:14px;line-height:1.6;color:#374151;">
-                  Luego de realizar el pago, envia el comprobante al correo
+                  Luego de realizar el pago, envía el comprobante al correo
                   <a href="{safe_receipt_mailto}" style="color:#9B0E0E;text-decoration:underline;">{safe_receipt_email}</a>
-                  indicando tu nombre completo y matricula.
+                  indicando tu nombre completo y matrícula.
                 </p>
 """.rstrip()
 
@@ -1797,20 +1889,20 @@ def _send_payment_link_email(
             {logo_html}
             <tr>
               <td style="background:#9B0E0E;padding:20px 28px;color:#ffffff;">
-                <h2 style="margin:0;font-size:22px;font-weight:700;">Pago de inscripcion</h2>
+                <h2 style="margin:0;font-size:22px;font-weight:700;">Pago de inscripción</h2>
               </td>
             </tr>
             <tr>
               <td style="padding:26px 28px;color:#111827;">
                 <p style="margin:0 0 12px 0;font-size:16px;">Hola {safe_recipient_label},</p>
-                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Hemos generado tu enlace para completar el pago de inscripcion.</p>
+                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Hemos generado tu enlace para completar el pago de inscripción.</p>
 
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 18px 0;border:1px solid #e5e7eb;border-radius:10px;">
                   <tr>
-                    <td style="padding:14px 16px;font-size:14px;color:#111827;"><strong>Matricula:</strong> {safe_matricula}</td>
+                    <td style="padding:14px 16px;font-size:14px;color:#111827;"><strong>Matrícula:</strong> {safe_matricula}</td>
                   </tr>
                   <tr>
-                    <td style="padding:14px 16px;border-top:1px solid #e5e7eb;font-size:16px;color:#111827;"><strong>Valor a cancelar:</strong> RD$ {safe_monto}</td>
+                    <td style="padding:14px 16px;border-top:1px solid #e5e7eb;font-size:16px;color:#111827;"><strong>Valor a cancelar:</strong> $ {safe_monto}</td>
                   </tr>
                 </table>
 
@@ -1820,7 +1912,7 @@ def _send_payment_link_email(
 
 {receipt_message}
 
-                <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;">Si el boton no funciona, copia y pega este enlace en tu navegador:</p>
+                <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;">Si el botón no funciona, copia y pega este enlace en tu navegador:</p>
                 <p style="margin:0;font-size:13px;word-break:break-all;color:#9B0E0E;">{safe_payment_link}</p>
               </td>
             </tr>
@@ -1834,7 +1926,7 @@ def _send_payment_link_email(
 
     mail_payload = {
         'message': {
-            'subject': 'Enlace de pago de inscripcion',
+            'subject': 'Enlace de pago de inscripción',
             'body': {
                 'contentType': 'HTML',
                 'content': html_content,
@@ -1900,7 +1992,7 @@ def _send_intec_welcome_email(
             <tr>
               <td style="padding:26px 28px;color:#111827;">
                 <p style="margin:0 0 12px 0;font-size:16px;">Hola {safe_recipient_label},</p>
-                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Te damos la bienvenida al Instituto Superior Tecnologico de Tecnicas Empresariales y del Conocimiento INTEC. Has sido matriculado en el curso <strong>{safe_course_name}</strong>, en el cual continuaras con tu preparacion profesional para lograr tu exito.</p>
+                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Te damos la bienvenida al Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento INTEC. Has sido matriculado en el curso <strong>{safe_course_name}</strong>, en el cual continuarás con tu preparación profesional para lograr tu éxito.</p>
                 <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Tu cuenta institucional ha sido creada correctamente.</p>
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 18px 0;border:1px solid #e5e7eb;border-radius:10px;">
                   <tr>
@@ -2009,7 +2101,7 @@ def _send_graph_mail(mail_payload: dict[str, Any]) -> None:
             raise PaymentGatewayError(
                 'Microsoft Graph denego el envio de correo. La aplicacion debe tener '
                 'el permiso Application Mail.Send con Grant admin consent, y el remitente '
-                f'{sender_identity} debe ser un buzon valido con permiso para enviar. '
+                f'{sender_identity} debe ser un buzón válido con permiso para enviar. '
                 f'Diagnostico seguro: tenant_source={tenant_source}, client_source={client_source}.'
             ) from exc
         raise
@@ -2078,11 +2170,11 @@ def _get_graph_access_token(tenant_id: str, client_id: str, client_secret: str) 
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise PaymentGatewayError('Graph devolvio una respuesta invalida al solicitar token.') from exc
+        raise PaymentGatewayError('Graph devolvió una respuesta inválida al solicitar token.') from exc
 
     token = str(payload.get('access_token') or '').strip()
     if not token:
-        raise PaymentGatewayError('Graph no devolvio access_token para envio de correo.')
+        raise PaymentGatewayError('Graph no devolvió access_token para envío de correo.')
     return token
 
 
@@ -2173,7 +2265,7 @@ def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str], expec
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise PaymentGatewayError('El proveedor devolvio una respuesta no JSON.') from exc
+        raise PaymentGatewayError('El proveedor devolvió una respuesta no JSON.') from exc
 
     if isinstance(parsed, dict):
         return parsed

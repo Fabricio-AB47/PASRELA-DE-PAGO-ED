@@ -347,7 +347,7 @@ export default function AdminAcademicPanel() {
         <div className="module-card-header">
           <div>
             <h3>Administrar carreras y pensum</h3>
-            <p>Activa carreras, registra materias del pensum y controla que solo lo activo aparezca en inscripcion.</p>
+            <p>Activa carreras, registra materias del pensum y controla que solo lo activo aparezca en inscripción.</p>
           </div>
           <div className="academic-action-bar">
             <button

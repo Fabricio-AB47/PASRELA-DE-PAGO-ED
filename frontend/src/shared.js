@@ -32,7 +32,30 @@ export async function readResponsePayload(response) {
   } catch {
     return {
       ok: false,
-      message: `El servidor devolvio una respuesta invalida (${response.status}).`,
+      message: `El servidor devolvió una respuesta inválida (${response.status}).`,
     }
   }
+}
+
+export function filenameFromContentDisposition(response, fallbackName) {
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1].replace(/["']/g, ''))
+  }
+
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i)
+  return plainMatch?.[1] || fallbackName
+}
+
+export async function downloadBlobResponse(response, fallbackName) {
+  const blob = await response.blob()
+  const downloadUrl = window.URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = downloadUrl
+  anchor.download = filenameFromContentDisposition(response, fallbackName)
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.URL.revokeObjectURL(downloadUrl)
 }

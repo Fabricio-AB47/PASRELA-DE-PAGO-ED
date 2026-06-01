@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { readResponsePayload } from '../shared.js'
+import { downloadBlobResponse, readResponsePayload } from '../shared.js'
 import { adminFetch } from './api.js'
 
 const FIXED_COD_ANIO_BASICA = '13'
@@ -42,6 +42,7 @@ export default function AdminBulkEnrollmentPanel() {
   const [isLoadingCatalogs, setIsLoadingCatalogs] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false)
+  const [downloadingCertificateKey, setDownloadingCertificateKey] = useState('')
   const [bulkError, setBulkError] = useState('')
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkResult, setBulkResult] = useState(null)
@@ -55,7 +56,7 @@ export default function AdminBulkEnrollmentPanel() {
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok || !payload.catalogs) {
-          throw new Error(payload?.message ?? `No fue posible cargar catalogos (${response.status}).`)
+          throw new Error(payload?.message ?? `No fue posible cargar catálogos (${response.status}).`)
         }
 
         if (!isMounted) {
@@ -157,19 +158,51 @@ export default function AdminBulkEnrollmentPanel() {
         throw new Error(payload?.message ?? `No fue posible descargar la plantilla (${response.status}).`)
       }
 
-      const blob = await response.blob()
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = downloadUrl
-      anchor.download = 'plantilla_matricula_masiva.xlsx'
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-      window.URL.revokeObjectURL(downloadUrl)
+      await downloadBlobResponse(response, 'plantilla_matricula_masiva.xlsx')
     } catch (error) {
       setBulkError(error.message)
     } finally {
       setIsDownloadingTemplate(false)
+    }
+  }
+
+  async function handleCertificateDownload(item) {
+    const certificateToken = item?.certificate?.token
+    const certificateKey = `${item?.fila || ''}-${item?.cedula || ''}-${item?.email || ''}`
+    if (!certificateToken) {
+      setBulkError('No hay datos de certificado para este registro.')
+      return
+    }
+
+    setDownloadingCertificateKey(certificateKey)
+    setBulkError('')
+
+    try {
+      const response = await adminFetch('/api/auth/inscription/certificate/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          certificate: {
+            token: certificateToken,
+          },
+        }),
+      })
+
+      if (!response.ok) {
+        const payload = await readResponsePayload(response)
+        throw new Error(payload?.message ?? `No fue posible generar el certificado (${response.status}).`)
+      }
+
+      await downloadBlobResponse(
+        response,
+        item?.certificate?.filename || `certificado_inscripcion_${item?.matricula || item?.cedula || 'registro'}.pdf`,
+      )
+    } catch (error) {
+      setBulkError(error.message)
+    } finally {
+      setDownloadingCertificateKey('')
     }
   }
 
@@ -223,7 +256,7 @@ export default function AdminBulkEnrollmentPanel() {
     <section id="admin-bulk-enrollment" className="admin-bulk-enrollment">
       <div className="admin-section-heading">
         <div>
-          <h3>Matricula masiva</h3>
+          <h3>Matrícula masiva</h3>
           <p>Sube un Excel y aplica la misma carrera, curso y periodo a todos los registros.</p>
         </div>
       </div>
@@ -287,7 +320,7 @@ export default function AdminBulkEnrollmentPanel() {
 
             <div className="bulk-status-note">
               <strong>Sin cargo de pago</strong>
-              <span>Esta carga solo matricula, crea credenciales y envia la bienvenida.</span>
+              <span>Esta carga solo matrícula, crea credenciales y envía la bienvenida.</span>
             </div>
           </div>
 
@@ -315,8 +348,8 @@ export default function AdminBulkEnrollmentPanel() {
               <div className="bulk-upload-help">
                 <strong>Columnas aceptadas</strong>
                 <p>
-                  Nombres, Apellidos, Cedula, Correo, Numero de celular, Ocupacion,
-                  Empresa. Localidad y Direccion son opcionales.
+                  Nombres, Apellidos, Cédula, Correo, Número de celular, Ocupación,
+                  Empresa. Localidad y Dirección son opcionales.
                 </p>
               </div>
             </section>
@@ -330,7 +363,7 @@ export default function AdminBulkEnrollmentPanel() {
             className="submit-button"
             disabled={isSubmitting || isLoadingCatalogs}
           >
-            {isSubmitting ? 'Procesando matricula masiva...' : 'Procesar matricula masiva'}
+            {isSubmitting ? 'Procesando matrícula masiva...' : 'Procesar matrícula masiva'}
           </button>
         </form>
       </article>
@@ -358,27 +391,47 @@ export default function AdminBulkEnrollmentPanel() {
                 <tr>
                   <th>Fila</th>
                   <th>Estudiante</th>
-                  <th>Cedula</th>
+                  <th>Cédula</th>
                   <th>Correo</th>
-                  <th>Matricula</th>
+                  <th>Matrícula</th>
                   <th>Materia</th>
                   <th>Bienvenida</th>
+                  <th>Correo cert.</th>
+                  <th>Certificado</th>
                   <th>Estado</th>
                 </tr>
               </thead>
               <tbody>
-                {(bulkResult.results || []).map((item) => (
-                  <tr key={`${item.fila}-${item.cedula}-${item.email}`}>
-                    <td>{item.fila}</td>
-                    <td>{item.nombre}</td>
-                    <td>{item.cedula}</td>
-                    <td>{item.email}</td>
-                    <td>{item.matricula || '-'}</td>
-                    <td>{item.materia || item.codigo_materia || '-'}</td>
-                    <td>{item.ok ? (item.welcome_email_sent ? 'Enviada' : 'Pendiente') : '-'}</td>
-                    <td>{item.ok ? item.message || 'Procesado' : item.message}</td>
-                  </tr>
-                ))}
+                {(bulkResult.results || []).map((item) => {
+                  const certificateKey = `${item.fila}-${item.cedula}-${item.email}`
+                  return (
+                    <tr key={certificateKey}>
+                      <td>{item.fila}</td>
+                      <td>{item.nombre}</td>
+                      <td>{item.cedula}</td>
+                      <td>{item.email}</td>
+                      <td>{item.matricula || '-'}</td>
+                      <td>{item.materia || item.codigo_materia || '-'}</td>
+                      <td>{item.ok ? (item.welcome_email_sent ? 'Enviada' : 'Pendiente') : '-'}</td>
+                      <td>{item.ok ? (item.certificate_email_sent ? 'Enviado' : 'Pendiente') : '-'}</td>
+                      <td>
+                        {item.ok && item.certificate ? (
+                          <button
+                            type="button"
+                            className="ghost-button compact-button table-action-button"
+                            onClick={() => handleCertificateDownload(item)}
+                            disabled={downloadingCertificateKey === certificateKey}
+                          >
+                            {downloadingCertificateKey === certificateKey ? 'Generando...' : 'Descargar'}
+                          </button>
+                        ) : (
+                          '-'
+                        )}
+                      </td>
+                      <td>{item.ok ? item.message || 'Procesado' : item.message}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

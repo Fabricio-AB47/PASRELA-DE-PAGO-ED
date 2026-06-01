@@ -246,3 +246,100 @@ OSError: [Errno 22] Invalid argument
 OSError: [Errno 22] Invalid argument
 2026-05-21 15:46:20.320356: Running on_exit tasks
 2026-05-21 15:46:20.328444: wfastcgi.py 3.0.0 closed
+2026-05-21 19:15:37.093644: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-21 19:15:37.103174: wfastcgi.py 3.0.0 initialized
+2026-05-21 19:15:37.103189: wfastcgi.py 3.0.0 initialized
+2026-05-21 19:20:51.577962: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-05-21 19:20:51.587826: Running on_exit tasks
+2026-05-21 19:20:51.596230: wfastcgi.py 3.0.0 closed
+2026-05-21 19:20:51.619481: Running on_exit tasks
+2026-05-21 19:20:51.626386: wfastcgi.py 3.0.0 closed
+2026-05-21 23:15:39.365407: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-21 23:15:39.365426: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-21 23:15:39.373818: wfastcgi.py 3.0.0 initialized
+2026-05-21 23:20:53.573084: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-05-21 23:20:53.583231: Running on_exit tasks
+2026-05-21 23:20:53.583230: Running on_exit tasks
+2026-05-21 23:20:53.591602: wfastcgi.py 3.0.0 closed
+2026-05-22 00:42:04.622024: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 00:42:04.622041: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 00:42:04.631172: wfastcgi.py 3.0.0 initialized
+2026-05-22 00:42:04.631190: wfastcgi.py 3.0.0 initialized
+2026-05-22 00:47:19.046419: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-05-22 00:47:19.055500: Running on_exit tasks
+2026-05-22 00:47:19.063495: wfastcgi.py 3.0.0 closed
+2026-05-22 00:47:19.063658: wfastcgi.py 3.0.0 closed
+2026-05-22 01:25:20.392665: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 01:25:20.400233: wfastcgi.py 3.0.0 initialized
+2026-05-22 01:25:20.400293: wfastcgi.py 3.0.0 initialized
+2026-05-22 01:30:34.828908: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-05-22 01:30:34.837860: Running on_exit tasks
+2026-05-22 01:30:34.844686: wfastcgi.py 3.0.0 closed
+2026-05-22 07:13:57.650879: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 07:13:57.650908: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 07:13:57.659389: wfastcgi.py 3.0.0 initialized
+2026-05-22 07:19:11.902827: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-05-22 07:19:11.912347: Running on_exit tasks
+2026-05-22 07:19:11.912445: Running on_exit tasks
+2026-05-22 07:19:11.919403: wfastcgi.py 3.0.0 closed
+2026-05-22 12:17:28.442300: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 12:17:28.451474: wfastcgi.py 3.0.0 initialized
+2026-05-22 12:17:33.016145: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 12:17:33.023586: wfastcgi.py 3.0.0 initialized
+2026-05-22 12:17:43.046714: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 12:17:43.054249: wfastcgi.py 3.0.0 initialized
+2026-05-22 12:27:37.391990: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-05-22 12:27:37.402138: Running on_exit tasks
+2026-05-22 12:27:37.411723: wfastcgi.py 3.0.0 closed
+2026-05-22 12:27:48.741138: wfastcgi.py exiting because E_Cont\E_Cont\settings.py has changed, matching .*((\.py)|(\.config))$
+2026-05-22 12:27:48.763191: Running on_exit tasks
+2026-05-22 12:29:22.166918: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 12:29:22.174696: wfastcgi.py 3.0.0 initialized
+2026-05-22 12:29:22.174735: wfastcgi.py 3.0.0 initialized
+2026-05-22 12:34:36.554249: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-05-22 12:34:36.565108: Running on_exit tasks
+2026-05-22 12:34:36.565751: Running on_exit tasks
+2026-05-22 12:34:36.574791: wfastcgi.py 3.0.0 closed
+2026-05-22 12:34:36.587342: wfastcgi.py 3.0.0 closed
+2026-05-22 12:34:49.641026: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 12:34:49.653480: wfastcgi.py 3.0.0 initialized
+2026-05-22 12:35:27.029243: wfastcgi.py exiting because E_Cont\dashboard_auth\views.py has changed, matching .*((\.py)|(\.config))$
+2026-05-22 12:35:27.045778: Running on_exit tasks
+2026-05-22 12:36:14.914477: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-05-22 12:36:14.924000: wfastcgi.py 3.0.0 initialized
+2026-05-22 12:36:14.924022: wfastcgi.py 3.0.0 initialized

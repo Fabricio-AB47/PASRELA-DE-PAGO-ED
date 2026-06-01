@@ -34,7 +34,7 @@ function LoginPage() {
       const payload = await readResponsePayload(response)
 
       if (!payload) {
-        throw new Error(`El servidor devolvio una respuesta vacia (${response.status}).`)
+        throw new Error(`El servidor devolvió una respuesta vacía (${response.status}).`)
       }
 
       if (!response.ok || !payload.ok) {
@@ -70,7 +70,7 @@ function LoginPage() {
             <span className="eyebrow">Acceso protegido</span>
             <h1>Ingreso exclusivo para dashboard administrativo, docente y estudiantil.</h1>
             <p>
-              Esta pagina es independiente del formulario publico de inscripcion y se
+              Esta página es independiente del formulario público de inscripción y se
               usa solo para entrar al dashboard autenticado.
             </p>
           </div>
@@ -91,17 +91,17 @@ function LoginPage() {
           </div>
 
           <span className="eyebrow">Login dashboard</span>
-          <h2>Iniciar sesion</h2>
+          <h2>Iniciar sesión</h2>
           <p className="auth-intro">
-            El sistema detecta automaticamente si tu acceso corresponde a estudiante,
+            El sistema detecta automáticamente si tu acceso corresponde a estudiante,
             docente o administrativo.
           </p>
           <p className="auto-detection-note">
-            Si buscas consultar una inscripcion, usa la pagina publica separada.
+            Si buscas consultar una inscripción, usa la página pública separada.
           </p>
 
           <a className="secondary-link" href="/inscripcion/">
-            Ir a la pagina publica de inscripcion
+            Ir a la página pública de inscripción
           </a>
 
           <form className="auth-form" onSubmit={handleSubmit}>
@@ -112,20 +112,20 @@ function LoginPage() {
                 type="text"
                 value={form.identifier}
                 onChange={handleChange}
-                placeholder="Correo, login, matricula, cedula o codigo"
+                placeholder="Correo, login, matrícula, cédula o código"
                 autoComplete="username"
               />
             </label>
 
             <label className="field">
-              <span>Contrasena</span>
+              <span>Contraseña</span>
               <div className="password-field">
                 <input
                   name="password"
                   type={showPassword ? 'text' : 'password'}
                   value={form.password}
                   onChange={handleChange}
-                  placeholder="Ingresa tu contrasena"
+                  placeholder="Ingresa tu contraseña"
                   autoComplete="current-password"
                 />
                 <button

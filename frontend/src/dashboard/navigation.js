@@ -26,9 +26,9 @@ export const DASHBOARD_ROUTES = [
     id: 'bulk-enrollment',
     hash: '#bulk-enrollment',
     aliases: ['#admin-bulk-enrollment'],
-    label: 'Matricula masiva',
-    title: 'Matricula masiva',
-    description: 'Procesa estudiantes por Excel, matricula materias y envia credenciales INTEC.',
+    label: 'Matrícula masiva',
+    title: 'Matrícula masiva',
+    description: 'Procesa estudiantes por Excel, matricula materias y envía credenciales INTEC.',
   },
 ]
 

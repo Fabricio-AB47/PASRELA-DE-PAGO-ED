@@ -9,7 +9,17 @@ from typing import Any
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+from .inscription_certificate import (
+    build_certificate_payload,
+    create_stored_certificate_record,
+    send_certificate_email,
+)
 from .payments import PaymentGatewayError, create_mass_matriculation_and_credentials
+from .student_registration import (
+    RegisteredUserExistsError,
+    USER_REGISTERED_MESSAGE,
+    ensure_user_is_not_registered,
+)
 
 
 class BulkEnrollmentError(Exception):
@@ -36,13 +46,13 @@ TEMPLATE_FILE_NAME = 'plantilla_matricula_masiva.xlsx'
 TEMPLATE_HEADERS = [
     'Nombres',
     'Apellidos',
-    'Cedula',
+    'Cédula',
     'Correo',
-    'Numero de celular',
-    'Ocupacion',
+    'Número de celular',
+    'Ocupación',
     'Empresa',
     'Localidad',
-    'Direccion',
+    'Dirección',
 ]
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_BULK_ROWS = 500
@@ -100,10 +110,10 @@ def build_bulk_enrollment_template() -> bytes:
         sheet[f'{column}2'].number_format = '@'
         sheet.column_dimensions[column].width = 22
 
-    instructions['A1'] = 'Plantilla valida para Matricula masiva'
+    instructions['A1'] = 'Plantilla válida para matrícula masiva'
     instructions['A1'].font = Font(bold=True, size=14, color='9B0E0E')
-    instructions['A3'] = 'Columnas obligatorias: Nombres, Apellidos, Cedula, Correo, Numero de celular.'
-    instructions['A4'] = 'Columnas opcionales: Ocupacion, Empresa, Localidad, Direccion.'
+    instructions['A3'] = 'Columnas obligatorias: Nombres, Apellidos, Cédula, Correo, Número de celular.'
+    instructions['A4'] = 'Columnas opcionales: Ocupación, Empresa, Localidad, Dirección.'
     instructions['A5'] = 'No cambies los nombres de las columnas.'
     instructions.column_dimensions['A'].width = 90
 
@@ -188,10 +198,44 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
     for row in rows:
         try:
             payload = _payload_from_row(row, clean_defaults)
+            try:
+                ensure_user_is_not_registered(
+                    payload['cedula'],
+                    cod_anio_basica=payload['cod_anio_basica'],
+                    codigo_materia=payload['codigo_materia'],
+                    codigo_periodo=payload['codigo_periodo'],
+                )
+            except RegisteredUserExistsError:
+                results.append(
+                    {
+                        'ok': False,
+                        'fila': row['fila'],
+                        'nombre': payload['nombre'],
+                        'cedula': payload['cedula'],
+                        'email': payload['email'],
+                        'registered': True,
+                        'message': USER_REGISTERED_MESSAGE,
+                    }
+                )
+                continue
             result = create_mass_matriculation_and_credentials(payload)
             welcome_email_result = result.get('welcome_email_result', {})
             welcome_email_sent = bool(welcome_email_result.get('sent'))
             official_record = result.get('official_sync', {}).get('record') or {}
+            certificate_payload = build_certificate_payload(payload, result, source='matricula_masiva')
+            certificate_record = create_stored_certificate_record(certificate_payload)
+            try:
+                certificate_email_result = send_certificate_email(
+                    recipient_email=payload['email'],
+                    recipient_name=payload['nombre'],
+                    certificate_record=certificate_record,
+                )
+            except Exception as exc:
+                certificate_email_result = {
+                    'sent': False,
+                    'message': f'Certificado generado, pero no fue posible enviarlo por correo: {str(exc)}',
+                    'filename': certificate_record.get('filename'),
+                }
             results.append(
                 {
                     'ok': True,
@@ -205,10 +249,13 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
                     'welcome_email_sent': welcome_email_sent,
                     'welcome_email_message': str(welcome_email_result.get('message') or ''),
                     'microsoft365_ok': bool(result.get('microsoft365', {}).get('ok')),
+                    'certificate': certificate_record,
+                    'certificate_email_sent': bool(certificate_email_result.get('sent')),
+                    'certificate_email_message': str(certificate_email_result.get('message') or ''),
                     'message': (
                         'Procesado correctamente.'
                         if welcome_email_sent
-                        else str(welcome_email_result.get('message') or 'Procesado, pero la bienvenida quedo pendiente.')
+                        else str(welcome_email_result.get('message') or 'Procesado, pero la bienvenida quedó pendiente.')
                     ),
                 }
             )
@@ -236,9 +283,9 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
 
 def _clean_defaults(defaults: dict[str, Any]) -> dict[str, str]:
     required = {
-        'cod_anio_basica': 'Debes seleccionar la carrera para la matricula masiva.',
-        'codigo_materia': 'Debes seleccionar el curso para la matricula masiva.',
-        'codigo_periodo': 'Debes seleccionar el periodo para la matricula masiva.',
+        'cod_anio_basica': 'Debes seleccionar la carrera para la matrícula masiva.',
+        'codigo_materia': 'Debes seleccionar el curso para la matrícula masiva.',
+        'codigo_periodo': 'Debes seleccionar el período para la matrícula masiva.',
     }
     cleaned = {key: str(value or '').strip() for key, value in defaults.items()}
     for field, message in required.items():
@@ -247,7 +294,7 @@ def _clean_defaults(defaults: dict[str, Any]) -> dict[str, str]:
 
     estado_periodo = cleaned.get('estado_periodo', '').lower()
     if estado_periodo and estado_periodo != 'activo':
-        raise BulkEnrollmentError('El periodo seleccionado esta inactivo.')
+        raise BulkEnrollmentError('El período seleccionado está inactivo.')
     return cleaned
 
 
@@ -304,7 +351,7 @@ def _payload_from_row(row: dict[str, str], defaults: dict[str, str]) -> dict[str
     if not nombre:
         raise PaymentGatewayError('Falta nombre del estudiante.')
     if not cedula:
-        raise PaymentGatewayError('Falta cedula del estudiante.')
+        raise PaymentGatewayError('Falta cédula del estudiante.')
     if not email:
         raise PaymentGatewayError('Falta correo del estudiante.')
     if not telefono:
@@ -313,7 +360,7 @@ def _payload_from_row(row: dict[str, str], defaults: dict[str, str]) -> dict[str
     direccion = _clean_text(row.get('direccion')) or DEFAULT_EMPTY_LOCATION
     localidad = _clean_text(row.get('localidad')) or DEFAULT_EMPTY_LOCATION
     course_name = _clean_text(defaults.get('nombre_materia'))
-    descripcion = f'Matricula masiva del curso {course_name}' if course_name else 'Matricula masiva'
+    descripcion = f'Matrícula masiva del curso {course_name}' if course_name else 'Matrícula masiva'
 
     return {
         'nombre': nombre,
