@@ -181,9 +181,10 @@ textarea {
 
 .inscription-fullscreen {
   min-height: 100vh;
-  padding: 24px;
+  min-height: 100svh;
+  padding: clamp(8px, 1.2vw, 18px);
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   background:
     radial-gradient(circle at top, rgba(var(--fintec-celeste-rgb), 0.28), transparent 30%),
@@ -191,8 +192,10 @@ textarea {
 }
 
 .inscription-centered {
-  width: min(1680px, 98vw);
+  width: min(1560px, 96vw);
+  display: flex;
   min-width: 0;
+  margin: 0 auto;
 }
 
 .inscription-card {
@@ -200,6 +203,8 @@ textarea {
   max-width: none;
   margin: 0 auto;
   text-align: center;
+  display: flex;
+  flex-direction: column;
 }
 
 .inscription-card .registration-box,
@@ -208,14 +213,15 @@ textarea {
 }
 
 .auth-card.lookup-mode.inscription-card {
-  width: min(1680px, 98vw);
+  width: 100%;
+  flex: 1;
 }
 
 .inscription-logo {
   display: block;
-  width: min(260px, 64vw);
+  width: clamp(120px, 10vw, 172px);
   height: auto;
-  margin: 0 auto 18px;
+  margin: 0 auto 8px;
 }
 
 .brand-mark {
@@ -443,6 +449,10 @@ textarea {
   background: rgba(var(--fintec-celeste-rgb), 0.18);
   border: 1px solid rgba(var(--fintec-celeste-rgb), 0.72);
   min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .registration-box-header h3 {
@@ -471,6 +481,18 @@ textarea {
 
 .registration-grid-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.registration-course-grid {
+  grid-template-columns: minmax(180px, 1fr) minmax(280px, 1.45fr) minmax(160px, 0.9fr);
+}
+
+.registration-data-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.registration-address-field {
+  grid-column: span 2;
 }
 
 .registration-row-group {
@@ -1158,6 +1180,77 @@ textarea {
   font-size: 0.9rem;
 }
 
+.bulk-selection-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.82);
+  border-radius: 18px;
+  background: rgba(var(--fintec-celeste-rgb), 0.1);
+}
+
+.bulk-selection-header,
+.student-selection-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.bulk-selection-header h4 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1rem;
+}
+
+.bulk-selection-header p {
+  margin-top: 6px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.bulk-selection-header strong {
+  flex: 0 0 auto;
+  color: var(--fintec-rojo);
+}
+
+.student-selection-toolbar .field {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.student-selection-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.student-selection-table {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.student-selector-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.student-selector-cell input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--fintec-rojo);
+}
+
+.student-selection-empty {
+  color: var(--text-soft);
+  text-align: center;
+}
+
 .bulk-status-note {
   display: grid;
   align-content: center;
@@ -1283,6 +1376,95 @@ textarea {
   width: 100%;
 }
 
+.registration-result-modal {
+  width: min(760px, 94vw);
+  max-height: min(760px, 92vh);
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--fintec-blanco);
+  box-shadow: 0 28px 72px rgba(var(--fintec-gris-oscuro-rgb), 0.26);
+}
+
+.registration-result-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.registration-result-header h2 {
+  margin: 0;
+  color: var(--fintec-rojo);
+  font-size: 1.45rem;
+  line-height: 1.2;
+}
+
+.registration-result-header p {
+  margin-top: 6px;
+  color: var(--text-soft);
+}
+
+.registration-result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.registration-result-grid div,
+.registration-result-linkbox {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.8);
+  border-radius: 10px;
+  background: rgba(var(--fintec-celeste-rgb), 0.14);
+}
+
+.registration-result-grid span,
+.registration-result-linkbox span {
+  display: block;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.registration-result-grid strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.registration-result-linkbox a {
+  display: block;
+  margin-top: 6px;
+  color: var(--fintec-rojo);
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.registration-result-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.registration-result-actions .submit-button,
+.registration-result-actions .ghost-button {
+  width: auto;
+}
+
+.registration-result-pay-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .career-modal {
   width: min(920px, 96vw);
   max-height: min(760px, 92vh);
@@ -1385,6 +1567,145 @@ textarea {
   margin: 0 0 10px;
   color: var(--text-soft);
   font-size: 0.86rem;
+}
+
+@media (min-width: 1180px) {
+  .inscription-fullscreen {
+    min-height: 100vh;
+    min-height: 100svh;
+    padding: 6px 10px;
+    align-items: stretch;
+  }
+
+  .inscription-centered,
+  .auth-card.lookup-mode.inscription-card {
+    width: min(1560px, 96vw);
+  }
+
+  .auth-card.lookup-mode.inscription-card {
+    min-height: calc(100vh - 12px);
+    min-height: calc(100svh - 12px);
+    padding: 10px 24px;
+    border-radius: 16px;
+  }
+
+  .inscription-card .eyebrow {
+    display: none;
+  }
+
+  .inscription-logo {
+    display: block;
+    width: clamp(118px, 8.2vw, 154px);
+    margin-bottom: 5px;
+  }
+
+  .inscription-card h2 {
+    margin-top: 0;
+    font-size: 1.45rem;
+    line-height: 1.15;
+  }
+
+  .inscription-card .auth-intro {
+    margin-top: 6px;
+    font-size: 0.88rem;
+    line-height: 1.25;
+  }
+
+  .registration-box {
+    margin-top: 8px;
+    padding: 14px 30px;
+    border-radius: 14px;
+  }
+
+  .registration-box-header h3 {
+    margin-bottom: 0;
+    font-size: 1.6rem;
+    line-height: 1.12;
+  }
+
+  .registration-box-header p {
+    margin-top: 4px;
+    font-size: 0.88rem;
+  }
+
+  .inscription-card .auth-form {
+    margin-top: 10px;
+  }
+
+  .registration-row-group {
+    margin-bottom: 3px;
+  }
+
+  .registration-grid,
+  .registration-course-grid,
+  .registration-data-grid {
+    gap: 8px 16px;
+  }
+
+  .registration-course-grid {
+    grid-template-columns: minmax(180px, 1fr) minmax(320px, 1.45fr) minmax(160px, 0.95fr);
+  }
+
+  .registration-data-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .registration-address-field {
+    grid-column: span 2;
+  }
+
+  .inscription-card .field {
+    margin-bottom: 7px;
+  }
+
+  .inscription-card .field span {
+    margin-bottom: 3px;
+    font-size: 0.84rem;
+  }
+
+  .inscription-card .field input,
+  .inscription-card .field select,
+  .registration-box .field input,
+  .registration-box .field select {
+    min-height: 42px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+  }
+
+  .inscription-payment-notice {
+    margin-bottom: 7px;
+    padding: 6px 10px;
+  }
+
+  .inscription-payment-notice p {
+    font-size: 0.78rem;
+    line-height: 1.25;
+  }
+
+  .consent-box {
+    margin-bottom: 8px;
+    padding: 6px 10px;
+  }
+
+  .consent-box p {
+    font-size: 0.78rem;
+    line-height: 1.25;
+  }
+
+  .consent-options {
+    gap: 16px;
+    margin-top: 5px;
+  }
+
+  .inscription-card .submit-button {
+    padding: 10px 18px;
+  }
+
+  .registration-box .form-error {
+    margin-bottom: 7px;
+    padding: 7px 10px;
+  }
 }
 
 .admin-form-grid {
@@ -1559,7 +1880,7 @@ textarea {
 
   .auth-card.lookup-mode.inscription-card,
   .inscription-centered {
-    width: min(100%, 1120px);
+    width: min(1180px, 96vw);
   }
 }
 
@@ -1594,8 +1915,26 @@ textarea {
     padding: 18px;
   }
 
+  .auth-card.lookup-mode.inscription-card {
+    padding: 18px;
+  }
+
+  .registration-box {
+    margin-top: 12px;
+    padding: 18px;
+  }
+
   .pensum-filter-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .registration-course-grid,
+  .registration-data-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .registration-address-field {
+    grid-column: span 2;
   }
 }
 
@@ -1623,6 +1962,8 @@ textarea {
   }
 
   .registration-grid-4,
+  .registration-course-grid,
+  .registration-data-grid,
   .lookup-grid,
   .catalog-filter-grid,
   .pensum-filter-grid,
@@ -1707,8 +2048,14 @@ textarea {
   .registration-grid,
   .registration-grid-3,
   .registration-grid-4,
+  .registration-course-grid,
+  .registration-data-grid,
   .details-list.compact {
     grid-template-columns: 1fr;
+  }
+
+  .registration-address-field {
+    grid-column: auto;
   }
 
   .inscription-fullscreen {
@@ -1723,6 +2070,7 @@ textarea {
 
   .registration-box {
     padding: 18px;
+    justify-content: flex-start;
   }
 
   .dashboard-nav {
@@ -1744,11 +2092,17 @@ textarea {
   .module-card-header,
   .admin-section-heading,
   .rate-mode-header,
+  .bulk-selection-header,
+  .student-selection-toolbar,
   .dashboard-module-card,
   .payment-module-card,
   .admin-subsection-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .student-selection-actions {
+    justify-content: stretch;
   }
 
   .compact-filter {
@@ -1762,10 +2116,26 @@ textarea {
 
   .career-modal,
   .pensum-modal,
-  .payment-modal {
+  .payment-modal,
+  .registration-result-modal {
     width: 100%;
     max-height: calc(100vh - 20px);
     border-radius: 20px;
+  }
+
+  .registration-result-header,
+  .registration-result-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .registration-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .registration-result-actions .submit-button,
+  .registration-result-actions .ghost-button {
+    width: 100%;
   }
 
   .career-modal-header {

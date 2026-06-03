@@ -41,11 +41,16 @@ export default function AdminBulkEnrollmentPanel() {
   const [selectedFile, setSelectedFile] = useState(null)
   const [isLoadingCatalogs, setIsLoadingCatalogs] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmittingSelected, setIsSubmittingSelected] = useState(false)
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false)
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false)
   const [downloadingCertificateKey, setDownloadingCertificateKey] = useState('')
   const [bulkError, setBulkError] = useState('')
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkResult, setBulkResult] = useState(null)
+  const [studentSearch, setStudentSearch] = useState('')
+  const [studentCandidates, setStudentCandidates] = useState([])
+  const [selectedStudentIds, setSelectedStudentIds] = useState([])
 
   useEffect(() => {
     let isMounted = true
@@ -145,6 +150,92 @@ export default function AdminBulkEnrollmentPanel() {
     setBulkResult(null)
     setBulkMessage('')
     setBulkError('')
+  }
+
+  async function loadStudentCandidates() {
+    setIsLoadingStudents(true)
+    setBulkError('')
+
+    try {
+      const params = new URLSearchParams({
+        q: studentSearch,
+        limit: '200',
+      })
+      const response = await adminFetch(`/api/auth/admin/academic-enrollment/students/?${params.toString()}`)
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok) {
+        throw new Error(payload?.message ?? `No fue posible cargar estudiantes (${response.status}).`)
+      }
+
+      const loadedStudents = payload.students || []
+      const availableIds = new Set(loadedStudents.map((student) => String(student.codigo_estud)))
+      setStudentCandidates(loadedStudents)
+      setSelectedStudentIds((current) => current.filter((studentId) => availableIds.has(String(studentId))))
+      setBulkMessage(`${loadedStudents.length} estudiante(s) disponible(s) para selección.`)
+    } catch (error) {
+      setBulkError(error.message)
+    } finally {
+      setIsLoadingStudents(false)
+    }
+  }
+
+  function toggleSelectedStudent(studentId) {
+    const cleanId = String(studentId || '')
+    if (!cleanId) {
+      return
+    }
+    setSelectedStudentIds((current) =>
+      current.includes(cleanId)
+        ? current.filter((item) => item !== cleanId)
+        : [...current, cleanId],
+    )
+  }
+
+  function selectAllLoadedStudents() {
+    setSelectedStudentIds(
+      studentCandidates
+        .map((student) => String(student.codigo_estud || ''))
+        .filter(Boolean),
+    )
+  }
+
+  async function handleSelectedEnrollmentSubmit(event) {
+    event.preventDefault()
+    setIsSubmittingSelected(true)
+    setBulkError('')
+    setBulkMessage('')
+    setBulkResult(null)
+
+    if (!selectedStudentIds.length) {
+      setBulkError('Selecciona al menos un estudiante para matricular.')
+      setIsSubmittingSelected(false)
+      return
+    }
+
+    try {
+      const response = await adminFetch('/api/auth/admin/academic-enrollment/selected/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...bulkForm,
+          student_ids: selectedStudentIds,
+        }),
+      })
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok) {
+        throw new Error(payload?.message ?? `No fue posible procesar la selección (${response.status}).`)
+      }
+
+      setBulkResult(payload.result)
+      setBulkMessage(payload.message || 'Matrícula académica procesada.')
+      setSelectedStudentIds([])
+    } catch (error) {
+      setBulkError(error.message)
+    } finally {
+      setIsSubmittingSelected(false)
+    }
   }
 
   async function handleTemplateDownload() {
@@ -251,13 +342,15 @@ export default function AdminBulkEnrollmentPanel() {
 
   const activeCourses = onlyActiveCourses(catalogs.cursos_por_carrera?.[bulkForm.cod_anio_basica])
   const activePeriods = catalogs.periodos.filter((period) => period.es_activo)
+  const selectedCount = selectedStudentIds.length
+  const isProcessing = isSubmitting || isSubmittingSelected
 
   return (
     <section id="admin-bulk-enrollment" className="admin-bulk-enrollment">
       <div className="admin-section-heading">
         <div>
-          <h3>Matrícula masiva</h3>
-          <p>Sube un Excel y aplica la misma carrera, curso y periodo a todos los registros.</p>
+          <h3>Matrícula académica</h3>
+          <p>Sube un Excel o selecciona estudiantes registrados para aplicar la misma carrera, curso y periodo.</p>
         </div>
       </div>
 
@@ -348,12 +441,119 @@ export default function AdminBulkEnrollmentPanel() {
               <div className="bulk-upload-help">
                 <strong>Columnas aceptadas</strong>
                 <p>
-                  Nombres, Apellidos, Cédula, Correo, Número de celular, Ocupación,
-                  Empresa. Localidad y Dirección son opcionales.
+                  Nombres, Apellidos, Cédula, Correo, Número de celular, Ciudad y Dirección.
+                  Las columnas Ciudad y Dirección son opcionales.
                 </p>
               </div>
             </section>
           </div>
+
+          <section className="bulk-selection-panel">
+            <div className="bulk-selection-header">
+              <div>
+                <h4>Matricular estudiantes seleccionados</h4>
+                <p>Usa estudiantes existentes en DATOS_ESTUD sin cargar Excel.</p>
+              </div>
+              <strong>{selectedCount} seleccionado(s)</strong>
+            </div>
+
+            <div className="student-selection-toolbar">
+              <label className="field">
+                <span>Buscar estudiante</span>
+                <input
+                  type="search"
+                  value={studentSearch}
+                  onChange={(event) => setStudentSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      loadStudentCandidates()
+                    }
+                  }}
+                  placeholder="Nombre, cédula o correo"
+                />
+              </label>
+              <div className="student-selection-actions">
+                <button
+                  type="button"
+                  className="ghost-button compact-button"
+                  onClick={loadStudentCandidates}
+                  disabled={isLoadingStudents}
+                >
+                  {isLoadingStudents ? 'Cargando...' : 'Cargar estudiantes'}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button compact-button"
+                  onClick={selectAllLoadedStudents}
+                  disabled={!studentCandidates.length}
+                >
+                  Seleccionar todos
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button compact-button"
+                  onClick={() => setSelectedStudentIds([])}
+                  disabled={!selectedCount}
+                >
+                  Limpiar
+                </button>
+              </div>
+            </div>
+
+            <div className="admin-table-wrap student-selection-table">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Seleccionar</th>
+                    <th>Estudiante</th>
+                    <th>Cédula</th>
+                    <th>Correo</th>
+                    <th>Teléfono</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {studentCandidates.map((student) => {
+                    const studentId = String(student.codigo_estud || '')
+                    return (
+                      <tr key={studentId}>
+                        <td>
+                          <label className="student-selector-cell">
+                            <input
+                              type="checkbox"
+                              checked={selectedStudentIds.includes(studentId)}
+                              onChange={() => toggleSelectedStudent(studentId)}
+                            />
+                            <span>{student.codigo_estud}</span>
+                          </label>
+                        </td>
+                        <td>{student.nombre}</td>
+                        <td>{student.cedula}</td>
+                        <td>{student.email}</td>
+                        <td>{student.telefono || '-'}</td>
+                      </tr>
+                    )
+                  })}
+                  {!studentCandidates.length ? (
+                    <tr>
+                      <td colSpan="5" className="student-selection-empty">
+                        Carga estudiantes para seleccionar registros existentes.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            <button
+              type="button"
+              className="submit-button"
+              onClick={handleSelectedEnrollmentSubmit}
+              disabled={isSubmittingSelected || isLoadingCatalogs || !selectedCount}
+            >
+              {isSubmittingSelected ? 'Procesando seleccionados...' : 'Matricular seleccionados'}
+            </button>
+          </section>
 
           {bulkError ? <p className="form-error">{bulkError}</p> : null}
           {bulkMessage ? <p className="form-success">{bulkMessage}</p> : null}
@@ -361,9 +561,9 @@ export default function AdminBulkEnrollmentPanel() {
           <button
             type="submit"
             className="submit-button"
-            disabled={isSubmitting || isLoadingCatalogs}
+            disabled={isProcessing || isLoadingCatalogs}
           >
-            {isSubmitting ? 'Procesando matrícula masiva...' : 'Procesar matrícula masiva'}
+            {isSubmitting ? 'Procesando Excel...' : 'Procesar Excel'}
           </button>
         </form>
       </article>

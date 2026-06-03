@@ -32,7 +32,7 @@ CERTIFICATE_CONTENT_TYPE = 'application/pdf'
 CERTIFICATE_STORAGE_DIR_NAME = 'certificados_inscripcion'
 CERTIFICATE_INSTITUTION_NAME = 'Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento INTEC'
 CERTIFICATE_SIGNING_SALT = 'dashboard_auth.inscription_certificate'
-CERTIFICATE_VERSION = '2026-07-20-logo-signature-code-db-cuts-v11'
+CERTIFICATE_VERSION = '2026-07-20-logo-signature-code-db-cuts-v12'
 DEFAULT_COURSE_START_DATE = '20 de julio de 2026'
 LOGO_FILE_NAME = 'Intec-Logowithslogangray.svg'
 SIGNATURE_FILE_NAME = 'firma veronica.jpeg'
@@ -64,7 +64,7 @@ def build_certificate_payload(
         result.get('monto') if isinstance(result, dict) else None,
         payload.get('monto'),
         provider_payload.get('monto'),
-        '0.00' if source == 'matricula_masiva' else None,
+        '0.00' if source in {'matricula_masiva', 'matricula_academica'} else None,
     )
     payment_link = _first_non_empty(
         result.get('payment_link') if isinstance(result, dict) else None,
@@ -84,7 +84,7 @@ def build_certificate_payload(
         payload.get('data_treatment_accepted')
         or payload.get('dataTreatment') == 'si'
         or provider_payload.get('data_treatment_accepted')
-        or source == 'matricula_masiva'
+        or source in {'matricula_masiva', 'matricula_academica'}
     )
 
     return {
@@ -116,8 +116,6 @@ def build_certificate_payload(
         'telefono': _clean_text(_first_non_empty(payload.get('telefono'), provider_payload.get('telefono'))),
         'localidad': _clean_text(_first_non_empty(payload.get('localidad'), provider_payload.get('localidad'))),
         'direccion': _clean_text(_first_non_empty(payload.get('direccion'), provider_payload.get('direccion'))),
-        'ocupacion': _clean_text(_first_non_empty(payload.get('ocupacion'), provider_payload.get('ocupacion'))),
-        'empresa': _clean_text(_first_non_empty(payload.get('empresa'), provider_payload.get('empresa'))),
         'codigo_periodo': _clean_text(
             _first_non_empty(payload.get('codigo_periodo'), provider_payload.get('codigo_periodo'))
         ),
@@ -424,8 +422,6 @@ def _build_pdf_story(payload: dict[str, Any]) -> list[Any]:
                 ('Teléfono', payload.get('telefono')),
                 ('Ciudad / localidad', payload.get('localidad')),
                 ('Dirección', payload.get('direccion')),
-                ('Ocupación', payload.get('ocupacion')),
-                ('Empresa / institución', payload.get('empresa')),
             ],
             styles,
         )
@@ -1020,7 +1016,7 @@ def _register_certificate_generation(payload: dict[str, Any], stored_relative_pa
 
 def _certificate_origin(payload: dict[str, Any]) -> str:
     source = _clean_text(payload.get('source'))
-    if source in {'matricula_masiva', 'inscripcion'}:
+    if source in {'matricula_masiva', 'matricula_academica', 'inscripcion'}:
         return 'MATRICULA'
     return 'OTRO'
 
@@ -1048,12 +1044,16 @@ def _source_label(value: Any) -> str:
     source = _clean_text(value)
     if source == 'matricula_masiva':
         return 'Carga masiva desde Excel'
+    if source == 'matricula_academica':
+        return 'Matrícula académica por selección'
     return 'Formulario público de inscripción'
 
 
 def _default_internal_observations(source: str, payment_link: str | None) -> str:
     if source == 'matricula_masiva':
         return 'Matrícula generada desde carga Excel sin cargo de pago.'
+    if source == 'matricula_academica':
+        return 'Matrícula generada por selección académica sin cargo de pago.'
     if payment_link:
         return 'Enlace de pago generado para completar la inscripción.'
     return 'Registro de inscripción generado desde formulario público.'

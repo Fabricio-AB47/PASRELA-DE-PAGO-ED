@@ -41,6 +41,11 @@ class ProviderHttpError(PaymentGatewayError):
 
 
 DEFAULT_PAYMENT_RECEIPT_EMAIL = 'DeptCobranzas@intec.edu.ec'
+GRAPH_MAIL_CC_ENV_KEYS = (
+    'MS_MAIL_CC_RECIPIENTS',
+    'MICROSOFT_MAIL_CC_RECIPIENTS',
+    'GRAPH_MAIL_CC_RECIPIENTS',
+)
 GRAPH_MAIL_SEND_ROLE = 'Mail.Send'
 
 
@@ -133,6 +138,10 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         email=email,
         telefono=_first_non_empty(payload.get('telefono'), payload.get('provider_payload', {}).get('telefono') if isinstance(payload.get('provider_payload'), dict) else None),
         direccion=_first_non_empty(payload.get('direccion'), payload.get('provider_payload', {}).get('direccion') if isinstance(payload.get('provider_payload'), dict) else None),
+        localidad=_first_non_empty(payload.get('localidad'), payload.get('provider_payload', {}).get('localidad') if isinstance(payload.get('provider_payload'), dict) else None),
+        tipo_postulante=_first_non_empty(payload.get('tipo_postulante'), payload.get('provider_payload', {}).get('tipo_postulante') if isinstance(payload.get('provider_payload'), dict) else None),
+        carrera_ocupacion=_first_non_empty(payload.get('carrera_ocupacion'), payload.get('provider_payload', {}).get('carrera_ocupacion') if isinstance(payload.get('provider_payload'), dict) else None, payload.get('ocupacion')),
+        actividad_profesional=_first_non_empty(payload.get('actividad_profesional'), payload.get('provider_payload', {}).get('actividad_profesional') if isinstance(payload.get('provider_payload'), dict) else None, payload.get('empresa')),
         cod_anio_basica=cod_anio_basica,
         codigo_materia=codigo_materia,
         codigo_periodo=codigo_periodo,
@@ -357,6 +366,24 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
         direccion=_first_non_empty(
             payload.get('direccion'),
             payload.get('provider_payload', {}).get('direccion') if isinstance(payload.get('provider_payload'), dict) else None,
+        ),
+        localidad=_first_non_empty(
+            payload.get('localidad'),
+            payload.get('provider_payload', {}).get('localidad') if isinstance(payload.get('provider_payload'), dict) else None,
+        ),
+        tipo_postulante=_first_non_empty(
+            payload.get('tipo_postulante'),
+            payload.get('provider_payload', {}).get('tipo_postulante') if isinstance(payload.get('provider_payload'), dict) else None,
+        ),
+        carrera_ocupacion=_first_non_empty(
+            payload.get('carrera_ocupacion'),
+            payload.get('provider_payload', {}).get('carrera_ocupacion') if isinstance(payload.get('provider_payload'), dict) else None,
+            payload.get('ocupacion'),
+        ),
+        actividad_profesional=_first_non_empty(
+            payload.get('actividad_profesional'),
+            payload.get('provider_payload', {}).get('actividad_profesional') if isinstance(payload.get('provider_payload'), dict) else None,
+            payload.get('empresa'),
         ),
         cod_anio_basica=cod_anio_basica,
         codigo_materia=codigo_materia,
@@ -673,6 +700,10 @@ def _first_non_empty(*values: Any) -> str:
     return ''
 
 
+def _clean_text(value: Any) -> str:
+    return re.sub(r'\s+', ' ', str(value or '').strip())
+
+
 def _env_first_named(*keys: str) -> tuple[str, str]:
     for key in keys:
         value = str(os.getenv(key) or '').strip()
@@ -703,6 +734,10 @@ def _compose_course_payment_description(raw_payload: dict[str, Any], fallback: s
 def _compose_mass_matriculation_description(raw_payload: dict[str, Any], fallback: str) -> str:
     provider_payload = raw_payload.get('provider_payload')
     provider_payload = provider_payload if isinstance(provider_payload, dict) else {}
+    source_type = str(
+        _first_non_empty(provider_payload.get('tipo'), raw_payload.get('tipo'))
+    ).strip()
+    label = 'Matrícula académica' if source_type == 'matricula_academica_sin_cargo' else 'Matrícula masiva'
 
     course_name = _first_non_empty(
         provider_payload.get('nombre_materia'),
@@ -713,10 +748,10 @@ def _compose_mass_matriculation_description(raw_payload: dict[str, Any], fallbac
     course_name = _remove_numbers_and_trim(course_name)
 
     if course_name:
-        return f'Matrícula masiva del curso {course_name}'
+        return f'{label} del curso {course_name}'
 
     clean_fallback = str(fallback or '').strip()
-    return clean_fallback or 'Matrícula masiva'
+    return clean_fallback or label
 
 
 def _resolve_welcome_course_name(raw_payload: dict[str, Any]) -> str:
@@ -1002,6 +1037,10 @@ def _upsert_official_inscription_records(
     email: str,
     telefono: str,
     direccion: str,
+    localidad: str,
+    tipo_postulante: str,
+    carrera_ocupacion: str,
+    actividad_profesional: str,
     cod_anio_basica: str,
     codigo_materia: str,
     codigo_periodo: str,
@@ -1025,6 +1064,10 @@ def _upsert_official_inscription_records(
             email=email,
             telefono=telefono,
             direccion=direccion,
+            localidad=localidad,
+            tipo_postulante=tipo_postulante,
+            carrera_ocupacion=carrera_ocupacion,
+            actividad_profesional=actividad_profesional,
             correo_intec=intec_account['correo'],
         )
 
@@ -1233,8 +1276,17 @@ def _resolve_or_create_datos_estud(
     email: str,
     telefono: str,
     direccion: str,
+    localidad: str,
+    tipo_postulante: str,
+    carrera_ocupacion: str,
+    actividad_profesional: str,
     correo_intec: str,
 ) -> str:
+    referencia = _datos_estud_reference(
+        tipo_postulante=tipo_postulante,
+        carrera_ocupacion=carrera_ocupacion,
+        actividad_profesional=actividad_profesional,
+    )
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -1253,13 +1305,35 @@ def _resolve_or_create_datos_estud(
                 SET Apellidos_nombre = %s,
                     correo = %s,
                     correointec = %s,
+                    ciudad = %s,
                     telefono = %s,
                     movil = %s,
                     calle_principal = %s,
+                    Ocupacion = %s,
+                    empresa = %s,
+                    Lugar_Trabajo = %s,
+                    AreaEstudio = %s,
+                    EscogioProfesion = %s,
+                    referencia = %s,
                     Estado = 'D'
                 WHERE CAST(codigo_estud AS varchar(50)) = %s
                 """,
-                [nombre, email, correo_intec, telefono or '', telefono or '', direccion or '', codigo_estud],
+                [
+                    nombre,
+                    email,
+                    correo_intec,
+                    _trim_to_max(localidad, 70),
+                    telefono or '',
+                    telefono or '',
+                    direccion or '',
+                    _trim_to_max(carrera_ocupacion, 50),
+                    _trim_to_max(actividad_profesional, 50),
+                    _trim_to_max(actividad_profesional, 100),
+                    _trim_to_max(carrera_ocupacion, 40),
+                    _trim_to_max(_applicant_type_label(tipo_postulante), 200),
+                    referencia,
+                    codigo_estud,
+                ],
             )
             return codigo_estud
 
@@ -1272,32 +1346,71 @@ def _resolve_or_create_datos_estud(
                 codigo_estud,
                 Cedula_Est,
                 Apellidos_nombre,
+                ciudad,
                 correo,
                 correointec,
                 telefono,
                 movil,
                 calle_principal,
+                Ocupacion,
+                empresa,
+                Lugar_Trabajo,
+                AreaEstudio,
+                EscogioProfesion,
+                referencia,
                 Cedula,
                 Fotos,
                 Tipodoc,
                 NumMigracion,
                 Estado
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 0, 'D')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 0, 'D')
             """,
             [
                 codigo_estud,
                 cedula,
                 nombre,
+                _trim_to_max(localidad, 70),
                 email,
                 correo_intec,
                 telefono or '',
                 telefono or '',
                 direccion or '',
+                _trim_to_max(carrera_ocupacion, 50),
+                _trim_to_max(actividad_profesional, 50),
+                _trim_to_max(actividad_profesional, 100),
+                _trim_to_max(carrera_ocupacion, 40),
+                _trim_to_max(_applicant_type_label(tipo_postulante), 200),
+                referencia,
                 _safe_int(cedula, default=0),
             ],
         )
         return codigo_estud
+
+
+def _applicant_type_label(value: Any) -> str:
+    text = _clean_text(value)
+    labels = {
+        'profesional_independiente': 'Profesional independiente',
+        'empresa_corporativo': 'Empresa / corporativo',
+    }
+    return labels.get(text, text)
+
+
+def _datos_estud_reference(
+    *,
+    tipo_postulante: str,
+    carrera_ocupacion: str,
+    actividad_profesional: str,
+) -> str:
+    parts = [
+        f'Tipo de postulante: {_applicant_type_label(tipo_postulante)}' if _clean_text(tipo_postulante) else '',
+        f'Carrera u ocupación: {_clean_text(carrera_ocupacion)}' if _clean_text(carrera_ocupacion) else '',
+        f'Actividad profesional o empresa: {_clean_text(actividad_profesional)}'
+        if _clean_text(actividad_profesional)
+        else '',
+    ]
+    return _trim_to_max('; '.join(part for part in parts if part), 500)
 
 
 def _upsert_correos_estud_intec(
@@ -2169,6 +2282,7 @@ def _send_graph_mail(mail_payload: dict[str, Any]) -> None:
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json',
     }
+    _ensure_graph_mail_cc_recipients(mail_payload)
 
     try:
         _post_json(endpoint, mail_payload, headers, expect_json=False)
@@ -2187,6 +2301,60 @@ def _send_graph_mail(mail_payload: dict[str, Any]) -> None:
                 f'Diagnostico seguro: tenant_source={tenant_source}, client_source={client_source}.'
             ) from exc
         raise
+
+
+def _ensure_graph_mail_cc_recipients(mail_payload: dict[str, Any]) -> None:
+    message = mail_payload.get('message')
+    if not isinstance(message, dict):
+        return
+
+    existing_addresses = set()
+    for recipient_key in ('toRecipients', 'ccRecipients', 'bccRecipients'):
+        for recipient in message.get(recipient_key) or []:
+            address = _graph_mail_recipient_address(recipient).lower()
+            if address:
+                existing_addresses.add(address)
+
+    cc_recipients = message.get('ccRecipients')
+    if not isinstance(cc_recipients, list):
+        cc_recipients = []
+
+    has_new_copy = False
+    for email in _resolve_graph_mail_cc_recipients():
+        clean_email = _clean_text(email)
+        if not clean_email:
+            continue
+
+        normalized_email = clean_email.lower()
+        if normalized_email in existing_addresses:
+            continue
+
+        cc_recipients.append({'emailAddress': {'address': clean_email}})
+        existing_addresses.add(normalized_email)
+        has_new_copy = True
+
+    if has_new_copy:
+        message['ccRecipients'] = cc_recipients
+
+
+def _resolve_graph_mail_cc_recipients() -> list[str]:
+    raw_recipients = _first_non_empty(*(os.getenv(key) for key in GRAPH_MAIL_CC_ENV_KEYS))
+    if not raw_recipients:
+        return []
+    return [
+        email
+        for email in (_clean_text(part) for part in re.split(r'[;,]', raw_recipients))
+        if email
+    ]
+
+
+def _graph_mail_recipient_address(recipient: Any) -> str:
+    if not isinstance(recipient, dict):
+        return ''
+    email_address = recipient.get('emailAddress')
+    if not isinstance(email_address, dict):
+        return ''
+    return _clean_text(email_address.get('address'))
 
 
 def _resolve_payment_receipt_email() -> str:

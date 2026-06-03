@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
+from django.db import connection
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
@@ -49,13 +50,12 @@ TEMPLATE_HEADERS = [
     'Cédula',
     'Correo',
     'Número de celular',
-    'Ocupación',
-    'Empresa',
-    'Localidad',
+    'Ciudad',
     'Dirección',
 ]
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_BULK_ROWS = 500
+MAX_STUDENT_SELECTION = 500
 DEFAULT_EMPTY_LOCATION = 'No registrado'
 
 
@@ -78,9 +78,7 @@ HEADER_ALIASES = {
     'celular': 'telefono',
     'telefono': 'telefono',
     'teléfono': 'telefono',
-    'ocupacion': 'ocupacion',
-    'ocupación': 'ocupacion',
-    'empresa': 'empresa',
+    'ciudad': 'localidad',
     'localidad': 'localidad',
     'direccion': 'direccion',
     'dirección': 'direccion',
@@ -113,7 +111,7 @@ def build_bulk_enrollment_template() -> bytes:
     instructions['A1'] = 'Plantilla válida para matrícula masiva'
     instructions['A1'].font = Font(bold=True, size=14, color='9B0E0E')
     instructions['A3'] = 'Columnas obligatorias: Nombres, Apellidos, Cédula, Correo, Número de celular.'
-    instructions['A4'] = 'Columnas opcionales: Ocupación, Empresa, Localidad, Dirección.'
+    instructions['A4'] = 'Columnas opcionales: Ciudad, Dirección.'
     instructions['A5'] = 'No cambies los nombres de las columnas.'
     instructions.column_dimensions['A'].width = 90
 
@@ -132,8 +130,6 @@ def build_bulk_enrollment_template() -> bytes:
             '0012345678',
             'juan.recalde@example.com',
             '0999999999',
-            'Analista',
-            'Empresa ABC',
             'Quito',
             'Av. Principal 123',
         ]
@@ -218,47 +214,7 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
                     }
                 )
                 continue
-            result = create_mass_matriculation_and_credentials(payload)
-            welcome_email_result = result.get('welcome_email_result', {})
-            welcome_email_sent = bool(welcome_email_result.get('sent'))
-            official_record = result.get('official_sync', {}).get('record') or {}
-            certificate_payload = build_certificate_payload(payload, result, source='matricula_masiva')
-            certificate_record = create_stored_certificate_record(certificate_payload)
-            try:
-                certificate_email_result = send_certificate_email(
-                    recipient_email=payload['email'],
-                    recipient_name=payload['nombre'],
-                    certificate_record=certificate_record,
-                )
-            except Exception as exc:
-                certificate_email_result = {
-                    'sent': False,
-                    'message': f'Certificado generado, pero no fue posible enviarlo por correo: {str(exc)}',
-                    'filename': certificate_record.get('filename'),
-                }
-            results.append(
-                {
-                    'ok': True,
-                    'fila': row['fila'],
-                    'nombre': payload['nombre'],
-                    'cedula': payload['cedula'],
-                    'email': payload['email'],
-                    'matricula': result.get('matricula'),
-                    'codigo_materia': official_record.get('codigo_materia') or payload['codigo_materia'],
-                    'materia': official_record.get('materia') or payload.get('nombre_materia'),
-                    'welcome_email_sent': welcome_email_sent,
-                    'welcome_email_message': str(welcome_email_result.get('message') or ''),
-                    'microsoft365_ok': bool(result.get('microsoft365', {}).get('ok')),
-                    'certificate': certificate_record,
-                    'certificate_email_sent': bool(certificate_email_result.get('sent')),
-                    'certificate_email_message': str(certificate_email_result.get('message') or ''),
-                    'message': (
-                        'Procesado correctamente.'
-                        if welcome_email_sent
-                        else str(welcome_email_result.get('message') or 'Procesado, pero la bienvenida quedó pendiente.')
-                    ),
-                }
-            )
+            results.append(_process_matriculation_payload(payload, row['fila'], certificate_source='matricula_masiva'))
         except Exception as exc:
             results.append(
                 {
@@ -281,11 +237,264 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
     }
 
 
+def list_academic_enrollment_students(search: Any = '', limit: Any = 200) -> list[dict[str, str]]:
+    clean_search = _clean_text(search)
+    max_results = min(max(_safe_int(limit, default=200), 1), MAX_STUDENT_SELECTION)
+    params: list[Any] = []
+    filters = [
+        "NULLIF(LTRIM(RTRIM(ISNULL(Apellidos_nombre, ''))), '') IS NOT NULL",
+    ]
+
+    if clean_search:
+        like_value = f'%{clean_search}%'
+        filters.append(
+            """
+            (
+                LTRIM(RTRIM(ISNULL(Apellidos_nombre, ''))) LIKE %s
+                OR REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(Cedula_Est, ''))), '-', ''), ' ', '') LIKE %s
+                OR LTRIM(RTRIM(ISNULL(CAST(Cedula AS varchar(20)), ''))) LIKE %s
+                OR LTRIM(RTRIM(ISNULL(correo, ''))) LIKE %s
+            )
+            """
+        )
+        params.extend([like_value, like_value, like_value, like_value])
+
+    query = f"""
+        SELECT TOP ({max_results})
+            CAST(codigo_estud AS varchar(50)) AS codigo_estud,
+            LTRIM(RTRIM(ISNULL(Apellidos_nombre, ''))) AS nombre,
+            LTRIM(RTRIM(COALESCE(NULLIF(Cedula_Est, ''), CAST(Cedula AS varchar(20)), ''))) AS cedula,
+            LTRIM(RTRIM(ISNULL(correo, ''))) AS email,
+            LTRIM(RTRIM(ISNULL(telefono, ''))) AS telefono,
+            LTRIM(RTRIM(ISNULL(movil, ''))) AS movil,
+            LTRIM(RTRIM(ISNULL(ciudad, ''))) AS localidad,
+            LTRIM(RTRIM(ISNULL(calle_principal, ''))) AS direccion
+        FROM dbo.DATOS_ESTUD
+        WHERE {' AND '.join(filters)}
+        ORDER BY Apellidos_nombre ASC, codigo_estud DESC
+    """
+    return [_serialize_student_candidate(row) for row in _fetch_all(query, params)]
+
+
+def process_selected_student_enrollment(payload: dict[str, Any]) -> dict[str, Any]:
+    clean_defaults = _clean_defaults(payload)
+    selected_ids = _selected_student_ids(payload)
+    if not selected_ids:
+        raise BulkEnrollmentError('Selecciona al menos un estudiante para matricular.')
+    if len(selected_ids) > MAX_STUDENT_SELECTION:
+        raise BulkEnrollmentError(f'La matrícula por selección permite hasta {MAX_STUDENT_SELECTION} estudiantes.')
+
+    students_by_id = _fetch_students_by_ids(selected_ids)
+    results: list[dict[str, Any]] = []
+    for index, codigo_estud in enumerate(selected_ids, start=1):
+        student = students_by_id.get(codigo_estud)
+        if not student:
+            results.append(
+                {
+                    'ok': False,
+                    'fila': index,
+                    'codigo_estud': codigo_estud,
+                    'nombre': '',
+                    'cedula': '',
+                    'email': '',
+                    'message': 'El estudiante seleccionado no existe en DATOS_ESTUD.',
+                }
+            )
+            continue
+
+        try:
+            student_payload = _payload_from_student(student, clean_defaults)
+            processed = _process_matriculation_payload(
+                student_payload,
+                index,
+                certificate_source='matricula_academica',
+            )
+            processed['codigo_estud'] = codigo_estud
+            results.append(processed)
+        except Exception as exc:
+            results.append(
+                {
+                    'ok': False,
+                    'fila': index,
+                    'codigo_estud': codigo_estud,
+                    'nombre': student.get('nombre', ''),
+                    'cedula': student.get('cedula', ''),
+                    'email': student.get('email', ''),
+                    'message': str(exc),
+                }
+            )
+
+    successful = sum(1 for item in results if item['ok'])
+    failed = len(results) - successful
+    return {
+        'total': len(results),
+        'exitosos': successful,
+        'fallidos': failed,
+        'results': results,
+    }
+
+
+def _process_matriculation_payload(
+    payload: dict[str, Any],
+    row_label: Any,
+    *,
+    certificate_source: str,
+) -> dict[str, Any]:
+    result = create_mass_matriculation_and_credentials(payload)
+    welcome_email_result = result.get('welcome_email_result', {})
+    welcome_email_sent = bool(welcome_email_result.get('sent'))
+    official_record = result.get('official_sync', {}).get('record') or {}
+    certificate_payload = build_certificate_payload(payload, result, source=certificate_source)
+    certificate_record = create_stored_certificate_record(certificate_payload)
+    try:
+        certificate_email_result = send_certificate_email(
+            recipient_email=payload['email'],
+            recipient_name=payload['nombre'],
+            certificate_record=certificate_record,
+        )
+    except Exception as exc:
+        certificate_email_result = {
+            'sent': False,
+            'message': f'Certificado generado, pero no fue posible enviarlo por correo: {str(exc)}',
+            'filename': certificate_record.get('filename'),
+        }
+
+    return {
+        'ok': True,
+        'fila': row_label,
+        'nombre': payload['nombre'],
+        'cedula': payload['cedula'],
+        'email': payload['email'],
+        'matricula': result.get('matricula'),
+        'codigo_materia': official_record.get('codigo_materia') or payload['codigo_materia'],
+        'materia': official_record.get('materia') or payload.get('nombre_materia'),
+        'welcome_email_sent': welcome_email_sent,
+        'welcome_email_message': str(welcome_email_result.get('message') or ''),
+        'microsoft365_ok': bool(result.get('microsoft365', {}).get('ok')),
+        'certificate': certificate_record,
+        'certificate_email_sent': bool(certificate_email_result.get('sent')),
+        'certificate_email_message': str(certificate_email_result.get('message') or ''),
+        'message': (
+            'Procesado correctamente.'
+            if welcome_email_sent
+            else str(welcome_email_result.get('message') or 'Procesado, pero la bienvenida quedó pendiente.')
+        ),
+    }
+
+
+def _selected_student_ids(payload: dict[str, Any]) -> list[str]:
+    raw_values = payload.get('student_ids')
+    if raw_values is None:
+        raw_values = payload.get('selected_student_ids')
+    if not isinstance(raw_values, list):
+        raise BulkEnrollmentError('Debes enviar la lista de estudiantes seleccionados.')
+
+    selected_ids: list[str] = []
+    seen: set[str] = set()
+    for value in raw_values:
+        clean_value = _clean_text(value)
+        if clean_value and clean_value not in seen:
+            selected_ids.append(clean_value)
+            seen.add(clean_value)
+    return selected_ids
+
+
+def _fetch_students_by_ids(student_ids: list[str]) -> dict[str, dict[str, str]]:
+    if not student_ids:
+        return {}
+
+    placeholders = ', '.join(['%s'] * len(student_ids))
+    query = f"""
+        SELECT
+            CAST(codigo_estud AS varchar(50)) AS codigo_estud,
+            LTRIM(RTRIM(ISNULL(Apellidos_nombre, ''))) AS nombre,
+            LTRIM(RTRIM(COALESCE(NULLIF(Cedula_Est, ''), CAST(Cedula AS varchar(20)), ''))) AS cedula,
+            LTRIM(RTRIM(ISNULL(correo, ''))) AS email,
+            LTRIM(RTRIM(ISNULL(telefono, ''))) AS telefono,
+            LTRIM(RTRIM(ISNULL(movil, ''))) AS movil,
+            LTRIM(RTRIM(ISNULL(ciudad, ''))) AS localidad,
+            LTRIM(RTRIM(ISNULL(calle_principal, ''))) AS direccion
+        FROM dbo.DATOS_ESTUD
+        WHERE CAST(codigo_estud AS varchar(50)) IN ({placeholders})
+    """
+    return {
+        str(row.get('codigo_estud') or '').strip(): _serialize_student_candidate(row)
+        for row in _fetch_all(query, student_ids)
+        if str(row.get('codigo_estud') or '').strip()
+    }
+
+
+def _payload_from_student(student: dict[str, str], defaults: dict[str, str]) -> dict[str, Any]:
+    nombre = _clean_text(student.get('nombre'))
+    cedula = re.sub(r'\D+', '', _clean_text(student.get('cedula')))
+    email = _clean_text(student.get('email')).lower()
+    telefono = _clean_text(student.get('telefono')) or _clean_text(student.get('movil'))
+    if not nombre:
+        raise PaymentGatewayError('Falta nombre del estudiante.')
+    if not cedula:
+        raise PaymentGatewayError('Falta cédula del estudiante.')
+    if not email:
+        raise PaymentGatewayError('Falta correo del estudiante.')
+    if not telefono:
+        raise PaymentGatewayError('Falta número de celular del estudiante.')
+
+    direccion = _clean_text(student.get('direccion')) or DEFAULT_EMPTY_LOCATION
+    localidad = _clean_text(student.get('localidad')) or DEFAULT_EMPTY_LOCATION
+    course_name = _clean_text(defaults.get('nombre_materia'))
+    descripcion = f'Matrícula académica del curso {course_name}' if course_name else 'Matrícula académica'
+
+    return {
+        'nombre': nombre,
+        'cedula': cedula,
+        'email': email,
+        'telefono': telefono,
+        'localidad': localidad,
+        'direccion': direccion,
+        'descripcion': descripcion,
+        'nombre_materia': course_name,
+        'carrera_num': defaults.get('carrera_num', ''),
+        'cod_anio_basica': defaults['cod_anio_basica'],
+        'codigo_materia': defaults['codigo_materia'],
+        'codigo_periodo': defaults['codigo_periodo'],
+        'estado_periodo': defaults.get('estado_periodo', ''),
+        'data_treatment_accepted': True,
+        'provider_payload': {
+            'tipo': 'matricula_academica_sin_cargo',
+            'nombre': nombre,
+            'cedula': cedula,
+            'email': email,
+            'telefono': telefono,
+            'localidad': localidad,
+            'direccion': direccion,
+            'descripcion': descripcion,
+            'nombre_materia': course_name,
+            'carrera_num': defaults.get('carrera_num', ''),
+            'cod_anio_basica': defaults['cod_anio_basica'],
+            'codigo_materia': defaults['codigo_materia'],
+            'codigo_periodo': defaults['codigo_periodo'],
+            'estado_periodo': defaults.get('estado_periodo', ''),
+        },
+    }
+
+
+def _serialize_student_candidate(row: dict[str, Any]) -> dict[str, str]:
+    telefono = _clean_text(row.get('telefono')) or _clean_text(row.get('movil'))
+    return {
+        'codigo_estud': _clean_text(row.get('codigo_estud')),
+        'nombre': _clean_text(row.get('nombre')),
+        'cedula': re.sub(r'\D+', '', _clean_text(row.get('cedula'))),
+        'email': _clean_text(row.get('email')).lower(),
+        'telefono': telefono,
+        'localidad': _clean_text(row.get('localidad')),
+        'direccion': _clean_text(row.get('direccion')),
+    }
+
+
 def _clean_defaults(defaults: dict[str, Any]) -> dict[str, str]:
     required = {
-        'cod_anio_basica': 'Debes seleccionar la carrera para la matrícula masiva.',
-        'codigo_materia': 'Debes seleccionar el curso para la matrícula masiva.',
-        'codigo_periodo': 'Debes seleccionar el período para la matrícula masiva.',
+        'cod_anio_basica': 'Debes seleccionar la carrera para la matrícula.',
+        'codigo_materia': 'Debes seleccionar el curso para la matrícula.',
+        'codigo_periodo': 'Debes seleccionar el período para la matrícula.',
     }
     cleaned = {key: str(value or '').strip() for key, value in defaults.items()}
     for field, message in required.items():
@@ -369,8 +578,6 @@ def _payload_from_row(row: dict[str, str], defaults: dict[str, str]) -> dict[str
         'telefono': telefono,
         'localidad': localidad,
         'direccion': direccion,
-        'ocupacion': _clean_text(row.get('ocupacion')),
-        'empresa': _clean_text(row.get('empresa')),
         'descripcion': descripcion,
         'nombre_materia': course_name,
         'carrera_num': defaults.get('carrera_num', ''),
@@ -387,8 +594,6 @@ def _payload_from_row(row: dict[str, str], defaults: dict[str, str]) -> dict[str
             'telefono': telefono,
             'localidad': localidad,
             'direccion': direccion,
-            'ocupacion': _clean_text(row.get('ocupacion')),
-            'empresa': _clean_text(row.get('empresa')),
             'descripcion': descripcion,
             'nombre_materia': course_name,
             'carrera_num': defaults.get('carrera_num', ''),
@@ -411,6 +616,20 @@ def _row_full_name(row: dict[str, str]) -> str:
 
 def _normalize_header(value: Any) -> str:
     return re.sub(r'\s+', ' ', str(value or '').strip().lower())
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(float(str(value or '').strip()))
+    except (TypeError, ValueError):
+        return default
+
+
+def _fetch_all(query: str, params: list[Any]) -> list[dict[str, Any]]:
+    with connection.cursor() as cursor:
+        cursor.execute(query, params)
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def _clean_text(value: Any) -> str:

@@ -24,8 +24,6 @@ function InscriptionPage() {
     telefono: '',
     localidad: '',
     direccion: '',
-    ocupacion: '',
-    empresa: '',
     carrera_num: '',
     cod_anio_basica: '',
     codigo_materia: '',
@@ -41,6 +39,7 @@ function InscriptionPage() {
   const [registrationErrorMessage, setRegistrationErrorMessage] = useState('')
   const [certificateErrorMessage, setCertificateErrorMessage] = useState('')
   const [registrationResult, setRegistrationResult] = useState(null)
+  const [isRegistrationResultOpen, setIsRegistrationResultOpen] = useState(false)
   const [registeredUserNotice, setRegisteredUserNotice] = useState(null)
   const [, setIsMatriculaLoading] = useState(true)
   const [catalogs, setCatalogs] = useState({
@@ -231,6 +230,7 @@ function InscriptionPage() {
     setRegistrationErrorMessage('')
     setCertificateErrorMessage('')
     setRegistrationResult(null)
+    setIsRegistrationResultOpen(false)
     setRegisteredUserNotice(null)
 
     if (registrationForm.dataTreatment !== 'si') {
@@ -280,6 +280,7 @@ function InscriptionPage() {
           telefono: registrationForm.telefono,
           direccion: registrationForm.direccion,
           matricula: registrationForm.matricula,
+          localidad: registrationForm.localidad,
           monto: registrationForm.monto ? Number(registrationForm.monto) : null,
           descripcion: paymentDescription,
           nombre_materia: selectedCourse?.nombre_materia || '',
@@ -297,8 +298,6 @@ function InscriptionPage() {
             telefono: registrationForm.telefono,
             localidad: registrationForm.localidad,
             direccion: registrationForm.direccion,
-            ocupacion: registrationForm.ocupacion,
-            empresa: registrationForm.empresa,
             matricula: registrationForm.matricula,
             monto: registrationForm.monto ? Number(registrationForm.monto) : null,
             descripcion: paymentDescription,
@@ -334,6 +333,7 @@ function InscriptionPage() {
       }
 
       setRegistrationResult(payload)
+      setIsRegistrationResultOpen(true)
       setRegistrationForm((current) => ({
         ...current,
         dataTreatment: 'si',
@@ -404,6 +404,79 @@ function InscriptionPage() {
           </section>
         </div>
       ) : null}
+      {registrationResult && isRegistrationResultOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="registration-result-title">
+          <section className="registration-result-modal">
+            <div className="registration-result-header">
+              <div>
+                <h2 id="registration-result-title">Inscripción completada</h2>
+                <p>{registrationResult.email_result?.message ?? 'Correo enviado correctamente.'}</p>
+              </div>
+              <button
+                type="button"
+                className="ghost-button compact-button"
+                onClick={() => setIsRegistrationResultOpen(false)}
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="registration-result-grid">
+              <div>
+                <span>Matrícula</span>
+                <strong>{registrationResult.matricula || registrationForm.matricula || '-'}</strong>
+              </div>
+              <div>
+                <span>Curso</span>
+                <strong>{automaticSelectedCourse ? removeNumbersFromLabel(automaticSelectedCourse.nombre_materia) : '-'}</strong>
+              </div>
+              <div>
+                <span>Correo de comprobante</span>
+                <strong>{receiptEmail}</strong>
+              </div>
+            </div>
+
+            {registrationResult.payment_link ? (
+              <div className="registration-result-linkbox">
+                <span>Enlace de pago</span>
+                <a href={registrationResult.payment_link} target="_blank" rel="noreferrer">
+                  {registrationResult.payment_link}
+                </a>
+              </div>
+            ) : null}
+
+            <p className="payment-result-note payment-result-receipt">
+              Luego de realizar el pago, envía el comprobante a{' '}
+              <a href={`mailto:${receiptEmail}`}>{receiptEmail}</a> indicando tu nombre completo y cédula de ciudadanía.
+            </p>
+
+            <div className="registration-result-actions">
+              {registrationResult.payment_link ? (
+                <a className="submit-button registration-result-pay-button" href={registrationResult.payment_link} target="_blank" rel="noreferrer">
+                  Abrir enlace de pago
+                </a>
+              ) : null}
+              {registrationResult.certificate ? (
+                <button
+                  type="button"
+                  className="ghost-button compact-button"
+                  onClick={handleCertificateDownload}
+                  disabled={isCertificateDownloading}
+                >
+                  {isCertificateDownloading ? 'Generando certificado...' : 'Descargar certificado PDF'}
+                </button>
+              ) : null}
+            </div>
+
+            {registrationResult.certificate_email_result ? (
+              <p className="payment-result-note">
+                {registrationResult.certificate_email_result.message}
+              </p>
+            ) : null}
+            {certificateErrorMessage ? <p className="form-error">{certificateErrorMessage}</p> : null}
+          </section>
+        </div>
+      ) : null}
       <section className="inscription-centered">
           <div className="auth-card lookup-mode inscription-card">
           <img
@@ -428,7 +501,7 @@ function InscriptionPage() {
 
               <form className="auth-form" onSubmit={handleRegistrationSubmit}>
                 <div className="registration-row-group">
-                  <div className="registration-grid registration-grid-4">
+                  <div className="registration-grid registration-course-grid">
                     <label className="field">
                       <span>Curso en: *</span>
                       <select
@@ -490,18 +563,18 @@ function InscriptionPage() {
                 </div>
 
                 <div className="registration-row-group">
-                  <div className="registration-grid">
+                  <div className="registration-grid registration-data-grid">
                     <label className="field">
-                    <span>Nombre completo *</span>
+                      <span>Nombre completo *</span>
                       <input
                         name="nombre"
                         type="text"
-                      value={registrationForm.nombre}
-                      onChange={handleRegistrationChange}
-                      placeholder="Nombre completo"
-                      required
-                    />
-                  </label>
+                        value={registrationForm.nombre}
+                        onChange={handleRegistrationChange}
+                        placeholder="Nombre completo"
+                        required
+                      />
+                    </label>
 
                     <label className="field">
                       <span>Cédula *</span>
@@ -517,108 +590,70 @@ function InscriptionPage() {
                         required
                       />
                     </label>
-                  </div>
-                </div>
 
-                <div className="registration-row-group">
-                  <div className="registration-grid">
                     <label className="field">
-                    <span>Correo Electrónico *</span>
+                      <span>Correo Electrónico *</span>
                       <input
                         name="email"
                         type="email"
-                      value={registrationForm.email}
-                      onChange={handleRegistrationChange}
-                    placeholder="correo@dominio.com"
-                    autoComplete="email"
-                      required
+                        value={registrationForm.email}
+                        onChange={handleRegistrationChange}
+                        placeholder="correo@dominio.com"
+                        autoComplete="email"
+                        required
                       />
                     </label>
 
                     <label className="field">
-                    <span>Número de Teléfono *</span>
+                      <span>Número de Teléfono *</span>
                       <input
-                      name="telefono"
-                      type="text"
-                      value={registrationForm.telefono}
-                      onChange={handleRegistrationChange}
-                      placeholder="Teléfono"
-                      required
+                        name="telefono"
+                        type="text"
+                        value={registrationForm.telefono}
+                        onChange={handleRegistrationChange}
+                        placeholder="Teléfono"
+                        required
                       />
                     </label>
-                  </div>
-                </div>
 
-                <div className="registration-row-group">
-                  <div className="registration-grid">
                     <label className="field">
-                    <span>Localidad *</span>
-                    <input
-                      name="localidad"
-                      type="text"
-                      value={registrationForm.localidad}
-                      onChange={handleRegistrationChange}
-                      placeholder="Localidad"
-                      required
-                    />
-                  </label>
+                      <span>Ciudad *</span>
+                      <input
+                        name="localidad"
+                        type="text"
+                        value={registrationForm.localidad}
+                        onChange={handleRegistrationChange}
+                        placeholder="Ciudad"
+                        required
+                      />
+                    </label>
 
-                  <label className="field">
-                    <span>Dirección *</span>
-                    <input
-                      name="direccion"
-                      type="text"
-                      value={registrationForm.direccion}
-                      onChange={handleRegistrationChange}
-                      placeholder="Dirección"
-                      required
-                    />
-                  </label>
-                  </div>
-                </div>
+                    <label className="field registration-address-field">
+                      <span>Dirección *</span>
+                      <input
+                        name="direccion"
+                        type="text"
+                        value={registrationForm.direccion}
+                        onChange={handleRegistrationChange}
+                        placeholder="Dirección"
+                        required
+                      />
+                    </label>
 
-                <div className="registration-row-group">
-                  <div className="registration-grid">
-                    <label className="field">
-                    <span>Ocupación</span>
-                    <input
-                      name="ocupacion"
-                      type="text"
-                      value={registrationForm.ocupacion}
-                      onChange={handleRegistrationChange}
-                      placeholder="Ocupación"
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Empresa</span>
-                    <input
-                      name="empresa"
-                      type="text"
-                      value={registrationForm.empresa}
-                      onChange={handleRegistrationChange}
-                      placeholder="Empresa"
-                    />
-                  </label>
-                  </div>
-                </div>
-
-                <div className="registration-row-group">
-                  <div className="registration-grid">
-                  <label className="field readonly-field">
-                    <span>Monto *</span>
-                    <input
-                      name="monto"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={registrationForm.monto}
-                      placeholder="Monto calculado automáticamente"
-                      readOnly
-                      disabled
-                      required
-                    />
-                  </label>
+                    <label className="field readonly-field registration-course-name-field">
+                      <span>Monto *</span>
+                      <input
+                        name="monto"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={registrationForm.monto}
+                        placeholder="Monto calculado automáticamente"
+                        readOnly
+                        disabled
+                        required
+                      />
+                    </label>
                   </div>
                 </div>
 
@@ -670,41 +705,6 @@ function InscriptionPage() {
               </button>
             </form>
 
-              {registrationResult ? (
-              <div className="payment-result">
-                  <p className="payment-result-title">Inscripción completada</p>
-                {registrationResult.payment_link ? (
-                  <a className="payment-result-link" href={registrationResult.payment_link} target="_blank" rel="noreferrer">
-                    {registrationResult.payment_link}
-                  </a>
-                ) : null}
-                <p className="payment-result-note">
-                    {registrationResult.email_result?.message ?? 'Correo enviado correctamente.'}
-                </p>
-                <p className="payment-result-note payment-result-receipt">
-                  Luego de realizar el pago, envía el comprobante a{' '}
-                  <a href={`mailto:${receiptEmail}`}>{receiptEmail}</a> indicando tu nombre completo y cédula de ciudadanía.
-                </p>
-                {registrationResult.certificate ? (
-                  <div className="payment-result-actions">
-                    <button
-                      type="button"
-                      className="ghost-button compact-button"
-                      onClick={handleCertificateDownload}
-                      disabled={isCertificateDownloading}
-                    >
-                      {isCertificateDownloading ? 'Generando certificado...' : 'Descargar certificado PDF'}
-                    </button>
-                  </div>
-                ) : null}
-                {registrationResult.certificate_email_result ? (
-                  <p className="payment-result-note">
-                    {registrationResult.certificate_email_result.message}
-                  </p>
-                ) : null}
-                {certificateErrorMessage ? <p className="form-error">{certificateErrorMessage}</p> : null}
-              </div>
-            ) : null}
           </section>
 
         </div>

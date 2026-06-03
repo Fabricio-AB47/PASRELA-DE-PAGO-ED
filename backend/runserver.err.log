@@ -1,0 +1,86 @@
+Traceback (most recent call last):
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\backends\base\base.py", line 279, in ensure_connection
+    self.connect()
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\utils\asyncio.py", line 26, in inner
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\backends\base\base.py", line 256, in connect
+    self.connection = self.get_new_connection(conn_params)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\mssql\base.py", line 409, in get_new_connection
+    conn = Database.connect(connstr, **args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pyodbc.OperationalError: ('08001', '[08001] [Microsoft][ODBC Driver 18 for SQL Server]TCP Provider: The wait operation timed out.\r\n (258) (SQLDriverConnect); [08001] [Microsoft][ODBC Driver 18 for SQL Server]Login timeout expired (0); [08001] [Microsoft][ODBC Driver 18 for SQL Server]Invalid connection string attribute (0); [08001] [Microsoft][ODBC Driver 18 for SQL Server]A network-related or instance-specific error has occurred while establishing a connection to 192.168.100.8,1433. Server is not found or not accessible. Check if instance name is correct and if SQL Server is configured to allow remote connections. For more information see SQL Server Books Online. (258)')
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\backend\manage.py", line 31, in <module>
+    main()
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\backend\manage.py", line 27, in main
+    execute_from_command_line(sys.argv)
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\__init__.py", line 443, in execute_from_command_line
+    utility.execute()
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\__init__.py", line 437, in execute
+    self.fetch_command(subcommand).run_from_argv(self.argv)
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\base.py", line 420, in run_from_argv
+    self.execute(*args, **cmd_options)
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\commands\runserver.py", line 69, in execute
+    super().execute(*args, **options)
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\base.py", line 464, in execute
+    output = self.handle(*args, **options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\commands\runserver.py", line 110, in handle
+    self.run(**options)
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\commands\runserver.py", line 119, in run
+    self.inner_run(None, **options)
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\commands\runserver.py", line 137, in inner_run
+    self.check_migrations()
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\core\management\base.py", line 591, in check_migrations
+    executor = MigrationExecutor(connections[DEFAULT_DB_ALIAS])
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\migrations\executor.py", line 18, in __init__
+    self.loader = MigrationLoader(self.connection)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\migrations\loader.py", line 59, in __init__
+    self.build_graph()
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\migrations\loader.py", line 288, in build_graph
+    self.applied_migrations = recorder.applied_migrations()
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\migrations\recorder.py", line 89, in applied_migrations
+    if self.has_table():
+       ^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\migrations\recorder.py", line 63, in has_table
+    with self.connection.cursor() as cursor:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\utils\asyncio.py", line 26, in inner
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\backends\base\base.py", line 320, in cursor
+    return self._cursor()
+           ^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\mssql\base.py", line 279, in _cursor
+    conn = super()._cursor()
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\backends\base\base.py", line 296, in _cursor
+    self.ensure_connection()
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\utils\asyncio.py", line 26, in inner
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\backends\base\base.py", line 278, in ensure_connection
+    with self.wrap_database_errors:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\utils.py", line 94, in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\backends\base\base.py", line 279, in ensure_connection
+    self.connect()
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\utils\asyncio.py", line 26, in inner
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\django\db\backends\base\base.py", line 256, in connect
+    self.connection = self.get_new_connection(conn_params)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\fabri\Documents\INTEC PROYECTOS\ps\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\mssql\base.py", line 409, in get_new_connection
+    conn = Database.connect(connstr, **args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+django.db.utils.OperationalError: ('08001', '[08001] [Microsoft][ODBC Driver 18 for SQL Server]TCP Provider: The wait operation timed out.\r\n (258) (SQLDriverConnect); [08001] [Microsoft][ODBC Driver 18 for SQL Server]Login timeout expired (0); [08001] [Microsoft][ODBC Driver 18 for SQL Server]Invalid connection string attribute (0); [08001] [Microsoft][ODBC Driver 18 for SQL Server]A network-related or instance-specific error has occurred while establishing a connection to 192.168.100.8,1433. Server is not found or not accessible. Check if instance name is correct and if SQL Server is configured to allow remote connections. For more information see SQL Server Books Online. (258)')

@@ -11,7 +11,9 @@ from .bulk_enrollment import (
     TEMPLATE_FILE_NAME,
     build_bulk_enrollment_template,
     excel_upload_from_json,
+    list_academic_enrollment_students,
     process_bulk_enrollment_excel,
+    process_selected_student_enrollment,
 )
 from .course_cuts import (
     CourseCutError,
@@ -651,6 +653,69 @@ def admin_bulk_enrollment_template_view(_request):
     )
     response['Content-Disposition'] = f'attachment; filename="{TEMPLATE_FILE_NAME}"'
     return response
+
+
+@require_GET
+@require_admin_session
+@never_cache
+def admin_academic_enrollment_students_view(request):
+    try:
+        students = list_academic_enrollment_students(
+            search=request.GET.get('q', ''),
+            limit=request.GET.get('limit', 200),
+        )
+    except Exception:
+        logger.exception('Unexpected error while loading academic enrollment students.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno cargando estudiantes para matrícula académica.',
+            },
+            status=500,
+        )
+
+    return JsonResponse(
+        {
+            'ok': True,
+            'message': 'Estudiantes cargados.',
+            'students': students,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_academic_enrollment_selected_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
+            status=400,
+        )
+
+    try:
+        result = process_selected_student_enrollment(payload)
+    except BulkEnrollmentError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while processing selected academic enrollment.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno procesando la matrícula académica seleccionada.',
+            },
+            status=500,
+        )
+
+    return JsonResponse(
+        {
+            'ok': True,
+            'message': 'Matrícula académica procesada.',
+            'result': result,
+        }
+    )
 
 
 @csrf_exempt

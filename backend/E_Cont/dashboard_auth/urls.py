@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import (
     admin_academic_catalogs_view,
+    admin_academic_enrollment_selected_view,
+    admin_academic_enrollment_students_view,
     admin_bulk_enrollment_template_view,
     admin_bulk_enrollment_view,
     admin_carrera_status_view,
@@ -35,6 +37,8 @@ urlpatterns = [
     path('microsoft365/users/', microsoft365_create_user_view, name='microsoft365-create-user'),
     path('microsoft365/licenses/student/', microsoft365_student_license_view, name='microsoft365-student-license'),
     path('admin/academic-catalogs/', admin_academic_catalogs_view, name='admin-academic-catalogs'),
+    path('admin/academic-enrollment/students/', admin_academic_enrollment_students_view, name='admin-academic-enrollment-students'),
+    path('admin/academic-enrollment/selected/', admin_academic_enrollment_selected_view, name='admin-academic-enrollment-selected'),
     path('admin/course-cuts/', admin_course_cuts_view, name='admin-course-cuts'),
     path('admin/course-cuts/create/', admin_course_cut_create_view, name='admin-course-cut-create'),
     path('admin/course-cuts/close/', admin_course_cut_close_view, name='admin-course-cut-close'),
