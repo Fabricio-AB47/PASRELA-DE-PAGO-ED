@@ -35,6 +35,8 @@ CERTIFICATE_SIGNING_SALT = 'dashboard_auth.inscription_certificate'
 CERTIFICATE_VERSION = '2026-07-20-logo-signature-code-db-cuts-v12'
 DEFAULT_COURSE_START_DATE = '20 de julio de 2026'
 LOGO_FILE_NAME = 'Intec-Logowithslogangray.svg'
+EMAIL_LOGO_FILE_NAME = 'Intec-Logowithslogangray.png'
+EMAIL_LOGO_CONTENT_ID = 'intec-logo.png'
 SIGNATURE_FILE_NAME = 'firma veronica.jpeg'
 CERTIFICATE_CODE_PREFIX = 'INTEC-VGA-CER'
 CERTIFICATE_CODE_PADDING = 3
@@ -191,7 +193,7 @@ def send_certificate_email(
         logo_html = """
             <tr>
               <td align="center" style="padding:24px 28px 8px 28px;background:#ffffff;">
-                <img src="cid:intec-logo" width="230" alt="INTEC" style="display:block;width:230px;max-width:78%;height:auto;border:0;" />
+                <img src="cid:intec-logo.png" width="230" alt="INTEC" style="display:block;width:230px;max-width:78%;height:auto;border:0;" />
               </td>
             </tr>
 """.rstrip()
@@ -650,7 +652,7 @@ def _signature_flowable() -> ReportLabImage | None:
 
 
 def _build_email_logo_attachment() -> dict[str, Any] | None:
-    logo_path = _logo_svg_path()
+    logo_path = _email_logo_path()
     if not logo_path:
         return None
     try:
@@ -660,12 +662,23 @@ def _build_email_logo_attachment() -> dict[str, Any] | None:
 
     return {
         '@odata.type': '#microsoft.graph.fileAttachment',
-        'name': LOGO_FILE_NAME,
-        'contentType': 'image/svg+xml',
+        'name': EMAIL_LOGO_FILE_NAME,
+        'contentType': 'image/png',
         'contentBytes': b64encode(content).decode('ascii'),
         'isInline': True,
-        'contentId': 'intec-logo',
+        'contentId': EMAIL_LOGO_CONTENT_ID,
     }
+
+
+def _email_logo_path() -> Path | None:
+    candidates = [
+        settings.PROJECT_ROOT / 'frontend' / 'dist' / EMAIL_LOGO_FILE_NAME,
+        settings.PROJECT_ROOT / 'frontend' / 'public' / EMAIL_LOGO_FILE_NAME,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _logo_svg_path() -> Path | None:

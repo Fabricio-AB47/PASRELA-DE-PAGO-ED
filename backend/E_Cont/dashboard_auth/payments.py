@@ -1243,6 +1243,8 @@ def _update_official_links_after_payment(
     codigo_periodo: str,
     payment_link: str,
 ) -> None:
+    cabecera_link = _trim_to_max(payment_link, 100)
+    payment_reference = _trim_to_max(payment_link, 80)
     with connection.cursor() as cursor:
         try:
             cursor.execute("EXEC sys.sp_set_session_context @key = N'SYNC_ESTADO_TRIGGER', @value = 1")
@@ -1254,7 +1256,7 @@ def _update_official_links_after_payment(
                   AND CAST(cod_anio_Basica AS varchar(20)) = %s
                   AND CAST(codigo_periodo AS varchar(20)) = %s
                 """,
-                [payment_link, str(codigo_estud), str(cod_anio_basica), str(codigo_periodo)],
+                [cabecera_link, str(codigo_estud), str(cod_anio_basica), str(codigo_periodo)],
             )
         finally:
             cursor.execute("EXEC sys.sp_set_session_context @key = N'SYNC_ESTADO_TRIGGER', @value = NULL")
@@ -1266,7 +1268,7 @@ def _update_official_links_after_payment(
               AND CAST(cod_anio_Basica AS varchar(20)) = %s
               AND CAST(codperiodo AS varchar(20)) = %s
             """,
-            [payment_link, str(codigo_estud), str(cod_anio_basica), str(codigo_periodo)],
+            [payment_reference, str(codigo_estud), str(cod_anio_basica), str(codigo_periodo)],
         )
 
 
@@ -1287,6 +1289,12 @@ def _resolve_or_create_datos_estud(
         carrera_ocupacion=carrera_ocupacion,
         actividad_profesional=actividad_profesional,
     )
+    nombre_corto = _trim_to_max(nombre, 70)
+    email_corto = _trim_to_max(email, 80)
+    correo_intec_corto = _trim_to_max(correo_intec, 100)
+    telefono_corto = _trim_to_max(telefono, 30)
+    movil_corto = _trim_to_max(telefono, 15)
+    direccion_corta = _trim_to_max(direccion, 150)
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -1319,13 +1327,13 @@ def _resolve_or_create_datos_estud(
                 WHERE CAST(codigo_estud AS varchar(50)) = %s
                 """,
                 [
-                    nombre,
-                    email,
-                    correo_intec,
+                    nombre_corto,
+                    email_corto,
+                    correo_intec_corto,
                     _trim_to_max(localidad, 70),
-                    telefono or '',
-                    telefono or '',
-                    direccion or '',
+                    telefono_corto,
+                    movil_corto,
+                    direccion_corta,
                     _trim_to_max(carrera_ocupacion, 50),
                     _trim_to_max(actividad_profesional, 50),
                     _trim_to_max(actividad_profesional, 100),
@@ -1369,13 +1377,13 @@ def _resolve_or_create_datos_estud(
             [
                 codigo_estud,
                 cedula,
-                nombre,
+                nombre_corto,
                 _trim_to_max(localidad, 70),
-                email,
-                correo_intec,
-                telefono or '',
-                telefono or '',
-                direccion or '',
+                email_corto,
+                correo_intec_corto,
+                telefono_corto,
+                movil_corto,
+                direccion_corta,
                 _trim_to_max(carrera_ocupacion, 50),
                 _trim_to_max(actividad_profesional, 50),
                 _trim_to_max(actividad_profesional, 100),
@@ -1762,6 +1770,7 @@ def _insert_cabecera_matricula(
     payment_link: str,
     template: dict[str, Any],
 ) -> None:
+    cabecera_link = _trim_to_max(payment_link, 100)
     with connection.cursor() as cursor:
         numcodigo_column = _resolve_numcodigo_column(cursor)
         insert_numcodigo = not _cabecera_numcodigo_is_identity(cursor, numcodigo_column)
@@ -1808,7 +1817,7 @@ def _insert_cabecera_matricula(
                     _safe_int(template.get('codjornada'), default=1),
                     _safe_int(template.get('codestadoMat'), default=1),
                     str(template.get('Jornada') or ''),
-                    payment_link,
+                    cabecera_link,
                 ],
             )
         finally:
@@ -2060,7 +2069,7 @@ def _send_payment_link_email(
         logo_html = """
             <tr>
               <td align="center" style="padding:24px 28px 8px 28px;background:#ffffff;">
-                <img src="cid:intec-logo" width="230" alt="INTEC" style="display:block;width:230px;max-width:78%;height:auto;border:0;" />
+                <img src="cid:intec-logo.png" width="230" alt="INTEC" style="display:block;width:230px;max-width:78%;height:auto;border:0;" />
               </td>
             </tr>
 """.rstrip()
@@ -2166,7 +2175,7 @@ def _send_intec_welcome_email(
         logo_html = """
             <tr>
               <td align="center" style="padding:24px 28px 8px 28px;background:#ffffff;">
-                <img src="cid:intec-logo" width="230" alt="INTEC" style="display:block;width:230px;max-width:78%;height:auto;border:0;" />
+                <img src="cid:intec-logo.png" width="230" alt="INTEC" style="display:block;width:230px;max-width:78%;height:auto;border:0;" />
               </td>
             </tr>
 """.rstrip()
@@ -2240,7 +2249,7 @@ def _build_intec_logo_attachment() -> dict[str, Any] | None:
         Path(__file__).resolve().parents[3]
         / 'frontend'
         / 'public'
-        / 'Intec-Logowithslogangray.svg'
+        / 'Intec-Logowithslogangray.png'
     )
     try:
         content = logo_path.read_bytes()
@@ -2249,11 +2258,11 @@ def _build_intec_logo_attachment() -> dict[str, Any] | None:
 
     return {
         '@odata.type': '#microsoft.graph.fileAttachment',
-        'name': 'Intec-Logowithslogangray.svg',
-        'contentType': 'image/svg+xml',
+        'name': 'Intec-Logowithslogangray.png',
+        'contentType': 'image/png',
         'contentBytes': b64encode(content).decode('ascii'),
         'isInline': True,
-        'contentId': 'intec-logo',
+        'contentId': 'intec-logo.png',
     }
 
 
