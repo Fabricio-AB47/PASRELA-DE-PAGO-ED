@@ -8,7 +8,7 @@ from django.db import connection
 
 
 ACTIVE_VALUES = {'a', 'activo', 'active', '1', 'si', 's', 'true'}
-INSCRIPTION_AMOUNT_DISCOUNT = Decimal('20.00')
+INSCRIPTION_AMOUNT_DISCOUNT = Decimal('0.00')
 PENSUM_STATUS_COLUMN_CANDIDATES = (
     'estado_mat',
     'Estado',

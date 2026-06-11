@@ -537,3 +537,48 @@ OSError: [Errno 22] Invalid argument
 OSError: [Errno 22] Invalid argument
 2026-06-08 11:13:01.598921: Running on_exit tasks
 2026-06-08 11:13:01.607967: wfastcgi.py 3.0.0 closed
+2026-06-08 19:31:13.332991: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-06-08 19:31:13.341966: wfastcgi.py 3.0.0 initialized
+2026-06-08 19:31:18.433698: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-06-08 19:31:18.443571: wfastcgi.py 3.0.0 initialized
+2026-06-08 19:36:27.815355: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-06-08 19:36:27.825615: Running on_exit tasks
+2026-06-08 19:36:27.832690: wfastcgi.py 3.0.0 closed
+2026-06-08 19:36:32.943108: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-06-08 19:36:32.953373: Running on_exit tasks
+2026-06-08 19:36:32.962861: wfastcgi.py 3.0.0 closed
+2026-06-10 08:56:23.575508: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-06-10 08:56:23.583900: wfastcgi.py 3.0.0 initialized
+2026-06-10 08:56:23.583977: wfastcgi.py 3.0.0 initialized
+2026-06-10 09:01:37.646054: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-06-10 09:01:37.654654: Unhandled exception in wfastcgi.py: Traceback (most recent call last):
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 774, in main
+    record = read_fastcgi_record(fcgi_stream)
+  File "C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\.venv\Lib\site-packages\wfastcgi.py", line 158, in read_fastcgi_record
+    data = stream.read(8)     # read record
+OSError: [Errno 22] Invalid argument
+2026-06-10 09:01:37.654735: Running on_exit tasks
+2026-06-10 09:01:37.662905: Running on_exit tasks
+2026-06-10 09:01:37.662948: wfastcgi.py 3.0.0 closed
+2026-06-10 09:01:37.672957: wfastcgi.py 3.0.0 closed
+2026-06-11 15:33:18.195785: wfastcgi.py will restart when files in C:\Users\Administrator\Documents\PASRELA-DE-PAGO-ED\backend\ are changed: .*((\.py)|(\.config))$
+2026-06-11 15:33:18.204526: wfastcgi.py 3.0.0 initialized
+2026-06-11 15:37:03.047901: wfastcgi.py exiting because E_Cont\dashboard_auth\inscription_catalogs.py has changed, matching .*((\.py)|(\.config))$
+2026-06-11 15:37:03.057157: Running on_exit tasks
+2026-06-11 15:37:03.057256: wfastcgi.py exiting because E_Cont\dashboard_auth\inscription_catalogs.py has changed, matching .*((\.py)|(\.config))$
+2026-06-11 15:37:03.069573: Running on_exit tasks
