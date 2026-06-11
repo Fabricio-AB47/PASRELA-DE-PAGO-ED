@@ -8,6 +8,7 @@ from django.db import connection
 
 
 ACTIVE_VALUES = {'a', 'activo', 'active', '1', 'si', 's', 'true'}
+FIXED_INSCRIPTION_AMOUNT = Decimal('500.00')
 INSCRIPTION_AMOUNT_DISCOUNT = Decimal('0.00')
 PENSUM_STATUS_COLUMN_CANDIDATES = (
     'estado_mat',
@@ -521,10 +522,7 @@ def _status_to_db_value(value: Any) -> str:
 
 
 def calculate_inscription_amount(horas: Any, valor_hora: Any) -> Decimal:
-    amount = (_to_decimal_value(horas) * _to_decimal_value(valor_hora)) - INSCRIPTION_AMOUNT_DISCOUNT
-    if amount < 0:
-        amount = Decimal('0')
-    return amount.quantize(Decimal('0.01'))
+    return FIXED_INSCRIPTION_AMOUNT.quantize(Decimal('0.01'))
 
 
 def _to_decimal_value(value: Any) -> Decimal:

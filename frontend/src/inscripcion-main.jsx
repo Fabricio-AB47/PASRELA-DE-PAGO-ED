@@ -6,6 +6,7 @@ import './App.css'
 import { downloadBlobResponse, readResponsePayload } from './shared.js'
 
 const FIXED_COD_ANIO_BASICA = '13'
+const FIXED_INSCRIPTION_AMOUNT = '500.00'
 const PAYMENT_RECEIPT_EMAIL = 'DeptCobranzas@intec.edu.ec'
 
 const onlyActiveCourses = (courses) => (courses || []).filter((course) => course.es_activo !== false)
@@ -30,7 +31,7 @@ function InscriptionPage() {
     codigo_periodo: '',
     estado_periodo: '',
     matricula: '',
-    monto: '',
+    monto: FIXED_INSCRIPTION_AMOUNT,
     descripcion: 'Pago de inscripción',
     dataTreatment: '',
   })
@@ -129,7 +130,7 @@ function InscriptionPage() {
           codigo_materia: defaultCourse?.codigo_materia
             ? String(defaultCourse.codigo_materia)
             : current.codigo_materia,
-          monto: defaultCourse?.monto_calculado || current.monto,
+          monto: FIXED_INSCRIPTION_AMOUNT,
           codigo_periodo: activePeriod?.cod_periodo
             ? String(activePeriod.cod_periodo)
             : current.codigo_periodo,
@@ -170,20 +171,16 @@ function InscriptionPage() {
         carrera_num: String(value),
         cod_anio_basica: codAnio,
         codigo_materia: firstCourse?.codigo_materia ? String(firstCourse.codigo_materia) : '',
-        monto: firstCourse?.monto_calculado || '',
+        monto: FIXED_INSCRIPTION_AMOUNT,
       }))
       return
     }
 
     if (name === 'codigo_materia') {
-      const courses = onlyActiveCourses(catalogs.cursos_por_carrera?.[registrationForm.cod_anio_basica])
-      const selectedCourse = courses.find(
-        (item) => String(item.codigo_materia) === String(value),
-      )
       setRegistrationForm((current) => ({
         ...current,
         codigo_materia: String(value),
-        monto: selectedCourse?.monto_calculado || '',
+        monto: FIXED_INSCRIPTION_AMOUNT,
       }))
       return
     }
@@ -281,7 +278,7 @@ function InscriptionPage() {
           direccion: registrationForm.direccion,
           matricula: registrationForm.matricula,
           localidad: registrationForm.localidad,
-          monto: registrationForm.monto ? Number(registrationForm.monto) : null,
+          monto: Number(FIXED_INSCRIPTION_AMOUNT),
           descripcion: paymentDescription,
           nombre_materia: selectedCourse?.nombre_materia || '',
           carrera_num: registrationForm.carrera_num,
@@ -299,7 +296,7 @@ function InscriptionPage() {
             localidad: registrationForm.localidad,
             direccion: registrationForm.direccion,
             matricula: registrationForm.matricula,
-            monto: registrationForm.monto ? Number(registrationForm.monto) : null,
+            monto: Number(FIXED_INSCRIPTION_AMOUNT),
             descripcion: paymentDescription,
             nombre_materia: selectedCourse?.nombre_materia || '',
             carrera_num: registrationForm.carrera_num,

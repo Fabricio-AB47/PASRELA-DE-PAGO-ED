@@ -104,7 +104,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         monto = f'{monto_calculado:.2f}'
     elif monto in (None, '', 0, '0'):
         raise PaymentGatewayError(
-            'No fue posible calcular el monto del curso con Horas x ValorHoraVirtual en PENSUM.'
+            'No fue posible validar el curso activo en PENSUM para asignar el monto fijo.'
         )
 
     if _cabecera_has_numcodigo(matricula):
