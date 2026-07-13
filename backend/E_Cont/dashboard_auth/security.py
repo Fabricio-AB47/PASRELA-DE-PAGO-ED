@@ -54,6 +54,60 @@ def require_admin_session(view_func: Callable) -> Callable:
     return wrapped
 
 
+def require_teacher_session(view_func: Callable) -> Callable:
+    @wraps(view_func)
+    def wrapped(request, *args, **kwargs):
+        token = _extract_session_token(request)
+        if not token:
+            return _auth_response('Debes iniciar sesión para acceder al dashboard docente.', 401)
+
+        try:
+            session_user = signing.loads(
+                token,
+                salt=SESSION_TOKEN_SALT,
+                max_age=_session_max_age_seconds(),
+            )
+        except signing.SignatureExpired:
+            return _auth_response('La sesión expiró. Inicia sesión nuevamente.', 401)
+        except signing.BadSignature:
+            return _auth_response('Sesión inválida. Inicia sesión nuevamente.', 401)
+
+        if str(session_user.get('category') or '').lower() != 'teacher':
+            return _auth_response('No tienes permisos para consultar información docente.', 403)
+
+        request.dashboard_user = session_user
+        return view_func(request, *args, **kwargs)
+
+    return wrapped
+
+
+def require_student_session(view_func: Callable) -> Callable:
+    @wraps(view_func)
+    def wrapped(request, *args, **kwargs):
+        token = _extract_session_token(request)
+        if not token:
+            return _auth_response('Debes iniciar sesión para acceder al dashboard estudiantil.', 401)
+
+        try:
+            session_user = signing.loads(
+                token,
+                salt=SESSION_TOKEN_SALT,
+                max_age=_session_max_age_seconds(),
+            )
+        except signing.SignatureExpired:
+            return _auth_response('La sesión expiró. Inicia sesión nuevamente.', 401)
+        except signing.BadSignature:
+            return _auth_response('Sesión inválida. Inicia sesión nuevamente.', 401)
+
+        if str(session_user.get('category') or '').lower() != 'student':
+            return _auth_response('No tienes permisos para consultar información estudiantil.', 403)
+
+        request.dashboard_user = session_user
+        return view_func(request, *args, **kwargs)
+
+    return wrapped
+
+
 def _extract_session_token(request) -> str:
     authorization = request.headers.get('Authorization', '').strip()
     if authorization.lower().startswith('bearer '):
@@ -77,7 +131,7 @@ def _validate_admin_request_shape(request) -> JsonResponse | None:
         try:
             if int(content_length) > MAX_ADMIN_JSON_BODY_BYTES:
                 return JsonResponse(
-                    {'ok': False, 'message': 'La solicitud supera el tamano permitido.'},
+                    {'ok': False, 'message': 'La solicitud supera el tamaño permitido.'},
                     status=413,
                 )
         except ValueError:

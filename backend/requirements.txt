@@ -8,6 +8,7 @@ requests
 gunicorn
 python-docx
 reportlab
+qrcode[pil]>=7.4
 docx2pdf
 mssql-django
 uvicorn

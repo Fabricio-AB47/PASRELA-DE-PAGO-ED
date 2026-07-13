@@ -158,16 +158,16 @@ def excel_upload_from_json(payload: dict[str, Any]) -> InMemoryExcelUpload:
     if not file_name.lower().endswith('.xlsx'):
         raise BulkEnrollmentError('El archivo debe estar en formato .xlsx.')
     if not content_base64:
-        raise BulkEnrollmentError('El archivo Excel esta vacio.')
+        raise BulkEnrollmentError('El archivo Excel está vacío.')
 
     try:
         content = base64.b64decode(content_base64, validate=True)
     except (ValueError, TypeError) as exc:
-        raise BulkEnrollmentError('El contenido del Excel no es base64 valido.') from exc
+        raise BulkEnrollmentError('El contenido del Excel no es base64 válido.') from exc
 
     upload = InMemoryExcelUpload(name=file_name, content=content)
     if upload.size > MAX_UPLOAD_BYTES:
-        raise BulkEnrollmentError('El archivo excede el tamano maximo permitido para carga masiva.')
+        raise BulkEnrollmentError('El archivo excede el tamaño máximo permitido para carga masiva.')
     return upload
 
 
@@ -181,7 +181,7 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
 
     file_size = int(getattr(uploaded_file, 'size', 0) or 0)
     if file_size > MAX_UPLOAD_BYTES:
-        raise BulkEnrollmentError('El archivo excede el tamano maximo permitido para carga masiva.')
+        raise BulkEnrollmentError('El archivo excede el tamaño máximo permitido para carga masiva.')
 
     clean_defaults = _clean_defaults(defaults)
     rows = _read_excel_rows(uploaded_file)
