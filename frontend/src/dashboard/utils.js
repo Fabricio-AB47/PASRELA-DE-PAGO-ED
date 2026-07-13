@@ -4,14 +4,14 @@ export const STATUS_OPTIONS = [
 ]
 
 export const statusLabel = (estado) => (estado === 'A' ? 'Activo' : 'Inactivo')
-export const categoryLabel = (value, fallback = 'Sin categoría') => String(value || '').trim() || fallback
+export const categoryLabel = (value, fallback = 'Sin categoria') => String(value || '').trim() || fallback
 export const normalizeSearchText = (value) =>
   String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim()
-export const uniqueSortedValues = (values, fallback = 'Sin categoría') =>
+export const uniqueSortedValues = (values, fallback = 'Sin categoria') =>
   Array.from(new Set((values || []).map((value) => categoryLabel(value, fallback)))).sort((first, second) => {
     const firstNumber = Number(first)
     const secondNumber = Number(second)

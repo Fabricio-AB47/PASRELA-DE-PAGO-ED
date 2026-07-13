@@ -486,18 +486,18 @@ def admin_get_payment_info(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(provider_payload, dict):
         return _call_payment_provider(provider_payload)
 
-    transacción_id = str(payload.get('transacción_id') or '').strip()
+    transaccion_id = str(payload.get('transaccion_id') or '').strip()
     plataforma_id = str(payload.get('plataforma_id') or '').strip()
     cliente = str(payload.get('cliente') or '').strip()
 
-    if not any([transacción_id, plataforma_id, cliente]):
+    if not any([transaccion_id, plataforma_id, cliente]):
         raise PaymentGatewayError(
-            'Debes indicar al menos un criterio: transacción_id, plataforma_id o cliente.'
+            'Debes indicar al menos un criterio: transaccion_id, plataforma_id o cliente.'
         )
 
     query_payload: dict[str, Any] = {
         'accion': 'consultar',
-        'transacción_id': transacción_id,
+        'transaccion_id': transaccion_id,
         'plataforma_id': plataforma_id,
         'cliente': cliente,
     }
@@ -509,16 +509,16 @@ def admin_cancel_payment(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(provider_payload, dict):
         return _call_payment_provider(provider_payload)
 
-    transacción_id = str(payload.get('transacción_id') or '').strip()
+    transaccion_id = str(payload.get('transaccion_id') or '').strip()
     plataforma_id = str(payload.get('plataforma_id') or '').strip()
     motivo = str(payload.get('motivo') or 'Anulacion solicitada desde dashboard').strip()
 
-    if not transacción_id and not plataforma_id:
-        raise PaymentGatewayError('Debes enviar transacción_id o plataforma_id para anular.')
+    if not transaccion_id and not plataforma_id:
+        raise PaymentGatewayError('Debes enviar transaccion_id o plataforma_id para anular.')
 
     cancel_payload: dict[str, Any] = {
         'accion': 'anular',
-        'transacción_id': transacción_id,
+        'transaccion_id': transaccion_id,
         'plataforma_id': plataforma_id,
         'motivo': motivo,
     }
@@ -528,7 +528,7 @@ def admin_cancel_payment(payload: dict[str, Any]) -> dict[str, Any]:
 def _call_payment_provider(payload: dict[str, Any]) -> dict[str, Any]:
     api_url = (os.getenv('PAYMENTS_API_URL') or '').strip()
     if not api_url:
-        raise PaymentGatewayError('No se encontró PAYMENTS_API_URL en las variables de entorno.')
+        raise PaymentGatewayError('No se encontro PAYMENTS_API_URL en las variables de entorno.')
 
     base_headers = {
         'Content-Type': 'application/json',
@@ -1654,7 +1654,7 @@ def _get_pensum_subject_template(cod_anio_basica: str, codigo_materia: str) -> d
     row = _fetch_one_row(query, [str(cod_anio_basica), str(codigo_materia)])
     if not row:
         raise PaymentGatewayError(
-            'No se encontró en PENSUM la materia seleccionada para la carrera indicada.'
+            'No se encontro en PENSUM la materia seleccionada para la carrera indicada.'
         )
     if not is_catalog_value_active(row.get('estado_materia'), default=True):
         raise PaymentGatewayError(
@@ -2267,7 +2267,6 @@ def _build_intec_logo_attachment() -> dict[str, Any] | None:
 
 
 def _send_graph_mail(mail_payload: dict[str, Any]) -> None:
-    skip_default_cc = bool(mail_payload.pop('_skip_default_cc', False))
     tenant_id, tenant_source = _env_first_named('MS_TENANT_ID', 'MICROSOFT_TENANT_ID', 'TENANT_ID')
     client_id, client_source = _env_first_named('MS_CLIENT_ID', 'MICROSOFT_CLIENT_ID', 'CLIENT_ID')
     client_secret, _secret_source = _env_first_named(
@@ -2292,8 +2291,7 @@ def _send_graph_mail(mail_payload: dict[str, Any]) -> None:
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json',
     }
-    if not skip_default_cc:
-        _ensure_graph_mail_cc_recipients(mail_payload)
+    _ensure_graph_mail_cc_recipients(mail_payload)
 
     try:
         _post_json(endpoint, mail_payload, headers, expect_json=False)
@@ -2301,7 +2299,7 @@ def _send_graph_mail(mail_payload: dict[str, Any]) -> None:
         if exc.status_code == 404 and 'ErrorInvalidUser' in exc.detail:
             raise PaymentGatewayError(
                 'Microsoft Graph no reconoce el remitente configurado. '
-                'Configura un usuario válido en MS_SENDER_USER_ID (Object ID/UPN) '
+                'Configura un usuario valido en MS_SENDER_USER_ID (Object ID/UPN) '
                 'o MS_SENDER_EMAIL y asegure permisos Mail.Send para la aplicacion.'
             ) from exc
         if exc.status_code == 403 and 'ErrorAccessDenied' in exc.detail:
@@ -2488,7 +2486,7 @@ def _extract_payment_link(provider_response: Any) -> str | None:
             if isinstance(value, str) and value.strip():
                 return value.strip()
 
-        nested_keys = ['data', 'result', 'payload', 'transacción']
+        nested_keys = ['data', 'result', 'payload', 'transaccion']
         for nested in nested_keys:
             nested_value = provider_response.get(nested)
             found = _extract_payment_link(nested_value)

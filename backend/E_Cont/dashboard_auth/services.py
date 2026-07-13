@@ -58,7 +58,7 @@ def authenticate_user(identifier: str, password: str, scope: str = 'auto') -> Au
     clean_scope = (scope or 'auto').strip().lower()
 
     if clean_scope not in VALID_SCOPES:
-        raise InvalidScopeError('El tipo de acceso solicitado no es válido.')
+        raise InvalidScopeError('El tipo de acceso solicitado no es valido.')
 
     if not clean_identifier or not clean_password:
         raise AuthError('Debes enviar el usuario y la contraseña.')
@@ -81,7 +81,7 @@ def authenticate_user(identifier: str, password: str, scope: str = 'auto') -> Au
         if user is not None:
             return user
 
-    raise AuthError('No encontramos un usuario válido con esas credenciales.')
+    raise AuthError('No encontramos un usuario valido con esas credenciales.')
 
 
 def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
@@ -134,7 +134,7 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
         summary=[
             {'label': 'Matrícula', 'value': student_code},
             {'label': 'Correo INTEC', 'value': intec_email or 'No disponible'},
-            {'label': 'Período', 'value': _clean_text(row.get('Periodo')) or 'No disponible'},
+            {'label': 'Periodo', 'value': _clean_text(row.get('Periodo')) or 'No disponible'},
         ],
         modules=[
             {
@@ -181,7 +181,7 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
 
     status = _clean_text(row.get('Estado')) or 'Sin estado'
     if not _is_active_teacher(status):
-        raise InactiveUserError('La cuenta docente no está activa para ingresar al dashboard.')
+        raise InactiveUserError('La cuenta docente no esta activa para ingresar al dashboard.')
 
     teacher_login = _clean_text(row.get('login')) or identifier
     teacher_code = _clean_text(row.get('Codigo_Usuario')) or 'No disponible'
@@ -197,7 +197,7 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
         role_code=_to_int(row.get('tipo_usuario')),
         role_name='DOCENTE',
         summary=[
-            {'label': 'Código', 'value': teacher_code},
+            {'label': 'Codigo', 'value': teacher_code},
             {'label': 'Cédula', 'value': teacher_id},
             {'label': 'Tipo docente', 'value': _clean_text(row.get('tipo_usuario')) or 'No disponible'},
         ],
@@ -208,7 +208,7 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
             },
             {
                 'title': 'Seguimiento',
-                'description': 'Monitorea pagos pendientes, validaciones y confirmaciones dentro del ciclo académico.',
+                'description': 'Monitorea pagos pendientes, validaciones y confirmaciones dentro del ciclo academico.',
             },
             {
                 'title': 'Historial',
@@ -250,7 +250,7 @@ def _find_staff(identifier: str, password: str) -> AuthenticatedUser | None:
 
     status = _clean_text(row.get('estado')) or 'Sin estado'
     if not _is_active_staff(status):
-        raise InactiveUserError('La cuenta administrativa no está activa para ingresar al dashboard.')
+        raise InactiveUserError('La cuenta administrativa no esta activa para ingresar al dashboard.')
 
     role_code = _resolve_staff_role_code(row)
     role_name = _resolve_staff_role_name(role_code)
@@ -324,11 +324,11 @@ def _staff_modules(role_name: str) -> list[dict[str, str]]:
         'ADMISIONES': [
             {'title': 'Prospectos', 'description': 'Gestiona cobros y confirmaciones vinculadas a nuevos ingresos.'},
             {'title': 'Documentos', 'description': 'Centraliza revisiones, incidencias y pasos de validacion.'},
-            {'title': 'Embudo comercial', 'description': 'Sigue conversiones por canal, sede y período.'},
+            {'title': 'Embudo comercial', 'description': 'Sigue conversiones por canal, sede y periodo.'},
         ],
         'RECTOR': [
             {'title': 'Vista ejecutiva', 'description': 'Resume indicadores criticos de pagos, cartera y operacion.'},
-            {'title': 'Tendencias', 'description': 'Compara períodos y lectura institucional consolidada.'},
+            {'title': 'Tendencias', 'description': 'Compara periodos y lectura institucional consolidada.'},
             {'title': 'Decisiones', 'description': 'Accede a focos de riesgo y oportunidades de mejora.'},
         ],
         'VICERRECTOR': [
@@ -338,21 +338,21 @@ def _staff_modules(role_name: str) -> list[dict[str, str]]:
         ],
         'SOPORTE': [
             {'title': 'Incidentes', 'description': 'Atiende errores, caídas y validaciones técnicas del sistema.'},
-            {'title': 'Bitácora', 'description': 'Consulta accesos, eventos y rastreo de transacciones.'},
+            {'title': 'Bitacora', 'description': 'Consulta accesos, eventos y rastreo de transacciones.'},
             {'title': 'Salud del sistema', 'description': 'Monitorea integraciones y conectividad operativa.'},
         ],
         'INVITADO_SOP': [
             {'title': 'Consulta tecnica', 'description': 'Revisa estados operativos con permisos restringidos.'},
-            {'title': 'Bitácora visible', 'description': 'Accede a eventos habilitados para soporte externo.'},
+            {'title': 'Bitacora visible', 'description': 'Accede a eventos habilitados para soporte externo.'},
             {'title': 'Seguimiento guiado', 'description': 'Da soporte a incidencias bajo supervision interna.'},
         ],
     }
     return modules.get(
         role_name,
         [
-            {'title': 'Resumen', 'description': 'Consulta la información habilitada según tu cuenta administrativa.'},
+            {'title': 'Resumen', 'description': 'Consulta la informacion habilitada segun tu cuenta administrativa.'},
             {'title': 'Actividad', 'description': 'Revisa movimientos y estado operativo del tablero.'},
-            {'title': 'Accesos', 'description': 'Explora las vistas activas según tu configuración.'},
+            {'title': 'Accesos', 'description': 'Explora las vistas activas segun tu configuracion.'},
         ],
     )
 
@@ -390,7 +390,7 @@ def _to_int(value: Any) -> int | None:
 
 def _is_active_student(status: str) -> bool:
     normalized = status.strip().lower()
-    return normalized in {'a', 'd'} or normalized.startswith('activo') or normalized.startswith('e continua')
+    return normalized.startswith('activo') or normalized.startswith('e continua')
 
 
 def _select_active_student_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -407,7 +407,7 @@ def _build_student_inactive_message(rows: list[dict[str, Any]]) -> str:
 
     for row in rows:
         status = _clean_text(row.get('Estado')) or 'Sin estado'
-        period = _clean_text(row.get('Periodo')) or 'Sin período'
+        period = _clean_text(row.get('Periodo')) or 'Sin periodo'
         aperture = (status, period)
         if aperture in seen:
             continue
@@ -425,8 +425,7 @@ def _build_student_inactive_message(rows: list[dict[str, Any]]) -> str:
 
 
 def _is_active_teacher(status: str) -> bool:
-    normalized = status.strip().lower()
-    return normalized in {'a', 'activo'}
+    return status.lower() == 'activo'
 
 
 def _is_active_staff(status: str) -> bool:

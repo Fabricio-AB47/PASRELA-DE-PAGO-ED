@@ -1,6 +1,5 @@
 import json
 import logging
-from html import escape
 
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.cache import never_cache
@@ -16,35 +15,12 @@ from .bulk_enrollment import (
     process_bulk_enrollment_excel,
     process_selected_student_enrollment,
 )
-from .admin_certificates import (
-    AdminCertificateError,
-    download_admin_certificate,
-    generate_admin_certificates,
-    list_admin_certificate_students,
-)
-from .certificate_template import (
-    CertificateTemplateError,
-    build_certificate_template_preview,
-    get_certificate_template_config,
-    save_certificate_template_config,
-)
 from .course_cuts import (
     CourseCutError,
     close_course_cut,
     create_course_cut,
-    list_course_cut_schedule,
-    list_attendance_students,
-    list_enrolled_students,
-    list_grade_transfer_students,
-    list_course_cut_students,
     list_course_cuts,
-    save_attendance_records,
-    save_course_cut_schedule,
-    save_grade_transfer,
-    sync_course_cut_students,
-    sync_course_cut_teams,
 )
-from .continuing_education import complement_status
 from .inscription_catalogs import (
     AcademicCatalogError,
     fetch_admin_academic_catalogs,
@@ -55,14 +31,12 @@ from .inscription_catalogs import (
 )
 from .inscription_certificate import (
     CERTIFICATE_CONTENT_TYPE,
-    CERTIFICATE_PREVIEW_IMAGE_CONTENT_TYPE,
     InscriptionCertificateError,
     build_certificate_payload,
     create_stored_certificate_record,
     load_signed_certificate_payload,
     load_or_create_stored_certificate,
     send_certificate_email,
-    verify_certificate_record,
 )
 from .microsoft365 import (
     Microsoft365Error,
@@ -76,7 +50,7 @@ from .payments import (
     create_payment_link_and_notify,
     generate_unique_numcodigo,
 )
-from .security import create_session_token, require_admin_session, require_student_session, require_teacher_session
+from .security import create_session_token, require_admin_session
 from .services import AuthError, InactiveUserError, InvalidScopeError, authenticate_user
 from .student_registration import (
     RegisteredUserExistsError,
@@ -84,43 +58,13 @@ from .student_registration import (
     ensure_user_is_not_registered,
 )
 from .student_records import StudentLookupError, lookup_student_inscription
-from .student_dashboard import (
-    StudentDashboardError,
-    build_student_certificate,
-    get_student_grades_dashboard,
-    get_student_schedule_dashboard,
-    preview_student_certificate,
-    send_student_certificate,
-)
-from .teacher_dashboard import (
-    TeacherDashboardError,
-    get_teacher_attendance_dashboard,
-    get_teacher_attendance_roster,
-    get_teacher_course_dashboard,
-    get_teacher_grades_dashboard,
-    get_teacher_schedule_dashboard,
-    save_teacher_schedule,
-    save_teacher_attendance,
-)
-from .teacher_enrollment import (
-    TeacherEnrollmentError,
-    create_teacher_entry_and_send_credentials,
-    enroll_existing_teacher,
-    list_teacher_candidates,
-)
 
 logger = logging.getLogger(__name__)
 
 
 @require_GET
 def health_view(_request):
-    return JsonResponse(
-        {
-            'ok': True,
-            'service': 'dashboard-auth',
-            'continuing_education': complement_status(),
-        }
-    )
+    return JsonResponse({'ok': True, 'service': 'dashboard-auth'})
 
 
 @csrf_exempt
@@ -130,7 +74,7 @@ def login_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -157,7 +101,7 @@ def login_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno validando el acceso. Intenta de nuevo.',
+                'message': 'Ocurrio un error interno validando el acceso. Intenta de nuevo.',
             },
             status=500,
         )
@@ -180,7 +124,7 @@ def student_lookup_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -217,7 +161,7 @@ def inscription_payment_link_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -242,7 +186,7 @@ def inscription_payment_link_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno validando si el usuario ya está registrado.',
+                'message': 'Ocurrio un error interno validando si el usuario ya esta registrado.',
             },
             status=500,
         )
@@ -256,7 +200,7 @@ def inscription_payment_link_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno creando el enlace de pago.',
+                'message': 'Ocurrio un error interno creando el enlace de pago.',
             },
             status=500,
         )
@@ -313,7 +257,7 @@ def inscription_certificate_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -353,149 +297,6 @@ def _certificate_payload_from_request(payload: dict) -> dict:
 
 @require_GET
 @never_cache
-def certificate_verify_view(request):
-    try:
-        result = verify_certificate_record(
-            request.GET.get('numero') or request.GET.get('code') or request.GET.get('certificado'),
-            request.GET.get('verificacion') or request.GET.get('verification') or request.GET.get('v'),
-        )
-    except InscriptionCertificateError as exc:
-        return JsonResponse({'ok': False, 'valid': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while verifying certificate.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'valid': False,
-                'message': 'Ocurrió un error interno verificando el certificado.',
-            },
-            status=500,
-        )
-
-    status = 200 if result.get('valid') else 404
-    response_payload = {
-        'ok': bool(result.get('valid')),
-        **result,
-    }
-    wants_json = (
-        request.GET.get('format') == 'json'
-        or 'application/json' in (request.headers.get('Accept') or '')
-    )
-    if wants_json:
-        return JsonResponse(response_payload, status=status)
-    return HttpResponse(_certificate_verification_html(response_payload), status=status)
-
-
-def _certificate_verification_html(payload: dict) -> str:
-    certificate = payload.get('certificate') if isinstance(payload.get('certificate'), dict) else {}
-    valid = bool(payload.get('valid'))
-    status_label = 'Certificado válido' if valid else 'Certificado no válido'
-    status_color = '#0f7a3a' if valid else '#9B0E0E'
-    message = escape(str(payload.get('message') or ''))
-
-    def value(key: str, fallback: str = 'No registrado') -> str:
-        text = str(certificate.get(key) or '').strip()
-        return escape(text or fallback)
-
-    rows = [
-        ('Número de certificado', value('numero_certificado')),
-        ('Tipo', value('tipo_certificado')),
-        ('Estado', value('estado')),
-        ('Estudiante', value('estudiante')),
-        ('Cédula', value('cedula_mascara')),
-        ('Código estudiante', value('codigo_estud')),
-        ('Fecha de emisión', value('fecha_generacion')),
-        ('Detalle', value('observacion')),
-    ]
-    rows_html = ''.join(
-        f'<tr><th>{label}</th><td>{field_value}</td></tr>'
-        for label, field_value in rows
-    )
-    return f"""<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Verificación de certificado INTEC</title>
-  <style>
-    body {{
-      margin: 0;
-      background: #eef6f8;
-      color: #1f2933;
-      font-family: Arial, sans-serif;
-    }}
-    main {{
-      max-width: 760px;
-      margin: 32px auto;
-      padding: 0 16px;
-    }}
-    section {{
-      background: #fff;
-      border-radius: 14px;
-      padding: 26px;
-      box-shadow: 0 14px 38px rgba(15, 23, 42, 0.12);
-    }}
-    .eyebrow {{
-      color: #7a858d;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-    }}
-    h1 {{
-      margin: 8px 0 12px;
-      color: #9B0E0E;
-      font-size: 30px;
-    }}
-    .status {{
-      display: inline-block;
-      margin: 8px 0 18px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      background: {status_color};
-      color: #fff;
-      font-weight: 700;
-    }}
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-    }}
-    th, td {{
-      border-top: 1px solid #d8e1e4;
-      padding: 12px 8px;
-      text-align: left;
-      vertical-align: top;
-      font-size: 15px;
-    }}
-    th {{
-      width: 34%;
-      color: #6b7280;
-      font-weight: 700;
-    }}
-    p {{
-      margin: 0;
-      color: #4b5563;
-      line-height: 1.5;
-    }}
-  </style>
-</head>
-<body>
-  <main>
-    <section>
-      <div class="eyebrow">INTEC</div>
-      <h1>Verificación de certificado</h1>
-      <div class="status">{status_label}</div>
-      <p>{message}</p>
-      <table>{rows_html}</table>
-    </section>
-  </main>
-</body>
-</html>"""
-
-
-@require_GET
-@never_cache
 def inscription_generate_matricula_view(_request):
     try:
         matricula = generate_unique_numcodigo()
@@ -530,7 +331,7 @@ def inscription_catalogs_view(_request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno cargando carreras, cursos y períodos.',
+                'message': 'Ocurrio un error interno cargando carreras, cursos y periodos.',
             },
             status=500,
         )
@@ -552,7 +353,7 @@ def microsoft365_create_user_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -565,7 +366,7 @@ def microsoft365_create_user_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno creando el usuario Microsoft 365.',
+                'message': 'Ocurrio un error interno creando el usuario Microsoft 365.',
             },
             status=500,
         )
@@ -592,7 +393,7 @@ def microsoft365_student_license_view(_request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno consultando la licencia Microsoft 365.',
+                'message': 'Ocurrio un error interno consultando la licencia Microsoft 365.',
             },
             status=500,
         )
@@ -609,185 +410,6 @@ def microsoft365_student_license_view(_request):
 @require_GET
 @require_admin_session
 @never_cache
-def admin_certificate_template_view(request):
-    try:
-        config = get_certificate_template_config(request.GET.get('corte_id') or request.GET.get('CorteId'))
-    except Exception:
-        logger.exception('Unexpected error while loading certificate template config.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando la plantilla de certificado.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Plantilla de certificado cargada.',
-            'config': config,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
-@never_cache
-def admin_certificate_template_save_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        config = save_certificate_template_config(payload, user_login=_dashboard_user_login(request))
-    except CertificateTemplateError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while saving certificate template config.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno guardando la plantilla de certificado.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Plantilla de certificado guardada.',
-            'config': config,
-        }
-    )
-
-
-@require_GET
-@require_admin_session
-@never_cache
-def admin_certificate_template_preview_view(request):
-    try:
-        content, filename = build_certificate_template_preview(request.GET.get('corte_id') or request.GET.get('CorteId'))
-    except CertificateTemplateError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except InscriptionCertificateError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while generating certificate template preview.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno generando la previsualización del certificado.',
-            },
-            status=500,
-        )
-
-    response = HttpResponse(content, content_type=CERTIFICATE_CONTENT_TYPE)
-    response['Content-Disposition'] = f'inline; filename="{filename}"'
-    return response
-
-
-@require_GET
-@require_admin_session
-@never_cache
-def admin_certificate_students_view(request):
-    try:
-        result = list_admin_certificate_students(
-            request.GET.get('corte_id') or request.GET.get('CorteId'),
-            search=request.GET.get('q', ''),
-            limit=request.GET.get('limit', 300),
-        )
-    except (AdminCertificateError, CourseCutError) as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while loading certificate students.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando estudiantes para certificado.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Estudiantes para certificado cargados.',
-            'result': result,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
-@never_cache
-def admin_certificate_generate_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = generate_admin_certificates(payload, user_login=_dashboard_user_login(request))
-    except (AdminCertificateError, CourseCutError, InscriptionCertificateError) as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while generating admin certificates.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno generando certificados de la corte.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Proceso de certificados ejecutado.',
-            'result': result,
-        }
-    )
-
-
-@require_GET
-@require_admin_session
-@never_cache
-def admin_certificate_download_view(request):
-    try:
-        content, filename = download_admin_certificate(
-            request.GET.get('corte_id') or request.GET.get('CorteId'),
-            request.GET.get('corte_estudiante_id') or request.GET.get('CorteEstudianteId'),
-        )
-    except AdminCertificateError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while downloading admin certificate.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno descargando el certificado.',
-            },
-            status=500,
-        )
-
-    response = HttpResponse(content, content_type=CERTIFICATE_CONTENT_TYPE)
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-    return response
-
-
-@require_GET
-@require_admin_session
-@never_cache
 def admin_academic_catalogs_view(_request):
     try:
         catalogs = fetch_admin_academic_catalogs()
@@ -796,7 +418,7 @@ def admin_academic_catalogs_view(_request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno cargando carreras y pensum.',
+                'message': 'Ocurrio un error interno cargando carreras y pensum.',
             },
             status=500,
         )
@@ -804,7 +426,7 @@ def admin_academic_catalogs_view(_request):
     return JsonResponse(
         {
             'ok': True,
-            'message': 'Catálogos académicos cargados.',
+            'message': 'Catalogos academicos cargados.',
             'catalogs': catalogs,
         }
     )
@@ -839,7 +461,7 @@ def admin_course_cut_create_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -868,7 +490,7 @@ def admin_course_cut_close_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -889,328 +511,6 @@ def admin_course_cut_close_view(request):
     return JsonResponse({'ok': True, 'message': 'Corte cerrada.', 'cut': result})
 
 
-@require_GET
-@require_admin_session
-@never_cache
-def admin_course_cut_students_view(request):
-    try:
-        result = list_course_cut_students(request.GET.get('corte_id') or request.GET.get('CorteId'))
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while loading course cut students.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando estudiantes de la corte.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Estudiantes de corte cargados.',
-            'result': result,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
-def admin_course_cut_students_sync_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = sync_course_cut_students(payload, user_login=_dashboard_user_login(request))
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while syncing course cut students.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno matriculando estudiantes en educación continua.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Sincronización de estudiantes procesada.',
-            'result': result,
-        }
-    )
-
-
-@require_GET
-@require_admin_session
-@never_cache
-def admin_course_cut_schedule_view(request):
-    try:
-        result = list_course_cut_schedule(request.GET.get('corte_id') or request.GET.get('CorteId'))
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while loading course cut schedule.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando horario y Teams.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Horario y Teams cargados.',
-            'result': result,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
-def admin_course_cut_schedule_save_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = save_course_cut_schedule(payload, user_login=_dashboard_user_login(request))
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while saving course cut schedule.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno guardando el horario.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Horario guardado y sesiones generadas.',
-            'result': result,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
-def admin_course_cut_teams_sync_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = sync_course_cut_teams(payload, user_login=_dashboard_user_login(request))
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while syncing course cut Teams.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno matriculando por Teams.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Proceso de Teams encolado.',
-            'result': result,
-        }
-    )
-
-
-@require_GET
-@require_admin_session
-@never_cache
-def admin_enrolled_students_view(request):
-    try:
-        result = list_enrolled_students(
-            request.GET.get('corte_id') or request.GET.get('CorteId'),
-            search=request.GET.get('q', ''),
-            limit=request.GET.get('limit', 300),
-        )
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while loading enrolled students.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando estudiantes matriculados.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Estudiantes matriculados cargados.',
-            'result': result,
-        }
-    )
-
-
-@require_GET
-@require_admin_session
-@never_cache
-def admin_grade_transfer_view(request):
-    try:
-        result = list_grade_transfer_students(
-            request.GET.get('corte_id') or request.GET.get('CorteId'),
-            search=request.GET.get('q', ''),
-            limit=request.GET.get('limit', 300),
-        )
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while loading grade transfer students.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando el pase de notas.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Pase de notas cargado.',
-            'result': result,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
-def admin_grade_transfer_save_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = save_grade_transfer(payload, user_login=_dashboard_user_login(request))
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while saving grade transfer.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno procesando el pase de notas.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Pase de notas procesado.',
-            'result': result,
-        }
-    )
-
-
-@require_GET
-@require_admin_session
-@never_cache
-def admin_attendance_view(request):
-    try:
-        result = list_attendance_students(
-            request.GET.get('corte_id') or request.GET.get('CorteId'),
-            attendance_date=request.GET.get('fecha') or request.GET.get('date'),
-            hour=request.GET.get('hora') or request.GET.get('time'),
-        )
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while loading administrative attendance.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando asistencia.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Asistencia cargada.',
-            'result': result,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
-def admin_attendance_save_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = save_attendance_records(payload, user_login=_dashboard_user_login(request))
-    except CourseCutError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while saving administrative attendance.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno guardando asistencia.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Asistencia guardada.',
-            'result': result,
-        }
-    )
-
-
 @csrf_exempt
 @require_POST
 @require_admin_session
@@ -1219,7 +519,7 @@ def admin_carrera_status_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -1232,7 +532,7 @@ def admin_carrera_status_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno actualizando el estado de la carrera.',
+                'message': 'Ocurrio un error interno actualizando el estado de la carrera.',
             },
             status=500,
         )
@@ -1248,7 +548,7 @@ def admin_pensum_entry_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -1261,7 +561,7 @@ def admin_pensum_entry_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno guardando el pensum.',
+                'message': 'Ocurrio un error interno guardando el pensum.',
             },
             status=500,
         )
@@ -1277,7 +577,7 @@ def admin_pensum_status_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -1290,7 +590,7 @@ def admin_pensum_status_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno actualizando el estado de la materia.',
+                'message': 'Ocurrio un error interno actualizando el estado de la materia.',
             },
             status=500,
         )
@@ -1306,7 +606,7 @@ def admin_bulk_enrollment_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -1383,388 +683,6 @@ def admin_academic_enrollment_students_view(request):
     )
 
 
-@require_GET
-@require_teacher_session
-@never_cache
-def teacher_course_dashboard_view(request):
-    try:
-        dashboard = get_teacher_course_dashboard(request.dashboard_user)
-    except TeacherDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=404)
-    except Exception:
-        logger.exception('Unexpected error while loading teacher course dashboard.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando la información docente.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Información docente cargada.',
-            'dashboard': dashboard,
-        }
-    )
-
-
-@require_GET
-@require_teacher_session
-@never_cache
-def teacher_attendance_dashboard_view(request):
-    try:
-        dashboard = get_teacher_attendance_dashboard(request.dashboard_user)
-    except TeacherDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=404)
-    except Exception:
-        logger.exception('Unexpected error while loading teacher attendance dashboard.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando la asistencia docente.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Asistencia docente cargada.',
-            'dashboard': dashboard,
-        }
-    )
-
-
-@require_GET
-@require_teacher_session
-@never_cache
-def teacher_schedule_dashboard_view(request):
-    try:
-        dashboard = get_teacher_schedule_dashboard(request.dashboard_user)
-    except TeacherDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=404)
-    except Exception:
-        logger.exception('Unexpected error while loading teacher schedule dashboard.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando el horario docente.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Horario docente cargado.',
-            'dashboard': dashboard,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_teacher_session
-def teacher_schedule_save_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = save_teacher_schedule(request.dashboard_user, payload)
-    except TeacherDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while saving teacher schedule.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno guardando el horario docente.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Horario docente guardado.',
-            'result': result,
-        }
-    )
-
-
-@require_GET
-@require_teacher_session
-@never_cache
-def teacher_attendance_roster_view(request):
-    try:
-        result = get_teacher_attendance_roster(request.dashboard_user, request.GET)
-    except TeacherDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while loading teacher attendance roster.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando estudiantes para asistencia.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Estudiantes de asistencia cargados.',
-            'result': result,
-        }
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_teacher_session
-def teacher_attendance_save_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = save_teacher_attendance(request.dashboard_user, payload)
-    except TeacherDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while saving teacher attendance.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno guardando la asistencia.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Asistencia guardada.',
-            'result': result,
-        }
-    )
-
-
-@require_GET
-@require_teacher_session
-@never_cache
-def teacher_grades_dashboard_view(request):
-    try:
-        dashboard = get_teacher_grades_dashboard(request.dashboard_user)
-    except TeacherDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=404)
-    except Exception:
-        logger.exception('Unexpected error while loading teacher grades dashboard.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando las calificaciones docentes.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Calificaciones docentes cargadas.',
-            'dashboard': dashboard,
-        }
-    )
-
-
-@require_GET
-@require_student_session
-@never_cache
-def student_schedule_dashboard_view(request):
-    try:
-        dashboard = get_student_schedule_dashboard(request.dashboard_user)
-    except StudentDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=404)
-    except Exception:
-        logger.exception('Unexpected error while loading student schedule dashboard.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando el horario estudiantil.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Horario estudiantil cargado.',
-            'dashboard': dashboard,
-        }
-    )
-
-
-@require_GET
-@require_student_session
-@never_cache
-def student_grades_dashboard_view(request):
-    try:
-        dashboard = get_student_grades_dashboard(request.dashboard_user)
-    except StudentDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=404)
-    except Exception:
-        logger.exception('Unexpected error while loading student grades dashboard.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando las calificaciones estudiantiles.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Calificaciones estudiantiles cargadas.',
-            'dashboard': dashboard,
-        }
-    )
-
-
-@require_GET
-@require_student_session
-@never_cache
-def student_certificate_download_view(request):
-    estudiante_corte_id = request.GET.get('estudiante_corte_id') or request.GET.get('EstudianteCorteId')
-    try:
-        content, filename = build_student_certificate(request.dashboard_user, estudiante_corte_id)
-    except StudentDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except InscriptionCertificateError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while generating student certificate.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno generando el certificado estudiantil.',
-            },
-            status=500,
-        )
-
-    response = HttpResponse(content, content_type=CERTIFICATE_CONTENT_TYPE)
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-    return response
-
-
-@require_GET
-@require_student_session
-@never_cache
-def student_certificate_preview_view(request):
-    estudiante_corte_id = request.GET.get('estudiante_corte_id') or request.GET.get('EstudianteCorteId')
-    try:
-        content, filename = preview_student_certificate(request.dashboard_user, estudiante_corte_id)
-    except StudentDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except InscriptionCertificateError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while previewing student certificate.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno generando la vista previa del certificado.',
-            },
-            status=500,
-        )
-
-    response = HttpResponse(content, content_type=CERTIFICATE_PREVIEW_IMAGE_CONTENT_TYPE)
-    response['Content-Disposition'] = f'inline; filename="{filename}"'
-    return response
-
-
-@csrf_exempt
-@require_POST
-@require_student_session
-@never_cache
-def student_certificate_send_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    estudiante_corte_id = payload.get('estudiante_corte_id') or payload.get('EstudianteCorteId')
-    try:
-        result = send_student_certificate(request.dashboard_user, estudiante_corte_id)
-    except StudentDashboardError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except InscriptionCertificateError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except PaymentGatewayError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while sending student certificate.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno enviando el certificado estudiantil.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': result.get('message') or 'Certificado enviado correctamente.',
-            'result': result,
-        }
-    )
-
-
-@require_GET
-@require_admin_session
-@never_cache
-def admin_teacher_candidates_view(request):
-    try:
-        teachers = list_teacher_candidates(
-            search=request.GET.get('q', ''),
-            limit=request.GET.get('limit', 100),
-        )
-    except TeacherEnrollmentError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while loading teacher candidates.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno cargando docentes.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Docentes cargados.',
-            'teachers': teachers,
-        }
-    )
-
-
 @csrf_exempt
 @require_POST
 @require_admin_session
@@ -1773,7 +691,7 @@ def admin_academic_enrollment_selected_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -1803,84 +721,12 @@ def admin_academic_enrollment_selected_view(request):
 @csrf_exempt
 @require_POST
 @require_admin_session
-def admin_teacher_entry_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = create_teacher_entry_and_send_credentials(payload, user_login=_dashboard_user_login(request))
-    except TeacherEnrollmentError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while processing teacher entry.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno procesando el ingreso docente.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Ingreso docente procesado.',
-            'result': result,
-        },
-        status=201,
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
-def admin_teacher_enrollment_view(request):
-    try:
-        payload = json.loads(request.body.decode('utf-8'))
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
-            status=400,
-        )
-
-    try:
-        result = enroll_existing_teacher(payload, user_login=_dashboard_user_login(request))
-    except TeacherEnrollmentError as exc:
-        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
-    except Exception:
-        logger.exception('Unexpected error while processing teacher enrollment.')
-        return JsonResponse(
-            {
-                'ok': False,
-                'message': 'Ocurrió un error interno procesando la matrícula docente.',
-            },
-            status=500,
-        )
-
-    return JsonResponse(
-        {
-            'ok': True,
-            'message': 'Matrícula docente procesada.',
-            'result': result,
-        },
-        status=201,
-    )
-
-
-@csrf_exempt
-@require_POST
-@require_admin_session
 def admin_payment_info_view(request):
     try:
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -1893,7 +739,7 @@ def admin_payment_info_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno consultando la transacción.',
+                'message': 'Ocurrio un error interno consultando la transaccion.',
             },
             status=500,
         )
@@ -1909,7 +755,7 @@ def admin_payment_cancel_view(request):
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         return JsonResponse(
-            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON valido.'},
             status=400,
         )
 
@@ -1922,7 +768,7 @@ def admin_payment_cancel_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno anulando la transacción.',
+                'message': 'Ocurrio un error interno anulando la transaccion.',
             },
             status=500,
         )
