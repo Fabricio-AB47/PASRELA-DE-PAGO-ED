@@ -14,55 +14,18 @@
       "created_at": ""
     }
   ],
-  "logos": [
-    {
-      "id": "3336bcaafa114cf3b173db84b695b3cd",
-      "display_name": "R",
-      "filename": "3336bcaafa114cf3b173db84b695b3cd.jpg",
-      "content_type": "image/jpeg",
-      "size_bytes": 315106,
-      "enabled": true,
-      "created_at": "2026-07-10T15:38:42+00:00",
-      "updated_at": "2026-07-10T19:59:26+00:00",
-      "created_by": "dir.ca@intec.edu.ec"
-    },
-    {
-      "id": "ca561f7fd2b54a0ba571d576dcf1868a",
-      "display_name": "ChatGPT Image Jun 19, 2026, 11_29_32 AM (1)",
-      "filename": "ca561f7fd2b54a0ba571d576dcf1868a.png",
-      "content_type": "image/png",
-      "size_bytes": 1515119,
-      "enabled": true,
-      "created_at": "2026-07-10T19:44:43+00:00",
-      "updated_at": "2026-07-10T19:59:26+00:00",
-      "created_by": "dir.ca@intec.edu.ec"
-    },
-    {
-      "id": "88aabcfa9bee43edb4bccbb2b6560cfc",
-      "display_name": "firma veronica",
-      "filename": "88aabcfa9bee43edb4bccbb2b6560cfc.jpg",
-      "content_type": "image/jpeg",
-      "size_bytes": 47834,
-      "enabled": true,
-      "created_at": "2026-07-10T19:59:26+00:00",
-      "updated_at": "2026-07-10T19:59:26+00:00",
-      "created_by": "dir.ca@intec.edu.ec"
-    }
-  ],
+  "logos": [],
   "cut_settings": {
     "1": {
       "template_type": "EDUCACION_CONTINUA",
       "background_id": "intec_background_default",
-      "logo_ids": [
-        "ca561f7fd2b54a0ba571d576dcf1868a",
-        "88aabcfa9bee43edb4bccbb2b6560cfc"
-      ],
+      "logo_ids": [],
       "use_default_logo": true,
       "show_complement_logos": true,
-      "updated_at": "2026-07-10T19:59:26+00:00",
+      "updated_at": "2026-07-14T20:02:09+00:00",
       "updated_by": "dir.ca@intec.edu.ec"
     }
   },
-  "updated_at": "2026-07-10T19:59:26+00:00",
+  "updated_at": "2026-07-14T20:02:09+00:00",
   "updated_by": "dir.ca@intec.edu.ec"
 }

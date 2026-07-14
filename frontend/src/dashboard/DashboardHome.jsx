@@ -1,22 +1,13 @@
 import { useEffect, useState } from 'react'
 import { readResponsePayload } from '../shared.js'
 import { adminFetch } from './api.js'
-import { DASHBOARD_ROUTES } from './navigation.js'
+import { visibleRoutesForUser } from './navigation.js'
 
 const numberFormatter = new Intl.NumberFormat('es-EC')
-const TEACHER_PANEL_ROUTE_IDS = new Set(['teacher-attendance', 'teacher-grades', 'teacher-schedule'])
-const STUDENT_PANEL_ROUTE_IDS = new Set(['student-schedule', 'student-grades'])
-
 export default function DashboardHome({ user }) {
   const isTeacher = user.category === 'teacher'
   const isStudent = user.category === 'student'
-  const visibleRoutes = user.category === 'staff'
-    ? DASHBOARD_ROUTES.filter(
-      (route) => route.id !== 'home' && !TEACHER_PANEL_ROUTE_IDS.has(route.id) && !STUDENT_PANEL_ROUTE_IDS.has(route.id),
-    )
-    : isStudent
-      ? DASHBOARD_ROUTES.filter((route) => STUDENT_PANEL_ROUTE_IDS.has(route.id))
-      : []
+  const visibleRoutes = visibleRoutesForUser(user).filter((route) => route.id !== 'home')
 
   return (
     <section className="dashboard-home" aria-labelledby="dashboard-home-title">

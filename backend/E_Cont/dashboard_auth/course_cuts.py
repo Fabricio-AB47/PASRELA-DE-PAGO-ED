@@ -15,6 +15,7 @@ from .continuing_education import (
     is_complement_available,
     sync_student_enrollment_to_complement,
 )
+from .notifications import create_notification_safely
 
 
 class CourseCutError(Exception):
@@ -215,6 +216,8 @@ def assign_matricula_to_open_cut(
     num_matricula: int,
     usuario_registro: str = 'SISTEMA',
     observacion: str = '',
+    valor_total_curso: Any = None,
+    origen_matricula: str = '',
 ) -> dict[str, Any]:
     _ensure_course_cut_schema()
     cut = _find_open_cut(
@@ -258,6 +261,8 @@ def assign_matricula_to_open_cut(
         corte_id=cut['corte_id'],
         codigo_estud=codigo_estud,
         usuario_registro=usuario_registro,
+        valor_total_curso=valor_total_curso,
+        origen_matricula=origen_matricula,
     )
 
     return {
@@ -551,6 +556,24 @@ def save_grade_transfer(payload: dict[str, Any], *, user_login: str = '') -> dic
                     'primary_sync': primary_sync,
                 }
             )
+            student_login = _clean_text(enrollment.get('UsuarioLogin')) or _clean_text(enrollment.get('CorreoIntec')) or _clean_text(enrollment.get('CorreoPersonal'))
+            if student_login:
+                course_name = _clean_text(enrollment.get('NombreCurso')) or _clean_text(cut.get('nombre_curso')) or 'Educación Continua'
+                create_notification_safely(
+                    event_key=f'grade-saved:{corte_estudiante_id}:{nota_final}:student',
+                    notification_type='GRADE_REGISTERED',
+                    title='Nueva nota registrada',
+                    message=f'Se registró tu nota final de {nota_final} en {course_name}.',
+                    recipient_category='student',
+                    recipient_login=student_login,
+                    route='#student-grades',
+                    data={
+                        'corte_id': corte_id,
+                        'corte_estudiante_id': corte_estudiante_id,
+                        'course_name': course_name,
+                        'grade': str(nota_final),
+                    },
+                )
         except Exception as exc:
             error_count += 1
             results.append(
@@ -3801,13 +3824,18 @@ def _sync_student_to_complement(
     corte_id: Any,
     codigo_estud: Any,
     usuario_registro: str,
+    valor_total_curso: Any = None,
+    origen_matricula: str = '',
 ) -> dict[str, Any]:
     try:
+        has_explicit_course_value = valor_total_curso not in (None, '')
         return sync_student_enrollment_to_complement(
             corte_id=corte_id,
             codigo_estud=codigo_estud,
             usuario_registro=usuario_registro or 'SISTEMA',
-            registrar_cargo_inicial=True,
+            registrar_cargo_inicial=not has_explicit_course_value,
+            valor_total_curso=valor_total_curso,
+            origen_matricula=origen_matricula,
         )
     except Exception as exc:
         return {

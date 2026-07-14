@@ -9,6 +9,7 @@ import AdminCourseStudentsPanel from './AdminCourseStudentsPanel.jsx'
 import AdminEnrolledStudentsPanel from './AdminEnrolledStudentsPanel.jsx'
 import AdminGradeTransferPanel from './AdminGradeTransferPanel.jsx'
 import AdminPaymentsPanel from './AdminPaymentsPanel.jsx'
+import AdminPaymentOperationsPanel from './AdminPaymentOperationsPanel.jsx'
 import AdminSchedulePanel from './AdminSchedulePanel.jsx'
 import AdminTeacherEntryPanel from './AdminTeacherEntryPanel.jsx'
 import AdminTeacherEnrollmentPanel from './AdminTeacherEnrollmentPanel.jsx'
@@ -18,41 +19,46 @@ import StudentGradesPanel from './StudentGradesPanel.jsx'
 import StudentSchedulePanel from './StudentSchedulePanel.jsx'
 import TeacherAcademicPanel from './TeacherAcademicPanel.jsx'
 import TeacherSchedulePanel from './TeacherSchedulePanel.jsx'
-import { DASHBOARD_ROUTES, routeById, routeFromHash } from './navigation.js'
+import NotificationCenter from './NotificationCenter.jsx'
+import {
+  canAccessDashboardRoute,
+  isTeacherAdminRoute,
+  routeById,
+  routeFromHash,
+  visibleRoutesForUser,
+} from './navigation.js'
 
 function getCurrentRouteId() {
   return routeFromHash(window.location.hash)
 }
 
-const TEACHER_ADMIN_ROUTE_IDS = new Set(['teacher-entry', 'teacher-enrollment'])
-const TEACHER_PANEL_ROUTE_IDS = new Set(['teacher-attendance', 'teacher-grades', 'teacher-schedule'])
-const STUDENT_PANEL_ROUTE_IDS = new Set(['student-schedule', 'student-grades'])
-
 export default function DashboardLayout({ session, onSessionChange }) {
   const [activeRouteId, setActiveRouteId] = useState(getCurrentRouteId)
   const { user } = session
-  const activeRoute = routeById(activeRouteId)
+  const routeIsAllowed = canAccessDashboardRoute(user, activeRouteId)
+  const effectiveRouteId = routeIsAllowed ? activeRouteId : 'home'
+  const activeRoute = routeById(effectiveRouteId)
   const dashboardTitle = user.category === 'teacher'
     ? 'Dashboard docente'
     : user.category === 'student'
       ? 'Dashboard estudiantil'
-      : 'Dashboard administrativo'
-  const visibleRoutes = user.category === 'staff'
-    ? DASHBOARD_ROUTES.filter((route) => !TEACHER_PANEL_ROUTE_IDS.has(route.id) && !STUDENT_PANEL_ROUTE_IDS.has(route.id))
-    : user.category === 'teacher'
-      ? DASHBOARD_ROUTES.filter((route) => route.id === 'home' || TEACHER_PANEL_ROUTE_IDS.has(route.id))
-      : user.category === 'student'
-        ? DASHBOARD_ROUTES.filter((route) => route.id === 'home' || STUDENT_PANEL_ROUTE_IDS.has(route.id))
-        : DASHBOARD_ROUTES.filter((route) => route.id === 'home')
-  const primaryRoutes = visibleRoutes.filter((route) => !TEACHER_ADMIN_ROUTE_IDS.has(route.id))
+      : 'Dashboard general'
+  const visibleRoutes = visibleRoutesForUser(user)
+  const primaryRoutes = visibleRoutes.filter((route) => !isTeacherAdminRoute(route.id) && !route.parentId)
   const teacherRoutes = user.category === 'staff'
-    ? DASHBOARD_ROUTES.filter((route) => TEACHER_ADMIN_ROUTE_IDS.has(route.id))
+    ? visibleRoutes.filter((route) => isTeacherAdminRoute(route.id))
     : []
-  const isTeacherRouteActive = TEACHER_ADMIN_ROUTE_IDS.has(activeRoute.id)
+  const isTeacherRouteActive = isTeacherAdminRoute(activeRoute.id)
 
   useEffect(() => {
     function handleHashChange() {
-      setActiveRouteId(getCurrentRouteId())
+      const requestedRouteId = getCurrentRouteId()
+      if (!canAccessDashboardRoute(user, requestedRouteId)) {
+        window.history.replaceState(null, '', '#dashboard')
+        setActiveRouteId('home')
+        return
+      }
+      setActiveRouteId(requestedRouteId)
     }
 
     window.addEventListener('hashchange', handleHashChange)
@@ -61,7 +67,7 @@ export default function DashboardLayout({ session, onSessionChange }) {
     return () => {
       window.removeEventListener('hashchange', handleHashChange)
     }
-  }, [])
+  }, [user])
 
   function handleLogout() {
     clearStoredSession()
@@ -83,9 +89,10 @@ export default function DashboardLayout({ session, onSessionChange }) {
             <h1 className="dashboard-title">{dashboardTitle}</h1>
           </div>
         </div>
-        <button type="button" className="ghost-button" onClick={handleLogout}>
-          Cerrar sesión
-        </button>
+        <div className="dashboard-topbar-actions">
+          <NotificationCenter />
+          <button type="button" className="ghost-button" onClick={handleLogout}>Cerrar sesión</button>
+        </div>
       </header>
 
       <nav className="dashboard-nav" aria-label="Navegación del dashboard">
@@ -93,8 +100,8 @@ export default function DashboardLayout({ session, onSessionChange }) {
           <a
             key={route.id}
             href={route.hash}
-            className={route.id === activeRoute.id ? 'is-active' : ''}
-            aria-current={route.id === activeRoute.id ? 'page' : undefined}
+            className={route.id === activeRoute.id || activeRoute.parentId === route.id ? 'is-active' : ''}
+            aria-current={route.id === activeRoute.id || activeRoute.parentId === route.id ? 'page' : undefined}
           >
             {route.label}
           </a>
@@ -145,25 +152,26 @@ export default function DashboardLayout({ session, onSessionChange }) {
         </aside>
 
         <section className="dashboard-main">
-          {activeRouteId === 'home' ? <DashboardHome user={user} /> : null}
-          {activeRouteId === 'academic' && user.category === 'staff' ? <AdminAcademicPanel /> : null}
-          {activeRouteId === 'course-cuts' && user.category === 'staff' ? <AdminCourseCutsPanel /> : null}
-          {activeRouteId === 'course-students' && user.category === 'staff' ? <AdminCourseStudentsPanel /> : null}
-          {activeRouteId === 'enrolled-students' && user.category === 'staff' ? <AdminEnrolledStudentsPanel /> : null}
-          {activeRouteId === 'attendance' && user.category === 'staff' ? <AdminAttendancePanel /> : null}
-          {activeRouteId === 'admin-schedule' && user.category === 'staff' ? <AdminSchedulePanel /> : null}
-          {activeRouteId === 'admin-teams' && user.category === 'staff' ? <AdminTeamsEnrollmentPanel /> : null}
-          {activeRouteId === 'grade-transfer' && user.category === 'staff' ? <AdminGradeTransferPanel /> : null}
-          {activeRouteId === 'certificate-template' && user.category === 'staff' ? <AdminCertificateTemplatePanel /> : null}
-          {activeRouteId === 'payments' && user.category === 'staff' ? <AdminPaymentsPanel /> : null}
-          {activeRouteId === 'bulk-enrollment' && user.category === 'staff' ? <AdminBulkEnrollmentPanel /> : null}
-          {activeRouteId === 'teacher-entry' && user.category === 'staff' ? <AdminTeacherEntryPanel /> : null}
-          {activeRouteId === 'teacher-enrollment' && user.category === 'staff' ? <AdminTeacherEnrollmentPanel /> : null}
-          {activeRouteId === 'teacher-attendance' && user.category === 'teacher' ? <TeacherAcademicPanel mode="attendance" /> : null}
-          {activeRouteId === 'teacher-grades' && user.category === 'teacher' ? <TeacherAcademicPanel mode="grades" /> : null}
-          {activeRouteId === 'teacher-schedule' && user.category === 'teacher' ? <TeacherSchedulePanel /> : null}
-          {activeRouteId === 'student-schedule' && user.category === 'student' ? <StudentSchedulePanel /> : null}
-          {activeRouteId === 'student-grades' && user.category === 'student' ? <StudentGradesPanel /> : null}
+          {effectiveRouteId === 'home' ? <DashboardHome user={user} /> : null}
+          {effectiveRouteId === 'academic' && user.category === 'staff' ? <AdminAcademicPanel /> : null}
+          {effectiveRouteId === 'course-cuts' && user.category === 'staff' ? <AdminCourseCutsPanel /> : null}
+          {effectiveRouteId === 'course-students' && user.category === 'staff' ? <AdminCourseStudentsPanel /> : null}
+          {effectiveRouteId === 'enrolled-students' && user.category === 'staff' ? <AdminEnrolledStudentsPanel /> : null}
+          {effectiveRouteId === 'attendance' && user.category === 'staff' ? <AdminAttendancePanel /> : null}
+          {effectiveRouteId === 'admin-schedule' && user.category === 'staff' ? <AdminSchedulePanel /> : null}
+          {effectiveRouteId === 'admin-teams' && user.category === 'staff' ? <AdminTeamsEnrollmentPanel /> : null}
+          {effectiveRouteId === 'grade-transfer' && user.category === 'staff' ? <AdminGradeTransferPanel /> : null}
+          {effectiveRouteId === 'certificate-template' && user.category === 'staff' ? <AdminCertificateTemplatePanel /> : null}
+          {effectiveRouteId === 'payments' && user.category === 'staff' ? <AdminPaymentsPanel /> : null}
+          {effectiveRouteId === 'payment-operations' && user.category === 'staff' ? <AdminPaymentOperationsPanel /> : null}
+          {effectiveRouteId === 'bulk-enrollment' && user.category === 'staff' ? <AdminBulkEnrollmentPanel /> : null}
+          {effectiveRouteId === 'teacher-entry' && user.category === 'staff' ? <AdminTeacherEntryPanel /> : null}
+          {effectiveRouteId === 'teacher-enrollment' && user.category === 'staff' ? <AdminTeacherEnrollmentPanel /> : null}
+          {effectiveRouteId === 'teacher-attendance' && user.category === 'teacher' ? <TeacherAcademicPanel mode="attendance" /> : null}
+          {effectiveRouteId === 'teacher-grades' && user.category === 'teacher' ? <TeacherAcademicPanel mode="grades" /> : null}
+          {effectiveRouteId === 'teacher-schedule' && user.category === 'teacher' ? <TeacherSchedulePanel /> : null}
+          {effectiveRouteId === 'student-schedule' && user.category === 'student' ? <StudentSchedulePanel /> : null}
+          {effectiveRouteId === 'student-grades' && user.category === 'student' ? <StudentGradesPanel /> : null}
         </section>
       </section>
     </main>

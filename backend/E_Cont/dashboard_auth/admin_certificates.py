@@ -8,6 +8,7 @@ from typing import Any
 from django.conf import settings
 from django.db import connection
 
+from .academic_rules import is_passing_grade
 from .course_cuts import list_enrolled_students
 from .inscription_certificate import (
     CERTIFICATE_STORAGE_DIR_NAME,
@@ -120,6 +121,17 @@ def download_admin_certificate(corte_id: Any, corte_estudiante_id: Any) -> tuple
     if not link:
         raise AdminCertificateError('Primero debes generar el certificado del estudiante.')
 
+    enrollment = list_enrolled_students(safe_corte_id, search='', limit=1000)
+    student = next(
+        (
+            item for item in enrollment.get('students', [])
+            if _safe_int(item.get('corte_estudiante_id'), default=0) == safe_student_id
+        ),
+        None,
+    )
+    if not student or not _student_payment_is_complete(student):
+        raise AdminCertificateError('El certificado no puede descargarse mientras exista saldo pendiente.')
+
     stored_path = _safe_stored_certificate_path(link.get('RutaArchivo'))
     if not stored_path.exists():
         raise AdminCertificateError('El archivo del certificado no se encontró en el almacenamiento local.')
@@ -135,6 +147,8 @@ def download_admin_certificate(corte_id: Any, corte_estudiante_id: Any) -> tuple
 def _generate_student_certificate(cut: dict[str, Any], student: dict[str, Any], *, user_login: str) -> dict[str, Any]:
     if not _is_passing_grade(student.get('nota_final')):
         raise AdminCertificateError('El estudiante no tiene nota aprobatoria para generar certificado.')
+    if not _student_payment_is_complete(student):
+        raise AdminCertificateError('El estudiante debe completar el pago total antes de generar el certificado.')
 
     payload = _certificate_payload_from_student(cut, student, user_login=user_login)
     certificate_record = create_stored_certificate_record(payload)
@@ -142,6 +156,29 @@ def _generate_student_certificate(cut: dict[str, Any], student: dict[str, Any], 
     load_or_create_stored_certificate(certificate_payload)
     _insert_certificate_link(cut, student, certificate_record, user_login=user_login)
     return certificate_record
+
+
+def _student_payment_is_complete(student: dict[str, Any]) -> bool:
+    # Importación local para evitar un ciclo entre pagos, cortes y certificados.
+    from .payments import list_registered_user_payments
+
+    result = list_registered_user_payments(
+        search=student.get('codigo_estud') or student.get('cedula') or '',
+        payment_status='all',
+        page=1,
+        page_size=100,
+    )
+    target_code = _clean_text(student.get('codigo_estud'))
+    target_cut = _clean_text(student.get('corte_id'))
+    account = next(
+        (
+            item for item in result.get('users', [])
+            if _clean_text(item.get('codigo_estud')) == target_code
+            and _clean_text(item.get('corte_id')) == target_cut
+        ),
+        None,
+    )
+    return bool(account and account.get('payment_status') == 'PAGADO')
 
 
 def _rebuild_admin_certificate_file(
@@ -442,12 +479,7 @@ def _fetch_all(query: str, params: list[Any] | None = None) -> list[dict[str, An
 
 
 def _is_passing_grade(value: Any) -> bool:
-    if value is None:
-        return False
-    try:
-        return Decimal(str(value)) >= Decimal('10')
-    except (InvalidOperation, TypeError, ValueError):
-        return False
+    return is_passing_grade(value)
 
 
 def _number_label(value: Any, *, suffix: str = '') -> str:

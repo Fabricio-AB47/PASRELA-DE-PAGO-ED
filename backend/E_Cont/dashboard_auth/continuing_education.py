@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from django.core.cache import cache
 from django.db import connection
 
 
@@ -124,7 +125,7 @@ def configure_cut_in_complement(
                 @CorteId = %s,
                 @CupoMaximo = %s,
                 @PermiteSobrecupo = 0,
-                @NotaMinima = 10.00,
+                @NotaMinima = 7.00,
                 @UsuarioRegistro = %s
             """,
             [numeric_corte_id, cupo, _trim_to_max(usuario_registro or 'SISTEMA', 50)],
@@ -156,6 +157,8 @@ def sync_student_enrollment_to_complement(
     codigo_estud: Any,
     usuario_registro: str = '',
     registrar_cargo_inicial: bool = True,
+    valor_total_curso: Any = None,
+    origen_matricula: str = '',
 ) -> dict[str, Any]:
     version = complement_version()
     if version == 'v5':
@@ -209,11 +212,141 @@ def sync_student_enrollment_to_complement(
                 _trim_to_max(usuario_registro or 'SISTEMA', 50),
             ],
         )
+    charge_result = None
+    if valor_total_curso not in (None, ''):
+        charge_result = ensure_student_course_charge(
+            corte_id=numeric_corte_id,
+            codigo_estud=numeric_codigo_estud,
+            target_value=valor_total_curso,
+            origin=origen_matricula,
+            usuario_registro=usuario_registro,
+        )
     return {
         'synced': True,
         'database': complement_database_name(),
         'version': version,
         'matricula': _lower_keys(rows[0]) if rows else {},
+        'course_charge': charge_result,
+    }
+
+
+def ensure_student_course_charge(
+    *,
+    corte_id: Any,
+    codigo_estud: Any,
+    target_value: Any,
+    origin: str = '',
+    usuario_registro: str = '',
+) -> dict[str, Any]:
+    numeric_corte_id = _safe_int(corte_id)
+    numeric_codigo_estud = _safe_int(codigo_estud)
+    try:
+        target = Decimal(str(target_value)).quantize(Decimal('0.01'))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ContinuingEducationError('El valor total del curso no es válido.') from exc
+    if numeric_corte_id <= 0 or numeric_codigo_estud <= 0 or target <= 0:
+        raise ContinuingEducationError('Datos insuficientes para ajustar el valor del curso.')
+    required = [
+        ('edu', 'CorteEstudiante', 'U'),
+        ('fin', 'CuentaEstudiante', 'U'),
+        ('fin', 'MovimientoCuenta', 'U'),
+        ('fin', 'usp_RegistrarMovimientoCuenta', 'P'),
+    ]
+    if not is_complement_available(required):
+        raise ContinuingEducationError('El módulo financiero complementario no está disponible.')
+
+    row = _fetch_one(
+        f"""
+        SELECT TOP (1)
+            CE.[EstudianteCorteId],
+            C.[CuentaId],
+            ISNULL(SUM(CASE
+                WHEN M.[EstadoMovimiento] = 'ACTIVO' AND M.[TipoMovimiento] = 'DEBE'
+                THEN M.[Valor] ELSE 0 END), 0) AS [TotalCargo]
+            ,ISNULL(SUM(CASE
+                WHEN M.[EstadoMovimiento] = 'ACTIVO'
+                 AND M.[TipoMovimiento] = 'HABER'
+                 AND UPPER(ISNULL(M.[FormaPago], '')) = 'DESCUENTO'
+                THEN M.[Valor] ELSE 0 END), 0) AS [TotalDescuento]
+        FROM {_qualified('edu', 'CorteEstudiante')} CE
+        INNER JOIN {_qualified('fin', 'CuentaEstudiante')} C
+            ON C.[EstudianteCorteId] = CE.[EstudianteCorteId]
+        LEFT JOIN {_qualified('fin', 'MovimientoCuenta')} M
+            ON M.[CuentaId] = C.[CuentaId]
+        WHERE CE.[CorteId] = %s AND CE.[CodigoEstud] = %s
+        GROUP BY CE.[EstudianteCorteId], C.[CuentaId]
+        """,
+        [numeric_corte_id, numeric_codigo_estud],
+    )
+    if not row:
+        raise ContinuingEducationError('No se encontró la cuenta financiera de la matrícula.')
+    current = Decimal(str(row.get('TotalCargo') or 0)).quantize(Decimal('0.01'))
+    current_discount = Decimal(str(row.get('TotalDescuento') or 0)).quantize(Decimal('0.01'))
+    current_net = max(current - current_discount, Decimal('0.00'))
+    charge_difference = target - current
+    discount_difference = current_net - target
+    if charge_difference <= 0 and discount_difference <= 0:
+        return {
+            'adjusted': False,
+            'origin': _clean_text(origin).upper(),
+            'previous_value': str(current),
+            'previous_net_value': str(current_net),
+            'target_value': str(target),
+            'added_value': '0.00',
+            'discount_value': '0.00',
+        }
+
+    clean_origin = _clean_text(origin).upper() or 'SISTEMA'
+    is_downward_adjustment = discount_difference > 0
+    movement_value = discount_difference if is_downward_adjustment else charge_difference
+    movement_type = 'HABER' if is_downward_adjustment else 'DEBE'
+    payment_method = 'DESCUENTO' if is_downward_adjustment else 'AJUSTE_VALOR_CURSO'
+    concept = (
+        f'AJUSTE VALOR NETO CURSO - {clean_origin}'
+        if is_downward_adjustment
+        else f'AJUSTE VALOR CURSO - {clean_origin}'
+    )
+    movement = _fetch_one(
+        f"""
+        EXEC {_qualified('fin', 'usp_RegistrarMovimientoCuenta')}
+            @CuentaId = %s,
+            @TipoMovimiento = %s,
+            @Concepto = %s,
+            @Valor = %s,
+            @FormaPago = %s,
+            @UsuarioRegistro = %s,
+            @Observacion = %s
+        """,
+        [
+            row.get('CuentaId'),
+            movement_type,
+            _trim_to_max(concept, 200),
+            movement_value,
+            payment_method,
+            _trim_to_max(usuario_registro or 'SISTEMA', 50),
+            _trim_to_max(
+                (
+                    f'Valor neto ajustado de {current_net:.2f} a {target:.2f} '
+                    f'según origen de matrícula {clean_origin}.'
+                    if is_downward_adjustment
+                    else f'Cargo ajustado de {current:.2f} a {target:.2f} '
+                    f'según origen de matrícula {clean_origin}.'
+                ),
+                500,
+            ),
+        ],
+    )
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v5:{complement_database_name()}')
+    return {
+        'adjusted': True,
+        'origin': clean_origin,
+        'previous_value': str(current),
+        'previous_net_value': str(current_net),
+        'target_value': str(target),
+        'added_value': str(movement_value) if not is_downward_adjustment else '0.00',
+        'discount_value': str(movement_value) if is_downward_adjustment else '0.00',
+        'adjustment_type': 'DISCOUNT' if is_downward_adjustment else 'CHARGE',
+        'movement': _lower_keys(movement or {}),
     }
 
 

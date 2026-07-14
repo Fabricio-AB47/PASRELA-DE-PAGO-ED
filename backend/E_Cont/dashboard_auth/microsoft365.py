@@ -55,6 +55,128 @@ class Microsoft365GraphError(Microsoft365Error):
         self.graph_status_code = graph_status_code
 
 
+def upload_continuing_education_voucher(
+    content: bytes,
+    *,
+    course_name: str,
+    cut_name: str,
+    student_name: str,
+    student_code: str,
+    file_name: str,
+) -> dict[str, str]:
+    """Store a payment receipt in the configured institutional OneDrive."""
+    if not content:
+        raise Microsoft365ValidationError('El comprobante está vacío.')
+    config = _graph_config()
+    token = _get_access_token(config)
+    owner = _env_first(
+        'ONEDRIVE_USER_ID',
+        'MS_SENDER_USER_ID',
+        'MS_SENDER_EMAIL',
+        'MICROSOFT_SENDER_USER_ID',
+    )
+    if not owner:
+        raise Microsoft365ConfigError(
+            'Configura ONEDRIVE_USER_ID con el correo propietario de la carpeta EDUCACION_CONTINUA.'
+        )
+
+    root_folder = _safe_onedrive_name(os.getenv('ONEDRIVE_EDUCATION_ROOT_FOLDER') or 'EDUCACION_CONTINUA')
+    student_folder = _safe_onedrive_name(f'{student_code} - {student_name}')
+    folders = [
+        root_folder,
+        _safe_onedrive_name(course_name or 'CURSO_SIN_NOMBRE'),
+        _safe_onedrive_name(cut_name or 'CORTE_SIN_NOMBRE'),
+        student_folder,
+    ]
+    _ensure_onedrive_folder_path(config, token, owner, folders)
+
+    safe_file_name = _safe_onedrive_name(file_name or f'comprobante_{student_code}', max_length=140)
+    encoded_owner = quote(owner, safe='')
+    encoded_path = '/'.join(quote(part, safe='') for part in [*folders, safe_file_name])
+    endpoint = f"{config['base_url']}/users/{encoded_owner}/drive/root:/{encoded_path}:/content"
+    item = _graph_binary_request('PUT', endpoint, token, content, operation='cargar comprobante en OneDrive')
+    return {
+        'item_id': str(item.get('id') or ''),
+        'file_name': str(item.get('name') or safe_file_name),
+        'relative_path': '/'.join([*folders, safe_file_name]),
+        'web_url': str(item.get('webUrl') or ''),
+    }
+
+
+def _safe_onedrive_name(value: str, *, max_length: int = 90) -> str:
+    clean = re.sub(r'[\\/:*?"<>|#%]', '-', str(value or '').strip())
+    clean = re.sub(r'\s+', ' ', clean).strip(' .')
+    return (clean or 'SIN_NOMBRE')[:max_length].rstrip(' .')
+
+
+def _ensure_onedrive_folder_path(
+    config: dict[str, str], token: str, owner: str, folders: list[str],
+) -> None:
+    encoded_owner = quote(owner, safe='')
+    parent = _graph_request(
+        'GET', f"{config['base_url']}/users/{encoded_owner}/drive/root", token,
+        operation='consultar raíz de OneDrive',
+    )
+    accumulated: list[str] = []
+    for folder_name in folders:
+        accumulated.append(folder_name)
+        encoded_path = '/'.join(quote(part, safe='') for part in accumulated)
+        endpoint = f"{config['base_url']}/users/{encoded_owner}/drive/root:/{encoded_path}"
+        try:
+            parent = _graph_request('GET', endpoint, token, operation=f'consultar carpeta {folder_name}')
+        except Microsoft365GraphError as exc:
+            if exc.graph_status_code != 404:
+                raise
+            parent_id = quote(str(parent.get('id') or ''), safe='')
+            try:
+                parent = _graph_request(
+                    'POST',
+                    f"{config['base_url']}/users/{encoded_owner}/drive/items/{parent_id}/children",
+                    token,
+                    body={
+                        'name': folder_name,
+                        'folder': {},
+                        '@microsoft.graph.conflictBehavior': 'fail',
+                    },
+                    operation=f'crear carpeta {folder_name}',
+                )
+            except Microsoft365GraphError as create_exc:
+                if create_exc.graph_status_code != 409:
+                    raise
+                parent = _graph_request('GET', endpoint, token, operation=f'consultar carpeta {folder_name}')
+
+
+def _graph_binary_request(
+    method: str, url: str, token: str, content: bytes, *, operation: str,
+) -> dict[str, Any]:
+    request = Request(
+        url,
+        data=content,
+        headers={
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/json',
+            'Content-Type': 'application/octet-stream',
+        },
+        method=method,
+    )
+    try:
+        with urlopen(request, timeout=60) as response:
+            raw = response.read().decode('utf-8')
+    except HTTPError as exc:
+        detail = exc.read().decode('utf-8', errors='ignore')
+        raise Microsoft365GraphError(
+            f'Microsoft Graph rechazó la operación "{operation}" ({exc.code}): '
+            f'{_graph_error_message(detail) or exc.reason}',
+            graph_status_code=exc.code,
+        ) from exc
+    except URLError as exc:
+        raise Microsoft365GraphError(f'No fue posible conectar con Microsoft Graph: {exc.reason}') from exc
+    try:
+        return json.loads(raw) if raw else {}
+    except json.JSONDecodeError as exc:
+        raise Microsoft365GraphError('Microsoft Graph devolvió una respuesta inválida al cargar el archivo.') from exc
+
+
 def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
     return _create_microsoft365_user_with_license(payload, license_kind='student')
 

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from django.contrib.auth.hashers import check_password, identify_hasher
+from django.utils.crypto import constant_time_compare
 from django.db import connection
 
 
@@ -92,10 +94,10 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
             CorreoPersonal,
             CorreoIntec,
             Estado,
-            CAST(Periodo AS varchar(50)) AS Periodo
+            CAST(Periodo AS varchar(50)) AS Periodo,
+            Password AS stored_password
         FROM dbo.CorreosEstudIntec
-        WHERE Password = %s
-          AND (
+        WHERE (
               LOWER(LTRIM(RTRIM(ISNULL(CorreoPersonal, '')))) = LOWER(%s)
               OR LOWER(LTRIM(RTRIM(ISNULL(CorreoIntec, '')))) = LOWER(%s)
               OR LTRIM(RTRIM(CAST(codestud AS varchar(50)))) = %s
@@ -108,7 +110,11 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
             END,
             Periodo DESC
     """
-    rows = _fetch_all(query, [password, identifier, identifier, identifier, identifier, identifier])
+    rows = [
+        row
+        for row in _fetch_all(query, [identifier, identifier, identifier, identifier, identifier])
+        if _password_matches(row.get('stored_password'), password)
+    ]
     if not rows:
         return None
 
@@ -155,15 +161,15 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
 
 def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
     query = """
-        SELECT TOP (1)
+        SELECT
             CAST(Codigo_Usuario AS varchar(50)) AS Codigo_Usuario,
             cedula,
             login,
             Estado,
-            CAST(tipo_usuario AS varchar(50)) AS tipo_usuario
+            CAST(tipo_usuario AS varchar(50)) AS tipo_usuario,
+            password AS stored_password
         FROM dbo.USUARIOS
-        WHERE password = %s
-          AND (
+        WHERE (
               LOWER(LTRIM(RTRIM(ISNULL(login, '')))) = LOWER(%s)
               OR LTRIM(RTRIM(ISNULL(cedula, ''))) = %s
               OR LTRIM(RTRIM(CAST(Codigo_Usuario AS varchar(50)))) = %s
@@ -175,7 +181,8 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
                 ELSE 2
             END
     """
-    row = _fetch_one(query, [password, identifier, identifier, identifier, identifier, identifier])
+    rows = _fetch_all(query, [identifier, identifier, identifier, identifier, identifier])
+    row = next((candidate for candidate in rows if _password_matches(candidate.get('stored_password'), password)), None)
     if row is None:
         return None
 
@@ -220,31 +227,43 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
 
 def _find_staff(identifier: str, password: str) -> AuthenticatedUser | None:
     query = """
-        SELECT TOP (1)
-            login,
-            nombres,
-            estado,
-            email,
-            CAST(id_usuarios AS varchar(50)) AS id_usuarios,
-            CAST(coordcarrera AS varchar(50)) AS coordcarrera,
-            CAST(codprovincia AS varchar(50)) AS codprovincia,
-            CAST(tipousuario AS varchar(50)) AS tipousuario,
-            tp_us
-        FROM dbo.USUARIO_SIS
-        WHERE password = %s
-          AND (
-              LOWER(LTRIM(RTRIM(ISNULL(login, '')))) = LOWER(%s)
-              OR LOWER(LTRIM(RTRIM(ISNULL(email, '')))) = LOWER(%s)
-              OR LTRIM(RTRIM(CAST(id_usuarios AS varchar(50)))) = %s
+        SELECT
+            S.login,
+            S.nombres,
+            S.estado,
+            S.email,
+            CAST(S.id_usuarios AS varchar(50)) AS id_usuarios,
+            CAST(S.coordcarrera AS varchar(50)) AS coordcarrera,
+            CAST(S.codprovincia AS varchar(50)) AS codprovincia,
+            NULLIF(LTRIM(RTRIM(S.tp_us)), '') AS tp_us,
+            RTRIM(TU.detalle_tipo_us) AS role_name,
+            S.password AS stored_password
+        FROM dbo.USUARIO_SIS AS S
+        LEFT JOIN dbo.TIPO_USUARIO AS TU
+          ON TU.Codigo_tipo_us = TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(S.tp_us)), ''))
+        WHERE (
+              LOWER(LTRIM(RTRIM(ISNULL(S.login, '')))) = LOWER(%s)
+              OR LOWER(LTRIM(RTRIM(ISNULL(S.email, '')))) = LOWER(%s)
+              OR LTRIM(RTRIM(CAST(S.id_usuarios AS varchar(50)))) = %s
           )
         ORDER BY
             CASE
-                WHEN LOWER(LTRIM(RTRIM(ISNULL(login, '')))) = LOWER(%s) THEN 0
-                WHEN LOWER(LTRIM(RTRIM(ISNULL(email, '')))) = LOWER(%s) THEN 1
+                WHEN LOWER(LTRIM(RTRIM(ISNULL(S.login, '')))) = LOWER(%s) THEN 0
+                WHEN LOWER(LTRIM(RTRIM(ISNULL(S.email, '')))) = LOWER(%s) THEN 1
                 ELSE 2
             END
     """
-    row = _fetch_one(query, [password, identifier, identifier, identifier, identifier, identifier])
+    rows = _fetch_all(
+        query,
+        [
+            identifier,
+            identifier,
+            identifier,
+            identifier,
+            identifier,
+        ],
+    )
+    row = next((candidate for candidate in rows if _password_matches(candidate.get('stored_password'), password)), None)
     if row is None:
         return None
 
@@ -253,7 +272,7 @@ def _find_staff(identifier: str, password: str) -> AuthenticatedUser | None:
         raise InactiveUserError('La cuenta administrativa no está activa para ingresar al dashboard.')
 
     role_code = _resolve_staff_role_code(row)
-    role_name = _resolve_staff_role_name(role_code)
+    role_name = _clean_text(row.get('role_name')) or _resolve_staff_role_name(role_code)
     staff_login = _clean_text(row.get('login')) or identifier
     display_name = _clean_text(row.get('nombres')) or staff_login
     email = _clean_text(row.get('email')) or (staff_login if '@' in staff_login else None)
@@ -277,11 +296,8 @@ def _find_staff(identifier: str, password: str) -> AuthenticatedUser | None:
 
 
 def _resolve_staff_role_code(row: dict[str, Any]) -> int | None:
-    for value in (_clean_text(row.get('tp_us')), _clean_text(row.get('tipousuario'))):
-        parsed = _to_int(value)
-        if parsed and 1 <= parsed <= 9:
-            return parsed
-    return None
+    parsed = _to_int(row.get('tp_us'))
+    return parsed if parsed is not None and parsed > 0 else None
 
 
 def _resolve_staff_role_name(role_code: int | None) -> str:
@@ -346,6 +362,11 @@ def _staff_modules(role_name: str) -> list[dict[str, str]]:
             {'title': 'Bitácora visible', 'description': 'Accede a eventos habilitados para soporte externo.'},
             {'title': 'Seguimiento guiado', 'description': 'Da soporte a incidencias bajo supervision interna.'},
         ],
+        'SECRETARIA': [
+            {'title': 'Gestión académica', 'description': 'Consulta y actualiza los procesos académicos habilitados para secretaría.'},
+            {'title': 'Matrículas', 'description': 'Da seguimiento a estudiantes, matrículas y documentación académica.'},
+            {'title': 'Certificados', 'description': 'Consulta el estado de certificados y solicitudes institucionales.'},
+        ],
     }
     return modules.get(
         role_name,
@@ -376,6 +397,20 @@ def _clean_text(value: Any) -> str | None:
         return None
     text = str(value).replace('\r', '').replace('\n', '').strip()
     return text or None
+
+
+def _password_matches(stored_password: Any, supplied_password: str) -> bool:
+    stored = str(stored_password or '')
+    supplied = str(supplied_password or '')
+    if not stored or not supplied:
+        return False
+    try:
+        identify_hasher(stored)
+    except ValueError:
+        # Compatibilidad temporal con las tablas heredadas. Los registros deben
+        # migrarse a hashes de Django/Argon2 y luego eliminar esta rama.
+        return constant_time_compare(stored, supplied)
+    return check_password(supplied, stored)
 
 
 def _to_int(value: Any) -> int | None:

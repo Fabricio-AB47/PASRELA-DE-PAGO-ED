@@ -18,7 +18,6 @@ from .inscription_certificate import (
 from .payments import PaymentGatewayError, create_mass_matriculation_and_credentials
 from .student_registration import (
     RegisteredUserExistsError,
-    USER_REGISTERED_MESSAGE,
     ensure_user_is_not_registered,
 )
 
@@ -57,6 +56,7 @@ MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_BULK_ROWS = 500
 MAX_STUDENT_SELECTION = 500
 DEFAULT_EMPTY_LOCATION = 'No registrado'
+STUDENT_ALREADY_REGISTERED_MESSAGE = 'El estudiante se encuentra registrado y fue omitido.'
 
 
 HEADER_ALIASES = {
@@ -191,9 +191,15 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
         raise BulkEnrollmentError(f'La carga masiva permite hasta {MAX_BULK_ROWS} filas por archivo.')
 
     results: list[dict[str, Any]] = []
+    seen_cedulas: set[str] = set()
     for row in rows:
         try:
             payload = _payload_from_row(row, clean_defaults)
+            if payload['cedula'] in seen_cedulas:
+                results.append(_skipped_registered_student(row, payload, duplicate_in_file=True))
+                continue
+
+            seen_cedulas.add(payload['cedula'])
             try:
                 ensure_user_is_not_registered(
                     payload['cedula'],
@@ -202,17 +208,7 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
                     codigo_periodo=payload['codigo_periodo'],
                 )
             except RegisteredUserExistsError:
-                results.append(
-                    {
-                        'ok': False,
-                        'fila': row['fila'],
-                        'nombre': payload['nombre'],
-                        'cedula': payload['cedula'],
-                        'email': payload['email'],
-                        'registered': True,
-                        'message': USER_REGISTERED_MESSAGE,
-                    }
-                )
+                results.append(_skipped_registered_student(row, payload))
                 continue
             results.append(_process_matriculation_payload(payload, row['fila'], certificate_source='matricula_masiva'))
         except Exception as exc:
@@ -228,12 +224,33 @@ def process_bulk_enrollment_excel(uploaded_file: Any, defaults: dict[str, Any]) 
             )
 
     successful = sum(1 for item in results if item['ok'])
-    failed = len(results) - successful
+    skipped = sum(1 for item in results if item.get('skipped'))
+    failed = len(results) - successful - skipped
     return {
         'total': len(results),
         'exitosos': successful,
+        'omitidos': skipped,
         'fallidos': failed,
         'results': results,
+    }
+
+
+def _skipped_registered_student(
+    row: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    duplicate_in_file: bool = False,
+) -> dict[str, Any]:
+    return {
+        'ok': False,
+        'skipped': True,
+        'registered': True,
+        'duplicate_in_file': duplicate_in_file,
+        'fila': row.get('fila'),
+        'nombre': payload['nombre'],
+        'cedula': payload['cedula'],
+        'email': payload['email'],
+        'message': STUDENT_ALREADY_REGISTERED_MESSAGE,
     }
 
 
@@ -561,6 +578,8 @@ def _payload_from_row(row: dict[str, str], defaults: dict[str, str]) -> dict[str
         raise PaymentGatewayError('Falta nombre del estudiante.')
     if not cedula:
         raise PaymentGatewayError('Falta cédula del estudiante.')
+    if len(cedula) != 10:
+        raise PaymentGatewayError('La cédula del estudiante debe contener 10 dígitos.')
     if not email:
         raise PaymentGatewayError('Falta correo del estudiante.')
     if not telefono:

@@ -47,7 +47,11 @@ function LoginPage() {
       setStoredSession(payload)
       window.location.assign('/dashboard/')
     } catch (error) {
-      setErrorMessage(error.message)
+      setErrorMessage(
+        error instanceof TypeError
+          ? 'No fue posible conectar con el servidor. Verifica que el backend esté iniciado e inténtalo nuevamente.'
+          : error.message,
+      )
     } finally {
       setIsSubmitting(false)
     }

@@ -5,6 +5,7 @@ from typing import Any
 
 from django.db import connection
 
+from .academic_rules import is_passing_grade
 from .continuing_education import complement_database_name, complement_version, is_complement_available
 from .inscription_certificate import (
     build_inscription_certificate_preview_image,
@@ -95,6 +96,9 @@ def preview_student_certificate(
     student, course = _student_certificate_course(
         session_user,
         estudiante_corte_id,
+        # La vista previa no emite ni entrega el certificado. Se permite para
+        # que el estudiante revise el formato; descargar y enviar continúan
+        # sujetos a nota aprobatoria y pago completo.
         require_approved=False,
         require_email=False,
     )
@@ -147,6 +151,8 @@ def _student_grades_status() -> dict[str, Any]:
         ('edu', 'VW_MatriculaDocenteCompleta', 'V'),
         ('edu', 'CalificacionCorte', 'U'),
         ('edu', 'VW_AsistenciaResumen', 'V'),
+        ('fin', 'CuentaEstudiante', 'U'),
+        ('fin', 'MovimientoCuenta', 'U'),
     ]
     available = complement_version() == 'v5' and is_complement_available(required)
     return {
@@ -367,7 +373,10 @@ def _fetch_student_grade_rows(student: dict[str, Any]) -> list[dict[str, Any]]:
             CAL.[FechaModifica] AS [FechaModificaNota],
             CAL.[FechaPase],
             AR.[PorcentajeAsistencia],
-            AR.[TotalSesionesRealizadas]
+            AR.[TotalSesionesRealizadas],
+            ISNULL(FIN.[TotalCargo], 0) AS [TotalCargo],
+            ISNULL(FIN.[TotalPagado], 0) AS [TotalPagado],
+            ISNULL(FIN.[TotalDescuento], 0) AS [TotalDescuento]
         FROM [{db_name}].[edu].[VW_MatriculaEstudianteCompleta] M
         INNER JOIN [{db_name}].[edu].[VW_CorteCursoDetalle] D
           ON D.[CorteId] = M.[CorteId]
@@ -375,6 +384,15 @@ def _fetch_student_grade_rows(student: dict[str, Any]) -> list[dict[str, Any]]:
           ON CAL.[EstudianteCorteId] = M.[EstudianteCorteId]
         LEFT JOIN [{db_name}].[edu].[VW_AsistenciaResumen] AR
           ON AR.[EstudianteCorteId] = M.[EstudianteCorteId]
+        OUTER APPLY (
+            SELECT
+                SUM(CASE WHEN MOV.[EstadoMovimiento] = 'ACTIVO' AND MOV.[TipoMovimiento] = 'DEBE' THEN MOV.[Valor] ELSE 0 END) AS [TotalCargo],
+                SUM(CASE WHEN MOV.[EstadoMovimiento] = 'ACTIVO' AND MOV.[TipoMovimiento] = 'HABER' AND UPPER(ISNULL(MOV.[FormaPago], '')) <> 'DESCUENTO' THEN MOV.[Valor] ELSE 0 END) AS [TotalPagado],
+                SUM(CASE WHEN MOV.[EstadoMovimiento] = 'ACTIVO' AND MOV.[TipoMovimiento] = 'HABER' AND UPPER(ISNULL(MOV.[FormaPago], '')) = 'DESCUENTO' THEN MOV.[Valor] ELSE 0 END) AS [TotalDescuento]
+            FROM [{db_name}].[fin].[CuentaEstudiante] CTA
+            LEFT JOIN [{db_name}].[fin].[MovimientoCuenta] MOV ON MOV.[CuentaId] = CTA.[CuentaId]
+            WHERE CTA.[EstudianteCorteId] = M.[EstudianteCorteId]
+        ) FIN
         OUTER APPLY (
             SELECT TOP (1)
                 MD.[ApellidosNombre],
@@ -435,7 +453,10 @@ def _fetch_student_grade_row(student: dict[str, Any], estudiante_corte_id: Any) 
             CAL.[FechaModifica] AS [FechaModificaNota],
             CAL.[FechaPase],
             AR.[PorcentajeAsistencia],
-            AR.[TotalSesionesRealizadas]
+            AR.[TotalSesionesRealizadas],
+            ISNULL(FIN.[TotalCargo], 0) AS [TotalCargo],
+            ISNULL(FIN.[TotalPagado], 0) AS [TotalPagado],
+            ISNULL(FIN.[TotalDescuento], 0) AS [TotalDescuento]
         FROM [{db_name}].[edu].[VW_MatriculaEstudianteCompleta] M
         INNER JOIN [{db_name}].[edu].[VW_CorteCursoDetalle] D
           ON D.[CorteId] = M.[CorteId]
@@ -443,6 +464,15 @@ def _fetch_student_grade_row(student: dict[str, Any], estudiante_corte_id: Any) 
           ON CAL.[EstudianteCorteId] = M.[EstudianteCorteId]
         LEFT JOIN [{db_name}].[edu].[VW_AsistenciaResumen] AR
           ON AR.[EstudianteCorteId] = M.[EstudianteCorteId]
+        OUTER APPLY (
+            SELECT
+                SUM(CASE WHEN MOV.[EstadoMovimiento] = 'ACTIVO' AND MOV.[TipoMovimiento] = 'DEBE' THEN MOV.[Valor] ELSE 0 END) AS [TotalCargo],
+                SUM(CASE WHEN MOV.[EstadoMovimiento] = 'ACTIVO' AND MOV.[TipoMovimiento] = 'HABER' AND UPPER(ISNULL(MOV.[FormaPago], '')) <> 'DESCUENTO' THEN MOV.[Valor] ELSE 0 END) AS [TotalPagado],
+                SUM(CASE WHEN MOV.[EstadoMovimiento] = 'ACTIVO' AND MOV.[TipoMovimiento] = 'HABER' AND UPPER(ISNULL(MOV.[FormaPago], '')) = 'DESCUENTO' THEN MOV.[Valor] ELSE 0 END) AS [TotalDescuento]
+            FROM [{db_name}].[fin].[CuentaEstudiante] CTA
+            LEFT JOIN [{db_name}].[fin].[MovimientoCuenta] MOV ON MOV.[CuentaId] = CTA.[CuentaId]
+            WHERE CTA.[EstudianteCorteId] = M.[EstudianteCorteId]
+        ) FIN
         OUTER APPLY (
             SELECT TOP (1)
                 MD.[ApellidosNombre],
@@ -565,7 +595,21 @@ def _normalize_grade_course(row: dict[str, Any]) -> dict[str, Any]:
     nota_final = _decimal_to_number(row.get('NotaFinal'))
     asistencia = _decimal_to_number(row.get('PorcentajeAsistencia'))
     aprobado = _is_passing_grade(nota_final)
+    total_curso = _to_decimal(row.get('TotalCargo'))
+    total_pagado = _to_decimal(row.get('TotalPagado'))
+    total_descuento = _to_decimal(row.get('TotalDescuento'))
+    saldo_pendiente = max(Decimal('0.00'), total_curso - total_pagado - total_descuento)
+    pago_completo = total_curso > 0 and saldo_pendiente <= 0
+    certificado_disponible = aprobado and pago_completo
     estado_nota = _clean_text(row.get('EstadoNota')).upper()
+    if certificado_disponible:
+        certificado_estado = 'Disponible'
+    elif not aprobado and not pago_completo:
+        certificado_estado = 'No disponible: curso no aprobado y pago pendiente'
+    elif not aprobado:
+        certificado_estado = 'No disponible: curso no aprobado'
+    else:
+        certificado_estado = 'No disponible: pago total pendiente'
     return {
         'estudiante_corte_id': _clean_text(row.get('EstudianteCorteId')),
         'corte_id': _clean_text(row.get('CorteId')),
@@ -597,8 +641,14 @@ def _normalize_grade_course(row: dict[str, Any]) -> dict[str, Any]:
         'porcentaje_asistencia': asistencia,
         'total_sesiones': _safe_int(row.get('TotalSesionesRealizadas')),
         'aprobado': aprobado,
-        'certificado_disponible': aprobado,
-        'certificado_estado': 'Disponible' if aprobado else 'Pendiente de culminación del curso',
+        'total_curso': str(total_curso),
+        'total_pagado': str(total_pagado),
+        'total_descuento': str(total_descuento),
+        'saldo_pendiente': str(saldo_pendiente),
+        'pago_completo': pago_completo,
+        'estado_financiero': 'PAGADO' if pago_completo else 'PENDIENTE',
+        'certificado_disponible': certificado_disponible,
+        'certificado_estado': certificado_estado,
         'culminacion_pendiente': not aprobado,
         'culminacion_estado': 'Curso culminado' if aprobado else 'Pendiente de culminación del curso',
     }
@@ -608,12 +658,15 @@ def _build_grade_metrics(courses: list[dict[str, Any]]) -> dict[str, int]:
     with_grade = [course for course in courses if course.get('nota_final') is not None]
     approved = [course for course in courses if course.get('aprobado')]
     certificates = [course for course in courses if course.get('certificado_disponible')]
+    paid = [course for course in courses if course.get('pago_completo')]
     pending_completion = [course for course in courses if course.get('culminacion_pendiente')]
     return {
         'cursos': len(courses),
         'con_nota': len(with_grade),
         'aprobados': len(approved),
         'certificados': len(certificates),
+        'pagados': len(paid),
+        'pendientes_pago': max(len(courses) - len(paid), 0),
         'pendientes_culminacion': len(pending_completion),
     }
 
@@ -639,7 +692,15 @@ def _student_certificate_course(
 
     course = _normalize_grade_course(row)
     if require_approved and not course['aprobado']:
-        raise StudentDashboardError('El certificado estará disponible cuando la nota final aprobatoria sea 10.')
+        raise StudentDashboardError(
+            'El certificado estará disponible cuando la nota final esté entre 7.00 y 10.00.'
+        )
+
+    if require_approved and not course['pago_completo']:
+        raise StudentDashboardError(
+            f'El certificado estará disponible cuando completes el pago total del curso. '
+            f'Saldo pendiente: ${course["saldo_pendiente"]}.'
+        )
 
     if require_email and not _student_certificate_email(student, course):
         raise StudentDashboardError('No se encontró un correo válido para enviar el certificado.')
@@ -683,12 +744,14 @@ def _student_certificate_email(student: dict[str, Any], course: dict[str, Any]) 
 
 
 def _is_passing_grade(value: Any) -> bool:
-    if value is None:
-        return False
+    return is_passing_grade(value)
+
+
+def _to_decimal(value: Any) -> Decimal:
     try:
-        return Decimal(str(value)) >= Decimal('10')
+        return Decimal(str(value or 0)).quantize(Decimal('0.01'))
     except (InvalidOperation, TypeError, ValueError):
-        return False
+        return Decimal('0.00')
 
 
 def _grade_status_label(nota_final: Any, estado_nota: str) -> str:

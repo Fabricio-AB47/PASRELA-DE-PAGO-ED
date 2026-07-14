@@ -4,11 +4,13 @@ import base64
 import json
 import re
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from django.conf import settings
+from PIL import Image, UnidentifiedImageError
 
 
 class CertificateTemplateError(Exception):
@@ -388,6 +390,7 @@ def _store_asset(
         raise CertificateTemplateError('El archivo enviado no contiene datos válidos.')
     if len(content) > max_bytes:
         raise CertificateTemplateError('El archivo supera el tamaño máximo permitido.')
+    _validate_image_content(content, extension)
 
     asset_id = uuid4().hex
     display_name = _trim(_clean_text(payload.get('display_name') or payload.get('name')), 90) or default_label
@@ -423,6 +426,18 @@ def _decode_asset_content(raw_value: str, content_type: str) -> bytes:
         return base64.b64decode(value, validate=True)
     except (ValueError, TypeError) as exc:
         raise CertificateTemplateError('El archivo debe enviarse como base64 válido.') from exc
+
+
+def _validate_image_content(content: bytes, extension: str) -> None:
+    expected_format = 'PNG' if extension == '.png' else 'JPEG'
+    try:
+        with Image.open(BytesIO(content)) as image:
+            detected_format = str(image.format or '').upper()
+            image.verify()
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise CertificateTemplateError('La imagen enviada está dañada o no es un formato permitido.') from exc
+    if detected_format != expected_format:
+        raise CertificateTemplateError('El contenido de la imagen no coincide con el formato declarado.')
 
 
 def _delete_logo_file(logo: dict[str, Any]) -> None:

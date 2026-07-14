@@ -73,10 +73,29 @@ from .payments import (
     PaymentGatewayError,
     admin_cancel_payment,
     admin_get_payment_info,
+    create_financial_card_payment,
     create_payment_link_and_notify,
+    generate_all_digital_payment_receipt_document,
     generate_unique_numcodigo,
+    get_payment_student_profile,
+    get_registered_user_payment_detail,
+    list_registered_user_payments,
+    list_financial_payment_operations,
+    reconcile_pending_all_digital_payments,
+    search_payment_links_for_operations,
+    register_continuing_education_payment,
+    register_continuing_education_discount,
 )
-from .security import create_session_token, require_admin_session, require_student_session, require_teacher_session
+from .notifications import list_notifications, mark_notifications_read, notification_storage_status
+from .security import (
+    clear_request_rate_limit,
+    create_session_token,
+    enforce_request_rate_limit,
+    require_admin_session,
+    require_dashboard_session,
+    require_student_session,
+    require_teacher_session,
+)
 from .services import AuthError, InactiveUserError, InvalidScopeError, authenticate_user
 from .student_registration import (
     RegisteredUserExistsError,
@@ -114,18 +133,62 @@ logger = logging.getLogger(__name__)
 
 @require_GET
 def health_view(_request):
+    try:
+        notifications = notification_storage_status()
+    except Exception:
+        notifications = {'available': False}
+    try:
+        continuing_education = complement_status()
+    except Exception:
+        continuing_education = {'available': False}
     return JsonResponse(
         {
             'ok': True,
             'service': 'dashboard-auth',
-            'continuing_education': complement_status(),
+            'continuing_education': {'available': bool(continuing_education.get('available'))},
+            'notifications': {'available': bool(notifications.get('available'))},
         }
     )
+
+
+@require_GET
+@require_dashboard_session
+@never_cache
+def notifications_view(request):
+    try:
+        result = list_notifications(request.dashboard_user, limit=request.GET.get('limit') or 30)
+    except Exception:
+        logger.exception('Unexpected error loading dashboard notifications.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible cargar las notificaciones.'}, status=500)
+    return JsonResponse({'ok': True, 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_dashboard_session
+@never_cache
+def notifications_read_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    notification_ids = payload.get('notification_ids')
+    if notification_ids is not None and not isinstance(notification_ids, list):
+        return JsonResponse({'ok': False, 'message': 'notification_ids debe ser una lista.'}, status=400)
+    try:
+        updated = mark_notifications_read(request.dashboard_user, notification_ids)
+    except Exception:
+        logger.exception('Unexpected error marking dashboard notifications as read.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible actualizar las notificaciones.'}, status=500)
+    return JsonResponse({'ok': True, 'updated': updated})
 
 
 @csrf_exempt
 @require_POST
 def login_view(request):
+    content_type = str(request.META.get('CONTENT_TYPE') or '').split(';', 1)[0].strip().lower()
+    if content_type != 'application/json':
+        return JsonResponse({'ok': False, 'message': 'El contenido debe enviarse como application/json.'}, status=415)
     try:
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
@@ -143,6 +206,16 @@ def login_view(request):
             {'ok': False, 'message': 'Debes completar el usuario y la contraseña.'},
             status=400,
         )
+
+    rate_response = enforce_request_rate_limit(
+        request,
+        scope='dashboard-login',
+        identifier=identifier,
+        limit=5,
+        window_seconds=900,
+    )
+    if rate_response:
+        return rate_response
 
     try:
         user = authenticate_user(identifier, password, scope)
@@ -163,6 +236,7 @@ def login_view(request):
         )
 
     user_payload = user.to_dict()
+    clear_request_rate_limit(request, scope='dashboard-login', identifier=identifier)
     return JsonResponse(
         {
             'ok': True,
@@ -176,6 +250,17 @@ def login_view(request):
 @csrf_exempt
 @require_POST
 def student_lookup_view(request):
+    content_type = str(request.META.get('CONTENT_TYPE') or '').split(';', 1)[0].strip().lower()
+    if content_type != 'application/json':
+        return JsonResponse({'ok': False, 'message': 'El contenido debe enviarse como application/json.'}, status=415)
+    rate_response = enforce_request_rate_limit(
+        request,
+        scope='student-inscription-lookup',
+        limit=20,
+        window_seconds=600,
+    )
+    if rate_response:
+        return rate_response
     try:
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
@@ -213,6 +298,17 @@ def student_lookup_view(request):
 @csrf_exempt
 @require_POST
 def inscription_payment_link_view(request):
+    content_type = str(request.META.get('CONTENT_TYPE') or '').split(';', 1)[0].strip().lower()
+    if content_type != 'application/json':
+        return JsonResponse({'ok': False, 'message': 'El contenido debe enviarse como application/json.'}, status=415)
+    rate_response = enforce_request_rate_limit(
+        request,
+        scope='public-payment-link',
+        limit=5,
+        window_seconds=900,
+    )
+    if rate_response:
+        return rate_response
     try:
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
@@ -296,9 +392,9 @@ def inscription_payment_link_view(request):
             'payment_link': result.get('payment_link'),
             'receipt_email': result.get('receipt_email'),
             'email_result': result.get('email_result'),
-            'provider_response': result.get('provider_response'),
-            'official_sync': result.get('official_sync'),
-            'microsoft365': result.get('microsoft365'),
+            'payment_status': 'GENERADA',
+            'official_sync': {'ok': bool((result.get('official_sync') or {}).get('ok'))},
+            'microsoft365': {'ok': bool((result.get('microsoft365') or {}).get('ok'))},
             'certificate': certificate_record,
             'certificate_email_result': certificate_email_result,
         }
@@ -309,6 +405,9 @@ def inscription_payment_link_view(request):
 @require_POST
 @never_cache
 def inscription_certificate_view(request):
+    content_type = str(request.META.get('CONTENT_TYPE') or '').split(';', 1)[0].strip().lower()
+    if content_type != 'application/json':
+        return JsonResponse({'ok': False, 'message': 'El contenido debe enviarse como application/json.'}, status=415)
     try:
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
@@ -497,6 +596,14 @@ def _certificate_verification_html(payload: dict) -> str:
 @require_GET
 @never_cache
 def inscription_generate_matricula_view(_request):
+    rate_response = enforce_request_rate_limit(
+        _request,
+        scope='public-matricula-number',
+        limit=10,
+        window_seconds=600,
+    )
+    if rate_response:
+        return rate_response
     try:
         matricula = generate_unique_numcodigo()
     except PaymentGatewayError as exc:
@@ -1885,7 +1992,7 @@ def admin_payment_info_view(request):
         )
 
     try:
-        result = admin_get_payment_info(payload)
+        result = admin_get_payment_info(payload, user_login=_dashboard_user_login(request))
     except PaymentGatewayError as exc:
         return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
     except Exception:
@@ -1901,6 +2008,173 @@ def admin_payment_info_view(request):
     return JsonResponse({'ok': True, 'message': 'Consulta completada.', 'result': result})
 
 
+@require_GET
+@require_admin_session
+@never_cache
+def admin_payment_operations_view(request):
+    try:
+        result = list_financial_payment_operations(request.GET.get('cedula', ''))
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error loading financial payment operations.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible cargar las operaciones del estudiante.'}, status=500)
+    return JsonResponse({'ok': True, 'message': 'Operaciones cargadas.', 'result': result})
+
+
+@require_GET
+@require_admin_session
+@never_cache
+def admin_payment_operations_links_view(request):
+    try:
+        result = search_payment_links_for_operations(request.GET.get('q', ''))
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error searching AllDigital payment links.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible consultar los enlaces de pago.'}, status=500)
+    return JsonResponse({'ok': True, 'message': 'Enlaces cargados.', 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_payment_operations_generate_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = create_financial_card_payment(payload, user_login=_dashboard_user_login(request))
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error generating a financial card payment link.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible generar el enlace con tarjeta.'}, status=500)
+    return JsonResponse({'ok': True, 'message': 'Enlace de pago generado.', 'result': result}, status=201)
+
+
+@require_GET
+@require_admin_session
+@never_cache
+def admin_registered_payments_view(request):
+    try:
+        student_codigo = request.GET.get('student_codigo', '').strip()
+        student_cedula = request.GET.get('student_cedula', '').strip()
+        codigo_estud = request.GET.get('codigo_estud', '').strip()
+        if student_codigo or student_cedula:
+            result = get_payment_student_profile(student_codigo, cedula=student_cedula)
+        elif codigo_estud:
+            result = get_registered_user_payment_detail(
+                codigo_estud,
+                cuenta_id=request.GET.get('cuenta_id', '').strip(),
+            )
+        else:
+            result = list_registered_user_payments(
+                search=request.GET.get('q', ''),
+                payment_status=request.GET.get('payment_status', 'all'),
+                page=request.GET.get('page', 1),
+                page_size=request.GET.get('page_size', 25),
+            )
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while listing registered user payments.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno consultando los pagos registrados.',
+            },
+            status=500,
+        )
+
+    return JsonResponse({'ok': True, 'message': 'Pagos registrados cargados.', 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_payments_reconcile_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = reconcile_pending_all_digital_payments(
+            limit=payload.get('limit') or 50,
+            force=True,
+            user_login=_dashboard_user_login(request),
+        )
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error reconciling AllDigital payments.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible validar los pagos con AllDigital.'}, status=500)
+    return JsonResponse({'ok': True, 'message': 'Validación de pagos completada.', 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_payment_register_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = register_continuing_education_payment(
+            payload,
+            user_login=_dashboard_user_login(request),
+        )
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error registering continuing education payment.')
+        return JsonResponse(
+            {'ok': False, 'message': 'No fue posible registrar el pago en Educación Continua.'},
+            status=500,
+        )
+    return JsonResponse({'ok': True, 'message': 'Pago registrado en INTECEDUCONTINUA.', 'result': result}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_payment_discount_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = register_continuing_education_discount(payload, user_login=_dashboard_user_login(request))
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error registering continuing education discount.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible registrar el descuento.'}, status=500)
+    return JsonResponse({'ok': True, 'message': 'Descuento registrado en INTECEDUCONTINUA.', 'result': result}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_payment_receipt_generate_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = generate_all_digital_payment_receipt_document(
+            payload.get('inscription_payment_id') or payload.get('solicitud_id')
+        )
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error generating All Digital payment receipt.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible generar el documento de pago.'}, status=500)
+    return JsonResponse({'ok': True, 'message': 'Documento generado y guardado en OneDrive.', 'result': result})
+
+
 @csrf_exempt
 @require_POST
 @require_admin_session
@@ -1914,7 +2188,7 @@ def admin_payment_cancel_view(request):
         )
 
     try:
-        result = admin_cancel_payment(payload)
+        result = admin_cancel_payment(payload, user_login=_dashboard_user_login(request))
     except PaymentGatewayError as exc:
         return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
     except Exception:

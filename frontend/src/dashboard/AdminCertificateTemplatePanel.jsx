@@ -660,7 +660,7 @@ export default function AdminCertificateTemplatePanel() {
               checked={showComplementLogos}
               onChange={(event) => setShowComplementLogos(event.target.checked)}
             />
-            <span>Logos complementarios</span>
+            <span>Logos complementarios en el lado derecho</span>
           </label>
         </div>
 
@@ -680,7 +680,7 @@ export default function AdminCertificateTemplatePanel() {
         ) : null}
 
         <label className="field">
-          <span>Agregar logos de empresas (máximo 5)</span>
+          <span>Agregar logos para el lado derecho (máximo 5)</span>
           <input
             type="file"
             accept="image/png,image/jpeg"

@@ -45,7 +45,7 @@ CERTIFICATE_PREVIEW_IMAGE_CONTENT_TYPE = 'image/png'
 CERTIFICATE_STORAGE_DIR_NAME = 'certificados_inscripcion'
 CERTIFICATE_INSTITUTION_NAME = 'Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento INTEC'
 CERTIFICATE_SIGNING_SALT = 'dashboard_auth.inscription_certificate'
-CERTIFICATE_VERSION = '2026-07-20-logo-signature-code-db-cuts-v31'
+CERTIFICATE_VERSION = '2026-07-20-centered-header-logos-v32'
 DEFAULT_COURSE_START_DATE = '20 de julio de 2026'
 LOGO_FILE_NAME = 'Intec-Logowithslogangray.svg'
 EMAIL_LOGO_FILE_NAME = 'Intec-Logowithslogangray.png'
@@ -54,6 +54,21 @@ SIGNATURE_FILE_NAME = 'firma veronica.jpeg'
 CERTIFICATE_CODE_PREFIX = 'INTEC-VGA-CER'
 CERTIFICATE_CODE_PADDING = 3
 CERTIFICATE_VERIFICATION_PATH = '/api/auth/certificates/verify/'
+
+# Shared header geometry. Keeping these values proportional makes the generated
+# PDF and its PNG preview use the same composition at every output size.
+HEADER_TEXT_CENTER_X_RATIO = 0.245
+HEADER_DIVIDER_X_RATIO = 0.375
+HEADER_PRIMARY_LOGO_WIDTH_RATIO = 0.22
+HEADER_PRIMARY_LOGO_HEIGHT_RATIO = 0.105
+HEADER_PRIMARY_LOGO_TOP_RATIO = 0.055
+HEADER_COMPLEMENT_MARGIN_X_RATIO = 0.025
+# Los logos complementarios se reservan exclusivamente para el bloque blanco
+# derecho del encabezado. El área termina antes del margen de la página y
+# comienza después del logo institucional central para conservar la plantilla.
+HEADER_COMPLEMENT_AREA_WIDTH_RATIO = 0.30
+HEADER_COMPLEMENT_AREA_HEIGHT_RATIO = 0.135
+HEADER_COMPLEMENT_AREA_TOP_RATIO = 0.045
 
 
 def build_certificate_payload(
@@ -696,19 +711,19 @@ def _draw_pdf_primary_education_logo(pdf, payload: dict[str, Any], width: float,
     logo_path = _email_logo_path()
     if not logo_path:
         return
-    has_complement_logos = bool(certificate_template_complement_logo_paths(payload.get('corte_id')))
-    text_center_x = width * (0.31 if has_complement_logos else 0.23)
-    divider_x = width * (0.48 if has_complement_logos else 0.445)
-    logo_x = width * (0.505 if has_complement_logos else 0.47)
-    logo_y = height - 1.21 * inch
+    logo_width = width * HEADER_PRIMARY_LOGO_WIDTH_RATIO
+    logo_height = height * HEADER_PRIMARY_LOGO_HEIGHT_RATIO
+    logo_x = (width - logo_width) / 2
+    logo_y = height - (height * HEADER_PRIMARY_LOGO_TOP_RATIO) - logo_height
 
     pdf.saveState()
     pdf.setFillColor(colors.HexColor('#777777'))
     pdf.setFont('Helvetica', 15.5)
-    pdf.drawCentredString(text_center_x, height - 0.64 * inch, 'Escuela de Educación en')
-    pdf.drawCentredString(text_center_x, height - 0.93 * inch, 'Línea y Educación Continua')
+    pdf.drawCentredString(width * HEADER_TEXT_CENTER_X_RATIO, height - 0.64 * inch, 'Escuela de Educación en')
+    pdf.drawCentredString(width * HEADER_TEXT_CENTER_X_RATIO, height - 0.93 * inch, 'Línea y Educación Continua')
     pdf.setStrokeColor(colors.HexColor('#333333'))
     pdf.setLineWidth(1.4)
+    divider_x = width * HEADER_DIVIDER_X_RATIO
     pdf.line(divider_x, height - 1.18 * inch, divider_x, height - 0.35 * inch)
     pdf.restoreState()
 
@@ -717,9 +732,9 @@ def _draw_pdf_primary_education_logo(pdf, payload: dict[str, Any], width: float,
         logo_path,
         logo_x,
         logo_y,
-        2.32 * inch,
-        0.86 * inch,
-        horizontal='left',
+        logo_width,
+        logo_height,
+        horizontal='center',
         transparent_white=True,
     )
 
@@ -728,40 +743,28 @@ def _draw_cut_logos(pdf, payload: dict[str, Any], width: float, height: float) -
     logos = certificate_template_complement_logo_paths(payload.get('corte_id'))
     if not logos:
         return
-    left_logos, right_logos = _split_logos_for_extremes(logos[:MAX_COMPLEMENT_LOGOS])
-    area_width = 1.95 * inch
-    area_height = 0.86 * inch
-    area_top = height - 0.36 * inch
+    margin_x = width * HEADER_COMPLEMENT_MARGIN_X_RATIO
+    area_width = width * HEADER_COMPLEMENT_AREA_WIDTH_RATIO
+    area_height = height * HEADER_COMPLEMENT_AREA_HEIGHT_RATIO
+    area_top = height - (height * HEADER_COMPLEMENT_AREA_TOP_RATIO)
     _draw_pdf_logo_grid(
         pdf,
-        left_logos,
-        x=0.38 * inch,
+        logos[:MAX_COMPLEMENT_LOGOS],
+        x=width - margin_x - area_width,
         area_top=area_top,
         area_width=area_width,
         area_height=area_height,
-        horizontal='left',
+        horizontal='center',
     )
-    _draw_pdf_logo_grid(
-        pdf,
-        right_logos,
-        x=width - 0.38 * inch - area_width,
-        area_top=area_top,
-        area_width=area_width,
-        area_height=area_height,
-        horizontal='right',
-    )
-
-
-def _split_logos_for_extremes(logos: list[Path]) -> tuple[list[Path], list[Path]]:
-    return logos[0::2], logos[1::2]
 
 
 def _logo_grid_dimensions(count: int) -> tuple[int, int]:
     if count <= 1:
         return 1, 1
-    columns = 2
-    rows = (count + columns - 1) // columns
-    return columns, rows
+    if count <= 3:
+        return count, 1
+    columns = 2 if count == 4 else 3
+    return columns, (count + columns - 1) // columns
 
 
 def _draw_pdf_logo_grid(
@@ -872,11 +875,12 @@ def _draw_preview_primary_education_logo(image: Image.Image, payload: dict[str, 
     if not logo_path:
         return
     width, height = image.size
-    has_complement_logos = bool(certificate_template_complement_logo_paths(payload.get('corte_id')))
-    text_center_x = int(width * (0.31 if has_complement_logos else 0.23))
-    divider_x = int(width * (0.48 if has_complement_logos else 0.445))
-    logo_x = int(width * (0.505 if has_complement_logos else 0.47))
-    logo_y = int(height * 0.075)
+    text_center_x = int(width * HEADER_TEXT_CENTER_X_RATIO)
+    divider_x = int(width * HEADER_DIVIDER_X_RATIO)
+    logo_width = int(width * HEADER_PRIMARY_LOGO_WIDTH_RATIO)
+    logo_height = int(height * HEADER_PRIMARY_LOGO_HEIGHT_RATIO)
+    logo_x = (width - logo_width) // 2
+    logo_y = int(height * HEADER_PRIMARY_LOGO_TOP_RATIO)
 
     draw = ImageDraw.Draw(image)
     font = _preview_font('regular', 42)
@@ -906,9 +910,9 @@ def _draw_preview_primary_education_logo(image: Image.Image, payload: dict[str, 
         logo_path,
         logo_x,
         logo_y,
-        int(width * 0.22),
-        int(height * 0.105),
-        horizontal='left',
+        logo_width,
+        logo_height,
+        horizontal='center',
         transparent_white=True,
     )
 
@@ -919,27 +923,18 @@ def _draw_preview_complement_logos(image: Image.Image, payload: dict[str, Any]) 
         return
 
     width, height = image.size
-    left_logos, right_logos = _split_logos_for_extremes(logo_paths[:MAX_COMPLEMENT_LOGOS])
-    area_width = int(width * 0.14)
-    area_height = int(height * 0.125)
-    area_y = int(height * 0.055)
+    margin_x = int(width * HEADER_COMPLEMENT_MARGIN_X_RATIO)
+    area_width = int(width * HEADER_COMPLEMENT_AREA_WIDTH_RATIO)
+    area_height = int(height * HEADER_COMPLEMENT_AREA_HEIGHT_RATIO)
+    area_y = int(height * HEADER_COMPLEMENT_AREA_TOP_RATIO)
     _paste_preview_logo_grid(
         image,
-        left_logos,
-        x=int(width * 0.035),
+        logo_paths[:MAX_COMPLEMENT_LOGOS],
+        x=width - margin_x - area_width,
         y=area_y,
         area_width=area_width,
         area_height=area_height,
-        horizontal='left',
-    )
-    _paste_preview_logo_grid(
-        image,
-        right_logos,
-        x=width - int(width * 0.035) - area_width,
-        y=area_y,
-        area_width=area_width,
-        area_height=area_height,
-        horizontal='right',
+        horizontal='center',
     )
 
 

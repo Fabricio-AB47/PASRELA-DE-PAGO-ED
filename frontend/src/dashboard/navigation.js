@@ -84,7 +84,16 @@ export const DASHBOARD_ROUTES = [
     aliases: ['#admin-payments'],
     label: 'Pagos',
     title: 'Pagos',
-    description: 'Consulta transacciones y ejecuta anulaciones desde un módulo independiente.',
+    description: 'Consulta estudiantes, enlaces y movimientos registrados.',
+  },
+  {
+    id: 'payment-operations',
+    hash: '#payment-operations',
+    aliases: ['#operaciones-pagos', '#all-digital'],
+    parentId: 'payments',
+    label: 'Operaciones All Digital',
+    title: 'Operaciones All Digital',
+    description: 'Consulta y anula transacciones directamente con la pasarela.',
   },
   {
     id: 'bulk-enrollment',
@@ -151,6 +160,41 @@ export const DASHBOARD_ROUTES = [
     description: 'Consulta tus notas en modo lectura y gestiona el certificado de aprobación.',
   },
 ]
+
+const TEACHER_ADMIN_ROUTE_IDS = new Set(['teacher-entry', 'teacher-enrollment'])
+const TEACHER_PANEL_ROUTE_IDS = new Set(['teacher-attendance', 'teacher-grades', 'teacher-schedule'])
+const STUDENT_PANEL_ROUTE_IDS = new Set(['student-schedule', 'student-grades'])
+const FINANCIAL_ROUTE_IDS = new Set(['home', 'enrolled-students', 'payments', 'payment-operations'])
+
+export function normalizedRoleName(user) {
+  return String(user?.role?.name || '').trim().toUpperCase()
+}
+
+export function visibleRoutesForUser(user) {
+  if (user?.category === 'staff') {
+    if (normalizedRoleName(user) === 'FINANCIERO') {
+      return DASHBOARD_ROUTES.filter((route) => FINANCIAL_ROUTE_IDS.has(route.id))
+    }
+    return DASHBOARD_ROUTES.filter(
+      (route) => !TEACHER_PANEL_ROUTE_IDS.has(route.id) && !STUDENT_PANEL_ROUTE_IDS.has(route.id),
+    )
+  }
+  if (user?.category === 'teacher') {
+    return DASHBOARD_ROUTES.filter((route) => route.id === 'home' || TEACHER_PANEL_ROUTE_IDS.has(route.id))
+  }
+  if (user?.category === 'student') {
+    return DASHBOARD_ROUTES.filter((route) => route.id === 'home' || STUDENT_PANEL_ROUTE_IDS.has(route.id))
+  }
+  return DASHBOARD_ROUTES.filter((route) => route.id === 'home')
+}
+
+export function canAccessDashboardRoute(user, routeId) {
+  return visibleRoutesForUser(user).some((route) => route.id === routeId)
+}
+
+export function isTeacherAdminRoute(routeId) {
+  return TEACHER_ADMIN_ROUTE_IDS.has(routeId)
+}
 
 export function routeFromHash(hash) {
   const normalizedHash = hash || '#dashboard'

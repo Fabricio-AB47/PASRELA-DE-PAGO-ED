@@ -7,6 +7,10 @@ const decimalFormatter = new Intl.NumberFormat('es-EC', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
+const moneyFormatter = new Intl.NumberFormat('es-EC', {
+  style: 'currency',
+  currency: 'USD',
+})
 
 export default function StudentGradesPanel() {
   const [dashboard, setDashboard] = useState(null)
@@ -77,6 +81,9 @@ export default function StudentGradesPanel() {
         throw new Error(payload?.message ?? `No fue posible generar la vista previa (${response.status}).`)
       }
       const blob = await response.blob()
+      if (!blob.size || !blob.type.startsWith('image/')) {
+        throw new Error('El servidor no devolvió una imagen válida para la vista previa.')
+      }
       const objectUrl = window.URL.createObjectURL(blob)
       setPreviewUrl((current) => {
         if (current) {
@@ -190,6 +197,10 @@ export default function StudentGradesPanel() {
           <strong>{formatInteger(metrics.certificados)}</strong>
         </article>
         <article className="summary-card">
+          <span>Pagados</span>
+          <strong>{formatInteger(metrics.pagados)}</strong>
+        </article>
+        <article className="summary-card">
           <span>Pendientes</span>
           <strong>{formatInteger(metrics.pendientes_culminacion)}</strong>
         </article>
@@ -207,6 +218,7 @@ export default function StudentGradesPanel() {
                   <th>Nota final</th>
                   <th>Asistencia</th>
                   <th>Estado</th>
+                  <th>Estado financiero</th>
                   <th>Certificado</th>
                 </tr>
               </thead>
@@ -233,6 +245,10 @@ export default function StudentGradesPanel() {
                     <td>
                       <strong>{course.estado_nota_label || '-'}</strong>
                       <span>{course.culminacion_estado || '-'}</span>
+                    </td>
+                    <td>
+                      <strong>{course.estado_financiero || 'PENDIENTE'}</strong>
+                      <span>Saldo: {formatMoney(course.saldo_pendiente)}</span>
                     </td>
                     <td>
                       <div className="student-certificate-actions">
@@ -282,8 +298,10 @@ export default function StudentGradesPanel() {
                 Cerrar
               </button>
             </div>
-            {previewCourse.culminacion_pendiente ? (
-              <p className="student-certificate-pending is-top">Pendiente de culminación del curso</p>
+            {!previewCourse.certificado_disponible ? (
+              <p className="student-certificate-pending is-top">
+                Vista informativa. La descarga se habilitará al aprobar con una nota entre 7 y 10 y completar el pago.
+              </p>
             ) : (
               <section className="student-certificate-preview-meta">
                 <div>
@@ -332,6 +350,10 @@ function formatPercent(value) {
     return '0%'
   }
   return `${decimalFormatter.format(Number(value))}%`
+}
+
+function formatMoney(value) {
+  return moneyFormatter.format(Number(value || 0))
 }
 
 function certificateFallbackName(course) {

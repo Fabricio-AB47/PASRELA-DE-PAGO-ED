@@ -580,6 +580,10 @@ export default function AdminBulkEnrollmentPanel() {
               <strong>{bulkResult.exitosos}</strong>
             </div>
             <div>
+              <span>Omitidos</span>
+              <strong>{bulkResult.omitidos || 0}</strong>
+            </div>
+            <div>
               <span>Fallidos</span>
               <strong>{bulkResult.fallidos}</strong>
             </div>

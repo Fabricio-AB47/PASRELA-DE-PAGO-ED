@@ -17,7 +17,7 @@ export function adminFetch(url, options = {}) {
     ...options,
     headers,
   }).then((response) => {
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       clearStoredSession()
       window.location.replace('/login/')
     }
