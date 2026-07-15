@@ -85,6 +85,7 @@ from .payments import (
     search_payment_links_for_operations,
     register_continuing_education_payment,
     register_continuing_education_discount,
+    upload_continuing_education_invoice,
 )
 from .notifications import list_notifications, mark_notifications_read, notification_storage_status
 from .security import (
@@ -2135,6 +2136,30 @@ def admin_payment_register_view(request):
             status=500,
         )
     return JsonResponse({'ok': True, 'message': 'Pago registrado en INTECEDUCONTINUA.', 'result': result}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_payment_invoice_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = upload_continuing_education_invoice(
+            payload,
+            user_login=_dashboard_user_login(request),
+        )
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error uploading continuing education invoice.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible guardar la factura.'}, status=500)
+    return JsonResponse(
+        {'ok': True, 'message': 'Factura guardada en INTECEDUCONTINUA.', 'result': result},
+        status=201,
+    )
 
 
 @csrf_exempt

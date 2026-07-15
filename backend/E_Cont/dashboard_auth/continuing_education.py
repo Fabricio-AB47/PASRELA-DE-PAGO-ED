@@ -145,16 +145,87 @@ def configure_cut_in_complement(
         cupo = 50
 
     if version == 'v5':
+        primary_cut = _fetch_primary_one(
+            """
+            SELECT TOP (1)
+                Cod_AnioBasica,
+                CodigoPeriodo,
+                CodigoMateria,
+                CodCurso,
+                CupoEsperado,
+                NombreCorte,
+                FechaInicio,
+                FechaFin
+            FROM dbo.CORTE_CURSO
+            WHERE CorteId = %s
+            """,
+            [numeric_corte_id],
+        )
+        if not primary_cut:
+            return _skipped_result('La corte no existe en la base principal INTECBDD.')
+
+        effective_cupo = cupo or _safe_int(primary_cut.get('CupoEsperado'), default=50) or 50
         rows = _fetch_all(
             f"""
-            EXEC {_qualified('edu', 'usp_ConfigurarCorteDesdePrincipal')}
-                @CorteId = %s,
-                @CupoMaximo = %s,
-                @PermiteSobrecupo = 0,
-                @NotaMinima = 7.00,
-                @UsuarioRegistro = %s
+            MERGE {_qualified('edu', 'CorteCurso')} AS T
+            USING (SELECT %s AS CorteId) AS S
+               ON T.CorteId = S.CorteId
+            WHEN MATCHED THEN UPDATE SET
+                Cod_AnioBasica = %s,
+                CodigoPeriodo = %s,
+                CodigoMateria = %s,
+                CodCurso = %s,
+                CupoMaximo = %s,
+                FechaInicioOverride = %s,
+                FechaFinOverride = %s,
+                Observacion = %s,
+                EstadoCorteEdu = CASE
+                    WHEN T.EstadoCorteEdu = 'CONFIGURADO' THEN 'ABIERTO'
+                    ELSE T.EstadoCorteEdu
+                END,
+                UsuarioModifica = %s,
+                FechaModifica = sysdatetime()
+            WHEN NOT MATCHED THEN INSERT (
+                CorteId, Cod_AnioBasica, CodigoPeriodo, CodigoMateria, CodCurso,
+                CupoMaximo, PermiteSobrecupo, ValorCurso, NotaMinima,
+                PorcentajeMinAsistencia, RequierePagoCompleto, RequierePaseNotas,
+                GeneraCertificado, UsaTeams, EstadoCorteEdu,
+                FechaInicioOverride, FechaFinOverride, Observacion, UsuarioRegistro
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                %s, 0, 0, 7.00,
+                70.00, 1, 1,
+                1, 1, 'ABIERTO',
+                %s, %s, %s, %s
+            );
+
+            SELECT *
+            FROM {_qualified('edu', 'VW_CorteCursoDetalle')}
+            WHERE CorteId = %s;
             """,
-            [numeric_corte_id, cupo, _trim_to_max(usuario_registro or 'SISTEMA', 50)],
+            [
+                numeric_corte_id,
+                primary_cut.get('Cod_AnioBasica'),
+                primary_cut.get('CodigoPeriodo'),
+                primary_cut.get('CodigoMateria'),
+                primary_cut.get('CodCurso'),
+                effective_cupo,
+                primary_cut.get('FechaInicio'),
+                primary_cut.get('FechaFin'),
+                _trim_to_max(primary_cut.get('NombreCorte'), 500),
+                _trim_to_max(usuario_registro or 'SISTEMA', 50),
+                numeric_corte_id,
+                primary_cut.get('Cod_AnioBasica'),
+                primary_cut.get('CodigoPeriodo'),
+                primary_cut.get('CodigoMateria'),
+                primary_cut.get('CodCurso'),
+                effective_cupo,
+                primary_cut.get('FechaInicio'),
+                primary_cut.get('FechaFin'),
+                _trim_to_max(primary_cut.get('NombreCorte'), 500),
+                _trim_to_max(usuario_registro or 'SISTEMA', 50),
+                numeric_corte_id,
+            ],
         )
     else:
         rows = _fetch_all(
@@ -206,22 +277,160 @@ def sync_student_enrollment_to_complement(
         return _skipped_result('Datos insuficientes para sincronizar matrícula estudiantil.')
 
     if version == 'v5':
-        rows = _fetch_all(
+        primary_enrollment = _fetch_primary_one(
+            """
+            SELECT TOP (1)
+                E.CorteEstudianteId,
+                COALESCE(NULLIF(LTRIM(RTRIM(E.CedulaEst)), ''), NULLIF(LTRIM(RTRIM(D.Cedula_Est)), '')) AS CedulaEst,
+                COALESCE(NULLIF(LTRIM(RTRIM(E.ApellidosNombre)), ''), NULLIF(LTRIM(RTRIM(D.Apellidos_nombre)), '')) AS ApellidosNombre,
+                NULLIF(LTRIM(RTRIM(D.correo)), '') AS CorreoPersonal,
+                NULLIF(LTRIM(RTRIM(D.correointec)), '') AS CorreoIntec,
+                NULLIF(LTRIM(RTRIM(D.Usuario)), '') AS UsuarioLogin
+            FROM dbo.CORTE_CURSO_ESTUDIANTE E
+            LEFT JOIN dbo.DATOS_ESTUD D ON D.codigo_estud = E.CodigoEstud
+            WHERE E.CorteId = %s AND E.CodigoEstud = %s
+            ORDER BY E.CorteEstudianteId DESC
+            """,
+            [numeric_corte_id, numeric_codigo_estud],
+        )
+        if not primary_enrollment:
+            return _skipped_result('La matrícula no existe en la base principal INTECBDD.')
+
+        _fetch_all(
             f"""
-            EXEC {_qualified('edu', 'usp_MatricularEstudianteCorte')}
-                @CorteId = %s,
-                @CodigoEstud = %s,
-                @EstadoMatricula = 'INSCRITO',
-                @RegistrarCargoInicial = %s,
-                @UsuarioRegistro = %s
+            SET XACT_ABORT ON;
+
+            MERGE {_qualified('edu', 'EstudiantePrincipalSnapshot')} AS T
+            USING (SELECT %s AS CodigoEstud) AS S
+               ON T.CodigoEstud = S.CodigoEstud
+            WHEN MATCHED THEN UPDATE SET
+                CedulaEst = %s,
+                ApellidosNombre = %s,
+                CorreoPersonal = %s,
+                CorreoIntec = %s,
+                UsuarioLogin = %s,
+                FechaSincronizacion = sysdatetime()
+            WHEN NOT MATCHED THEN INSERT (
+                CodigoEstud, CedulaEst, ApellidosNombre,
+                CorreoPersonal, CorreoIntec, UsuarioLogin
+            ) VALUES (%s, %s, %s, %s, %s, %s);
+
+            IF NOT EXISTS (
+                SELECT 1 FROM {_qualified('edu', 'CorteCurso')} WHERE CorteId = %s
+            )
+                THROW 53120, 'La corte debe configurarse antes de matricular.', 1;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM {_qualified('edu', 'CorteEstudiante')}
+                WHERE CorteId = %s AND CodigoEstud = %s
+            ) AND EXISTS (
+                SELECT 1
+                FROM {_qualified('edu', 'VW_CupoCorte')}
+                WHERE CorteId = %s
+                  AND PermiteSobrecupo = 0
+                  AND CuposDisponibles <= 0
+            )
+                THROW 53123, 'No hay cupos disponibles para este corte.', 1;
+
+            MERGE {_qualified('edu', 'CorteEstudiante')} AS T
+            USING (SELECT %s AS CorteId, %s AS CodigoEstud) AS S
+               ON T.CorteId = S.CorteId AND T.CodigoEstud = S.CodigoEstud
+            WHEN MATCHED THEN UPDATE SET
+                CorteEstudianteIdPrincipal = %s,
+                EstadoMatricula = CASE
+                    WHEN T.EstadoMatricula IN ('RETIRADO','ANULADO') THEN 'INSCRITO'
+                    ELSE T.EstadoMatricula
+                END,
+                UsuarioModifica = %s,
+                FechaModifica = sysdatetime()
+            WHEN NOT MATCHED THEN INSERT (
+                CorteId, CodigoEstud, CorteEstudianteIdPrincipal,
+                EstadoMatricula, TipoIngreso, UsuarioRegistro
+            ) VALUES (%s, %s, %s, 'INSCRITO', 'IMPORTADO', %s);
+
+            DECLARE @EstudianteCorteId int;
+            DECLARE @CuentaId int;
+            DECLARE @ValorCurso decimal(18,2);
+
+            SELECT @EstudianteCorteId = EstudianteCorteId
+            FROM {_qualified('edu', 'CorteEstudiante')}
+            WHERE CorteId = %s AND CodigoEstud = %s;
+
+            SELECT @ValorCurso = ValorCurso
+            FROM {_qualified('edu', 'CorteCurso')}
+            WHERE CorteId = %s;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM {_qualified('fin', 'CuentaEstudiante')}
+                WHERE EstudianteCorteId = @EstudianteCorteId
+            )
+                INSERT INTO {_qualified('fin', 'CuentaEstudiante')}
+                    (EstudianteCorteId, CorteId, CodigoEstud, UsuarioRegistro, Observacion)
+                VALUES
+                    (@EstudianteCorteId, %s, %s, %s, N'Cuenta creada desde la base principal.');
+
+            SELECT @CuentaId = CuentaId
+            FROM {_qualified('fin', 'CuentaEstudiante')}
+            WHERE EstudianteCorteId = @EstudianteCorteId;
+
+            IF %s = 1 AND ISNULL(@ValorCurso, 0) > 0
+               AND NOT EXISTS (
+                   SELECT 1 FROM {_qualified('fin', 'MovimientoCuenta')}
+                   WHERE CuentaId = @CuentaId
+                     AND EstadoMovimiento = 'ACTIVO'
+                     AND TipoMovimiento = 'DEBE'
+                     AND Concepto = N'VALOR CURSO'
+               )
+                INSERT INTO {_qualified('fin', 'MovimientoCuenta')}
+                    (CuentaId, TipoMovimiento, Concepto, Valor, UsuarioRegistro, Observacion)
+                VALUES
+                    (@CuentaId, 'DEBE', N'VALOR CURSO', @ValorCurso, %s,
+                     N'Cargo automático generado por matrícula sincronizada.');
             """,
             [
+                numeric_codigo_estud,
+                primary_enrollment.get('CedulaEst'),
+                primary_enrollment.get('ApellidosNombre'),
+                primary_enrollment.get('CorreoPersonal'),
+                primary_enrollment.get('CorreoIntec'),
+                primary_enrollment.get('UsuarioLogin'),
+                numeric_codigo_estud,
+                primary_enrollment.get('CedulaEst'),
+                primary_enrollment.get('ApellidosNombre'),
+                primary_enrollment.get('CorreoPersonal'),
+                primary_enrollment.get('CorreoIntec'),
+                primary_enrollment.get('UsuarioLogin'),
+                numeric_corte_id,
                 numeric_corte_id,
                 numeric_codigo_estud,
+                numeric_corte_id,
+                numeric_corte_id,
+                numeric_codigo_estud,
+                primary_enrollment.get('CorteEstudianteId'),
+                _trim_to_max(usuario_registro or 'SISTEMA', 50),
+                numeric_corte_id,
+                numeric_codigo_estud,
+                primary_enrollment.get('CorteEstudianteId'),
+                _trim_to_max(usuario_registro or 'SISTEMA', 50),
+                numeric_corte_id,
+                numeric_codigo_estud,
+                numeric_corte_id,
+                numeric_corte_id,
+                numeric_codigo_estud,
+                _trim_to_max(usuario_registro or 'SISTEMA', 50),
                 1 if registrar_cargo_inicial else 0,
                 _trim_to_max(usuario_registro or 'SISTEMA', 50),
             ],
         )
+        row = _fetch_one(
+            f"""
+            SELECT TOP (1) *
+            FROM {_qualified('edu', 'VW_MatriculaEstudianteCompleta')}
+            WHERE CorteId = %s AND CodigoEstud = %s
+            """,
+            [numeric_corte_id, numeric_codigo_estud],
+        )
+        rows = [row] if row else []
     else:
         rows = _fetch_all(
             f"""
@@ -404,20 +613,89 @@ def sync_teacher_assignment_to_complement(
         return _skipped_result('No existe CorteId equivalente para la materia/período seleccionado.')
 
     if version == 'v5':
-        rows = _fetch_all(
+        numeric_codigo_doc = _safe_int(codigo_doc)
+        primary_teacher = _fetch_primary_one(
+            """
+            SELECT TOP (1)
+                D.codigo_doc AS CodigoDocente,
+                LTRIM(RTRIM(D.cedula_doc)) AS CedulaDoc,
+                LTRIM(RTRIM(D.apellidos_nombre)) AS ApellidosNombre,
+                NULLIF(LTRIM(RTRIM(D.correop)), '') AS CorreoPersonal,
+                NULLIF(LTRIM(RTRIM(D.correo)), '') AS CorreoIntec,
+                NULLIF(LTRIM(RTRIM(U.login)), '') AS UsuarioLogin
+            FROM dbo.DATOSDOCENTE D
+            LEFT JOIN dbo.USUARIOS U
+              ON LTRIM(RTRIM(U.cedula)) = LTRIM(RTRIM(D.cedula_doc))
+            WHERE D.codigo_doc = %s
+            ORDER BY U.fecha_ingreso DESC
+            """,
+            [numeric_codigo_doc],
+        )
+        if not primary_teacher:
+            return _skipped_result('El docente no existe en la base principal INTECBDD.')
+
+        _fetch_all(
             f"""
-            EXEC {_qualified('edu', 'usp_MatricularDocenteCorte')}
-                @CorteId = %s,
-                @CodigoDocente = %s,
-                @RolDocente = 'TITULAR',
-                @UsuarioRegistro = %s
+            SET XACT_ABORT ON;
+
+            MERGE {_qualified('edu', 'DocentePrincipalSnapshot')} AS T
+            USING (SELECT %s AS CodigoDocente) AS S
+               ON T.CodigoDocente = S.CodigoDocente
+            WHEN MATCHED THEN UPDATE SET
+                CedulaDoc = %s,
+                ApellidosNombre = %s,
+                CorreoPersonal = %s,
+                CorreoIntec = %s,
+                UsuarioLogin = %s,
+                FechaSincronizacion = sysdatetime()
+            WHEN NOT MATCHED THEN INSERT (
+                CodigoDocente, CedulaDoc, ApellidosNombre,
+                CorreoPersonal, CorreoIntec, UsuarioLogin
+            ) VALUES (%s, %s, %s, %s, %s, %s);
+
+            MERGE {_qualified('edu', 'CorteDocente')} AS T
+            USING (SELECT %s AS CorteId, %s AS CodigoDocente) AS S
+               ON T.CorteId = S.CorteId AND T.CodigoDocente = S.CodigoDocente
+            WHEN MATCHED THEN UPDATE SET
+                RolDocente = 'TITULAR',
+                EstadoDocenteCorte = 'ACTIVO',
+                UsuarioModifica = %s,
+                FechaModifica = sysdatetime()
+            WHEN NOT MATCHED THEN INSERT (
+                CorteId, CodigoDocente, RolDocente,
+                EstadoDocenteCorte, UsuarioRegistro
+            ) VALUES (%s, %s, 'TITULAR', 'ACTIVO', %s);
             """,
             [
+                numeric_codigo_doc,
+                primary_teacher.get('CedulaDoc'),
+                primary_teacher.get('ApellidosNombre'),
+                primary_teacher.get('CorreoPersonal'),
+                primary_teacher.get('CorreoIntec'),
+                primary_teacher.get('UsuarioLogin'),
+                numeric_codigo_doc,
+                primary_teacher.get('CedulaDoc'),
+                primary_teacher.get('ApellidosNombre'),
+                primary_teacher.get('CorreoPersonal'),
+                primary_teacher.get('CorreoIntec'),
+                primary_teacher.get('UsuarioLogin'),
                 _safe_int(cut.get('corte_id')),
-                _safe_int(codigo_doc) or None,
+                numeric_codigo_doc,
+                _trim_to_max(usuario_registro or 'SISTEMA', 50),
+                _safe_int(cut.get('corte_id')),
+                numeric_codigo_doc,
                 _trim_to_max(usuario_registro or 'SISTEMA', 50),
             ],
         )
+        row = _fetch_one(
+            f"""
+            SELECT TOP (1) *
+            FROM {_qualified('edu', 'VW_MatriculaDocenteCompleta')}
+            WHERE CorteId = %s AND CodigoDocente = %s
+            """,
+            [_safe_int(cut.get('corte_id')), numeric_codigo_doc],
+        )
+        rows = [row] if row else []
     else:
         rows = _fetch_all(
             f"""
@@ -452,9 +730,10 @@ def resolve_cut_for_assignment(assignment: dict[str, Any]) -> dict[str, Any] | N
 
     corte_id = _safe_int(assignment.get('corte_id') or assignment.get('CorteId'))
     params: list[Any] = []
-    where = ["[EstadoCorteEdu] <> 'ANULADO'"] if version == 'v5' else ["[EstadoCorte] <> 'ANULADO'"]
+    column_prefix = 'D.' if version == 'v5' else ''
+    where = [f"{column_prefix}[EstadoCorteEdu] <> 'ANULADO'"] if version == 'v5' else ["[EstadoCorte] <> 'ANULADO'"]
     if corte_id > 0:
-        where.append('[CorteId] = %s')
+        where.append(f'{column_prefix}[CorteId] = %s')
         params.append(corte_id)
     else:
         cod_anio_basica = _clean_text(assignment.get('cod_anio_basica'))
@@ -462,11 +741,11 @@ def resolve_cut_for_assignment(assignment: dict[str, Any]) -> dict[str, Any] | N
         codigo_periodo = _clean_text(assignment.get('codigo_periodo'))
         if not codigo_materia or not codigo_periodo:
             return None
-        where.append("LTRIM(RTRIM(CAST([CodigoMateria] AS varchar(30)))) = %s")
-        where.append("LTRIM(RTRIM(CAST([CodigoPeriodo] AS varchar(30)))) = %s")
+        where.append(f"LTRIM(RTRIM(CAST({column_prefix}[CodigoMateria] AS varchar(30)))) = %s")
+        where.append(f"LTRIM(RTRIM(CAST({column_prefix}[CodigoPeriodo] AS varchar(30)))) = %s")
         params.extend([codigo_materia, codigo_periodo])
         if cod_anio_basica:
-            where.append("LTRIM(RTRIM(CAST([Cod_AnioBasica] AS varchar(30)))) = %s")
+            where.append(f"LTRIM(RTRIM(CAST({column_prefix}[Cod_AnioBasica] AS varchar(30)))) = %s")
             params.append(cod_anio_basica)
 
     if version == 'v5':
@@ -1001,13 +1280,32 @@ def _fetch_one(query: str, params: list[Any] | tuple[Any, ...] | None = None) ->
     return rows[0] if rows else None
 
 
+def _fetch_primary_one(
+    query: str,
+    params: list[Any] | tuple[Any, ...] | None = None,
+) -> dict[str, Any] | None:
+    with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
+        cursor.execute(query, params or [])
+        row = cursor.fetchone()
+        if row is None or cursor.description is None:
+            return None
+        columns = [column[0] for column in cursor.description]
+        return dict(zip(columns, row))
+
+
 def _fetch_all(query: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
     with complement_connection().cursor() as cursor:
         cursor.execute(query, params or [])
-        if cursor.description is None:
-            return []
-        columns = [column[0] for column in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        selected_rows: list[dict[str, Any]] | None = None
+        while True:
+            if cursor.description is not None:
+                columns = [column[0] for column in cursor.description]
+                rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                if selected_rows is None:
+                    selected_rows = rows
+            if not cursor.nextset():
+                break
+        return selected_rows or []
 
 
 def _safe_identifier(value: Any) -> str:

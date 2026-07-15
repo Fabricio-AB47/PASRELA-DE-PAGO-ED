@@ -101,7 +101,7 @@ function InscriptionPage() {
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok || !payload.catalogs) {
-          throw new Error(payload?.message ?? 'No fue posible cargar carreras, cursos y periodos.')
+          throw new Error(payload?.message ?? 'No fue posible cargar carreras, cursos y períodos.')
         }
 
         if (!isMounted) {
@@ -492,7 +492,7 @@ function InscriptionPage() {
               <div className="registration-box-header">
                 <h3>Registro de Estudiante</h3>
               <p>
-                  Por favor complete sus datos personales para ser parte de esta experiencia.
+                  Por favor, complete sus datos personales para ser parte de esta experiencia.
               </p>
             </div>
 

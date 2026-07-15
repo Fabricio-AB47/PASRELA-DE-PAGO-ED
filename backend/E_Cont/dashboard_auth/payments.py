@@ -1291,9 +1291,11 @@ def list_registered_user_payments(
     payment_validation = reconcile_pending_all_digital_payments()
     account_sync = _sync_missing_continuing_education_payment_accounts()
     account_sync['excel_charge_adjustments'] = _sync_excel_course_charge_adjustments()
-    complement_enrollments = _continuing_education_object('edu', 'CorteEstudiante')
+    complement_enrollments = _continuing_education_object('edu', 'VW_MatriculaEstudianteCompleta')
+    complement_cuts = _continuing_education_object('edu', 'VW_CorteCursoDetalle')
     accounts_table = _continuing_education_object('fin', 'CuentaEstudiante')
     movements_table = _continuing_education_object('fin', 'MovimientoCuenta')
+    invoices_table = _continuing_education_object('fin', 'FacturaMovimiento')
     clean_search = _clean_text(search)[:120]
     clean_status = _clean_text(payment_status).lower() or 'all'
     if clean_status not in {'all', 'with_payments', 'without_payments'}:
@@ -1313,9 +1315,9 @@ def list_registered_user_payments(
                 CONVERT(varchar(50), E.CodigoEstud) LIKE %s
                 OR LTRIM(RTRIM(E.CedulaEst)) LIKE %s
                 OR E.ApellidosNombre LIKE %s
-                OR ISNULL(D.correo, '') LIKE %s
-                OR ISNULL(D.correointec, '') LIKE %s
-                OR ISNULL(PN.Nomb_Materia, '') LIKE %s
+                OR ISNULL(E.CorreoPersonal, '') LIKE %s
+                OR ISNULL(E.CorreoIntec, '') LIKE %s
+                OR ISNULL(CC.NombreCursoMateria, '') LIKE %s
                 OR ISNULL(CC.NombreCorte, '') LIKE %s
             )
             """
@@ -1333,6 +1335,7 @@ def list_registered_user_payments(
                 CE.CorteEstudianteIdPrincipal,
                 C.CuentaId,
                 COUNT(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO' THEN 1 END) AS payment_count,
+                COUNT(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO' AND F.FacturaMovimientoId IS NOT NULL AND F.EstadoFactura = 'SUBIDA' THEN 1 END) AS invoice_count,
                 SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'DEBE' THEN M.Valor ELSE 0 END) AS total_value,
                 SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO' THEN M.Valor ELSE 0 END) AS registered_value,
                 SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO' THEN M.Valor ELSE 0 END) AS discount_value,
@@ -1341,22 +1344,24 @@ def list_registered_user_payments(
             FROM {complement_enrollments} AS CE
             LEFT JOIN {accounts_table} AS C ON C.EstudianteCorteId = CE.EstudianteCorteId
             LEFT JOIN {movements_table} AS M ON M.CuentaId = C.CuentaId
+            LEFT JOIN {invoices_table} AS F ON F.MovimientoId = M.MovimientoId
             GROUP BY CE.CorteEstudianteIdPrincipal, C.CuentaId
         )
         SELECT
             CONVERT(varchar(50), E.CodigoEstud) AS codigo_estud,
-            CONVERT(varchar(50), E.CorteEstudianteId) AS estudiante_corte_id,
+            CONVERT(varchar(50), E.CorteEstudianteIdPrincipal) AS estudiante_corte_id,
             CONVERT(varchar(50), E.CorteId) AS corte_id,
             CONVERT(varchar(50), P.CuentaId) AS cuenta_id,
             LTRIM(RTRIM(E.ApellidosNombre)) AS nombre,
             LTRIM(RTRIM(E.CedulaEst)) AS cedula,
-            COALESCE(NULLIF(LTRIM(RTRIM(D.correointec)), ''), NULLIF(LTRIM(RTRIM(D.correo)), '')) AS email,
-            LTRIM(RTRIM(D.Usuario)) AS usuario_login,
-            LTRIM(RTRIM(PN.Nomb_Materia)) AS course_name,
+            COALESCE(NULLIF(LTRIM(RTRIM(E.CorreoIntec)), ''), NULLIF(LTRIM(RTRIM(E.CorreoPersonal)), '')) AS email,
+            LTRIM(RTRIM(E.UsuarioLogin)) AS usuario_login,
+            LTRIM(RTRIM(CC.NombreCursoMateria)) AS course_name,
             LTRIM(RTRIM(CC.NombreCorte)) AS cut_name,
-            LTRIM(RTRIM(E.EstadoParticipacion)) AS enrollment_status,
+            LTRIM(RTRIM(E.EstadoMatricula)) AS enrollment_status,
             CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%' THEN 1 ELSE 0 END AS is_excel_enrollment,
             ISNULL(P.payment_count, 0) AS payment_count,
+            ISNULL(P.invoice_count, 0) AS invoice_count,
             ISNULL(P.total_value, 0) AS total_value,
             ISNULL(P.registered_value, 0) AS registered_value,
             ISNULL(P.discount_value, 0) AS discount_value,
@@ -1366,12 +1371,9 @@ def list_registered_user_payments(
             LTRIM(RTRIM(LP.Concepto)) AS last_payment_detail,
             COALESCE(NULLIF(LTRIM(RTRIM(LP.NumeroComprobante)), ''), NULLIF(LTRIM(RTRIM(LP.NumeroDeposito)), '')) AS last_payment_reference,
             COUNT(*) OVER() AS filtered_total
-        FROM dbo.CORTE_CURSO_ESTUDIANTE AS E
-        INNER JOIN dbo.CORTE_CURSO AS CC ON CC.CorteId = E.CorteId
-        LEFT JOIN dbo.DATOS_ESTUD AS D ON D.codigo_estud = E.CodigoEstud
-        LEFT JOIN dbo.PENSUM AS PN
-          ON PN.Cod_AnioBasica = E.Cod_AnioBasica AND PN.codigo_materia = E.CodigoMateria
-        LEFT JOIN AccountSummary AS P ON P.CorteEstudianteIdPrincipal = E.CorteEstudianteId
+        FROM {complement_enrollments} AS E
+        INNER JOIN {complement_cuts} AS CC ON CC.CorteId = E.CorteId
+        LEFT JOIN AccountSummary AS P ON P.CorteEstudianteIdPrincipal = E.CorteEstudianteIdPrincipal
         OUTER APPLY (
             SELECT TOP (1) M.Concepto, M.NumeroComprobante, M.NumeroDeposito
             FROM {movements_table} AS M
@@ -1392,7 +1394,7 @@ def list_registered_user_payments(
     rows = _fetch_payment_rows(query, [*params, offset, per_page])
     filtered_total = int(rows[0].get('filtered_total') or 0) if rows else 0
     users = [_serialize_registered_user_payment(row) for row in rows]
-    metrics = _registered_payment_metrics(complement_enrollments, accounts_table, movements_table)
+    metrics = _registered_payment_metrics(complement_enrollments, accounts_table, movements_table, invoices_table)
     payment_links = _list_generated_payment_links(clean_search, clean_status)
     payment_link_metrics = _generated_payment_link_metrics()
     total_pages = max(1, (filtered_total + per_page - 1) // per_page)
@@ -1415,22 +1417,35 @@ def list_registered_user_payments(
 
 
 def _sync_missing_continuing_education_payment_accounts() -> dict[str, Any]:
-    complement_enrollments = _continuing_education_object('edu', 'CorteEstudiante')
-    missing_rows = _fetch_payment_rows(
-        f"""
+    complement_enrollments = _continuing_education_object('edu', 'VW_MatriculaEstudianteCompleta')
+    primary_rows = _fetch_payment_rows(
+        """
         SELECT TOP (300)
             CONVERT(varchar(50), E.CorteId) AS corte_id,
-            CONVERT(varchar(50), E.CodigoEstud) AS codigo_estud
+            CONVERT(varchar(50), E.CodigoEstud) AS codigo_estud,
+            CONVERT(varchar(50), E.CorteEstudianteId) AS estudiante_corte_id
         FROM dbo.CORTE_CURSO_ESTUDIANTE AS E
-        LEFT JOIN {complement_enrollments} AS CE
-          ON CE.CorteEstudianteIdPrincipal = E.CorteEstudianteId
         WHERE E.EstadoRegistro = 'A'
           AND UPPER(ISNULL(E.EstadoParticipacion, 'INSCRITO')) NOT IN ('ANULADO', 'RETIRADO')
-          AND CE.EstudianteCorteId IS NULL
         ORDER BY E.CorteId, E.CorteEstudianteId
         """,
         [],
     )
+    if not primary_rows:
+        return {'processed': 0, 'synced': 0, 'errors': 0}
+    complement_rows = _fetch_payment_rows(
+        f"""
+        SELECT CONVERT(varchar(50), CorteEstudianteIdPrincipal) AS estudiante_corte_id
+        FROM {complement_enrollments}
+        WHERE CorteEstudianteIdPrincipal IS NOT NULL
+        """,
+        [],
+    )
+    existing_ids = {_clean_text(row.get('estudiante_corte_id')) for row in complement_rows}
+    missing_rows = [
+        row for row in primary_rows
+        if _clean_text(row.get('estudiante_corte_id')) not in existing_ids
+    ]
     if not missing_rows:
         return {'processed': 0, 'synced': 0, 'errors': 0}
 
@@ -1464,7 +1479,7 @@ def _sync_missing_continuing_education_payment_accounts() -> dict[str, Any]:
         except Exception:
             errors += 1
     if synced:
-        cache.delete(f'dashboard:continuing-education-payment-metrics:v5:{complement_database_name()}')
+        cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
     return {'processed': len(missing_rows), 'synced': synced, 'errors': errors}
 
 
@@ -1501,15 +1516,17 @@ def _sync_excel_course_charge_adjustments() -> dict[str, Any]:
         except Exception:
             errors += 1
     if adjusted:
-        cache.delete(f'dashboard:continuing-education-payment-metrics:v5:{complement_database_name()}')
+        cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
     return {'processed': len(rows), 'adjusted': adjusted, 'unchanged': unchanged, 'errors': errors}
 
 
 def get_registered_user_payment_detail(codigo_estud: Any, *, cuenta_id: Any = '') -> dict[str, Any]:
     _ensure_continuing_education_payments_available()
-    complement_enrollments = _continuing_education_object('edu', 'CorteEstudiante')
+    complement_enrollments = _continuing_education_object('edu', 'VW_MatriculaEstudianteCompleta')
+    complement_cuts = _continuing_education_object('edu', 'VW_CorteCursoDetalle')
     accounts_table = _continuing_education_object('fin', 'CuentaEstudiante')
     movements_table = _continuing_education_object('fin', 'MovimientoCuenta')
+    invoices_table = _continuing_education_object('fin', 'FacturaMovimiento')
     clean_code = _clean_text(codigo_estud)
     if not clean_code or not clean_code.isdigit():
         raise PaymentGatewayError('Debes indicar un código de estudiante válido.')
@@ -1526,22 +1543,18 @@ def get_registered_user_payment_detail(codigo_estud: Any, *, cuenta_id: Any = ''
         f"""
         SELECT TOP (1)
             CONVERT(varchar(50), E.CodigoEstud) AS codigo_estud,
-            CONVERT(varchar(50), E.CorteEstudianteId) AS estudiante_corte_id,
+            CONVERT(varchar(50), E.CorteEstudianteIdPrincipal) AS estudiante_corte_id,
             CONVERT(varchar(50), E.CorteId) AS corte_id,
             CONVERT(varchar(50), C.CuentaId) AS cuenta_id,
             LTRIM(RTRIM(E.ApellidosNombre)) AS nombre,
             LTRIM(RTRIM(E.CedulaEst)) AS cedula,
-            COALESCE(NULLIF(LTRIM(RTRIM(D.correointec)), ''), NULLIF(LTRIM(RTRIM(D.correo)), '')) AS email,
-            LTRIM(RTRIM(PN.Nomb_Materia)) AS course_name,
+            COALESCE(NULLIF(LTRIM(RTRIM(E.CorreoIntec)), ''), NULLIF(LTRIM(RTRIM(E.CorreoPersonal)), '')) AS email,
+            LTRIM(RTRIM(CC.NombreCursoMateria)) AS course_name,
             LTRIM(RTRIM(CC.NombreCorte)) AS cut_name,
             CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%' THEN 1 ELSE 0 END AS is_excel_enrollment
-        FROM dbo.CORTE_CURSO_ESTUDIANTE AS E
-        INNER JOIN dbo.CORTE_CURSO AS CC ON CC.CorteId = E.CorteId
-        LEFT JOIN dbo.DATOS_ESTUD AS D ON D.codigo_estud = E.CodigoEstud
-        LEFT JOIN dbo.PENSUM AS PN
-          ON PN.Cod_AnioBasica = E.Cod_AnioBasica AND PN.codigo_materia = E.CodigoMateria
-        LEFT JOIN {complement_enrollments} AS CE ON CE.CorteEstudianteIdPrincipal = E.CorteEstudianteId
-        LEFT JOIN {accounts_table} AS C ON C.EstudianteCorteId = CE.EstudianteCorteId
+        FROM {complement_enrollments} AS E
+        INNER JOIN {complement_cuts} AS CC ON CC.CorteId = E.CorteId
+        LEFT JOIN {accounts_table} AS C ON C.EstudianteCorteId = E.EstudianteCorteId
         WHERE E.CodigoEstud = %s
         {account_filter}
         ORDER BY E.CorteId DESC
@@ -1572,9 +1585,19 @@ def get_registered_user_payment_detail(codigo_estud: Any, *, cuenta_id: Any = ''
                 LTRIM(RTRIM(M.UsuarioRegistro)) AS usuario_registro,
                 LTRIM(RTRIM(M.FormaPago)) AS forma_pago,
                 LTRIM(RTRIM(M.TipoMovimiento)) AS tipo_movimiento,
-                LTRIM(RTRIM(M.EstadoMovimiento)) AS estado_movimiento
+                LTRIM(RTRIM(M.EstadoMovimiento)) AS estado_movimiento,
+                CASE
+                    WHEN M.TipoMovimiento <> 'HABER' OR UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO' THEN 'NO_APLICA'
+                    WHEN F.FacturaMovimientoId IS NULL OR F.EstadoFactura <> 'SUBIDA' THEN 'PENDIENTE'
+                    ELSE 'SUBIDA'
+                END AS estado_factura,
+                LTRIM(RTRIM(F.NumeroFactura)) AS numero_factura,
+                LTRIM(RTRIM(F.NombreArchivo)) AS nombre_factura,
+                LTRIM(RTRIM(F.UrlDocumento)) AS url_factura,
+                CONVERT(varchar(19), COALESCE(F.FechaModifica, F.FechaRegistro), 120) AS fecha_factura
             FROM {movements_table} AS M
             INNER JOIN {accounts_table} AS C ON C.CuentaId = M.CuentaId
+            LEFT JOIN {invoices_table} AS F ON F.MovimientoId = M.MovimientoId
             WHERE M.CuentaId = %s
             ORDER BY M.FechaMovimiento DESC, M.MovimientoId DESC
             """,
@@ -1615,6 +1638,7 @@ def get_registered_user_payment_detail(codigo_estud: Any, *, cuenta_id: Any = ''
     if _safe_int(student_rows[0].get('is_excel_enrollment'), default=0) == 1:
         total_value = EXCEL_ENROLLMENT_NET_AMOUNT
         discount_value = max(Decimal('0.00'), discount_value - excel_net_adjustment)
+    total_value = _effective_total_value(total_value, registered_value)
     pending_balance = max(Decimal('0.00'), total_value - registered_value - discount_value)
     account_status = 'PAGADO' if total_value > 0 and pending_balance <= 0 else 'PENDIENTE'
     return {
@@ -1905,7 +1929,7 @@ def register_continuing_education_payment(payload: dict[str, Any], *, user_login
             _trim_to_max(payload.get('observacion'), 500),
         ],
     )
-    cache.delete(f'dashboard:continuing-education-payment-metrics:v5:{complement_database_name()}')
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
     payment_result = payment_rows[0] if payment_rows else {}
     payment_reference = _first_non_empty(
         payment_result.get('MovimientoId'),
@@ -2050,7 +2074,7 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
             _trim_to_max(payload.get('observacion'), 500),
         ],
     )
-    cache.delete(f'dashboard:continuing-education-payment-metrics:v5:{complement_database_name()}')
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
     create_notification_safely(
         event_key=f"discount:{account.get('CuentaId')}:{movement_rows[0].get('MovimientoId') if movement_rows else reason}",
         notification_type='DISCOUNT_APPLIED',
@@ -2068,6 +2092,92 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
         'discount_type': discount_type,
         'value': str(value),
         'pending_balance': str(max(Decimal('0.00'), pending_balance - value)),
+    }
+
+
+def upload_continuing_education_invoice(payload: dict[str, Any], *, user_login: str) -> dict[str, Any]:
+    _ensure_continuing_education_payments_available()
+    if not is_complement_available([('fin', 'FacturaMovimiento', 'U')]):
+        raise PaymentGatewayError('El control de facturación no está instalado en INTECEDUCONTINUA.')
+    movement_id = _clean_text(payload.get('movimiento_id') or payload.get('movement_id'))
+    if not movement_id.isdigit():
+        raise PaymentGatewayError('Debes seleccionar un movimiento de pago válido.')
+
+    movements_table = _continuing_education_object('fin', 'MovimientoCuenta')
+    accounts_table = _continuing_education_object('fin', 'CuentaEstudiante')
+    enrollments_view = _continuing_education_object('edu', 'VW_MatriculaEstudianteCompleta')
+    cuts_view = _continuing_education_object('edu', 'VW_CorteCursoDetalle')
+    invoices_table = _continuing_education_object('fin', 'FacturaMovimiento')
+    rows = _fetch_payment_rows(
+        f"""
+        SELECT TOP (1)
+            M.MovimientoId AS movimiento_id,
+            CONVERT(varchar(50), C.CodigoEstud) AS codigo_estud,
+            LTRIM(RTRIM(E.ApellidosNombre)) AS nombre_estudiante,
+            LTRIM(RTRIM(CC.NombreCursoMateria)) AS nombre_curso,
+            LTRIM(RTRIM(CC.NombreCorte)) AS nombre_corte
+        FROM {movements_table} AS M
+        INNER JOIN {accounts_table} AS C ON C.CuentaId = M.CuentaId
+        INNER JOIN {enrollments_view} AS E ON E.EstudianteCorteId = C.EstudianteCorteId
+        INNER JOIN {cuts_view} AS CC ON CC.CorteId = C.CorteId
+        WHERE M.MovimientoId = %s
+          AND M.EstadoMovimiento = 'ACTIVO'
+          AND M.TipoMovimiento = 'HABER'
+          AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO'
+        """,
+        [movement_id],
+    )
+    if not rows:
+        raise PaymentGatewayError('El movimiento no corresponde a un pago activo que pueda facturarse.')
+    payment = rows[0]
+    invoice = _store_continuing_education_invoice(
+        payload,
+        codigo_estud=_clean_text(payment.get('codigo_estud')),
+        course_name=_clean_text(payment.get('nombre_curso')),
+        cut_name=_clean_text(payment.get('nombre_corte')),
+        student_name=_clean_text(payment.get('nombre_estudiante')),
+    )
+    result_rows = _fetch_payment_rows(
+        f"""
+        MERGE {invoices_table} AS T
+        USING (SELECT %s AS MovimientoId) AS S ON S.MovimientoId = T.MovimientoId
+        WHEN MATCHED THEN UPDATE SET
+            EstadoFactura = 'SUBIDA', NumeroFactura = NULLIF(%s, ''),
+            UrlDocumento = %s, NombreArchivo = %s, HashDocumento = %s,
+            UsuarioModifica = %s, FechaModifica = sysdatetime(), Observacion = NULLIF(%s, '')
+        WHEN NOT MATCHED THEN INSERT (
+            MovimientoId, EstadoFactura, NumeroFactura, UrlDocumento,
+            NombreArchivo, HashDocumento, UsuarioRegistro, Observacion
+        ) VALUES (%s, 'SUBIDA', NULLIF(%s, ''), %s, %s, %s, %s, NULLIF(%s, ''));
+        SELECT TOP (1)
+            CONVERT(varchar(50), FacturaMovimientoId) AS factura_id,
+            CONVERT(varchar(50), MovimientoId) AS movimiento_id,
+            EstadoFactura AS estado_factura, NumeroFactura AS numero_factura,
+            UrlDocumento AS url_factura, NombreArchivo AS nombre_factura,
+            CONVERT(varchar(19), COALESCE(FechaModifica, FechaRegistro), 120) AS fecha_factura
+        FROM {invoices_table} WHERE MovimientoId = %s;
+        """,
+        [
+            movement_id,
+            _trim_to_max(payload.get('numero_factura'), 100),
+            invoice['relative_path'], invoice['file_name'], invoice['sha256'],
+            _trim_to_max(user_login or 'SISTEMA', 50), _trim_to_max(payload.get('observacion'), 500),
+            movement_id, _trim_to_max(payload.get('numero_factura'), 100),
+            invoice['relative_path'], invoice['file_name'], invoice['sha256'],
+            _trim_to_max(user_login or 'SISTEMA', 50), _trim_to_max(payload.get('observacion'), 500),
+            movement_id,
+        ],
+    )
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+    return {
+        'ok': True,
+        'database': complement_database_name(),
+        'invoice': result_rows[0] if result_rows else {},
+        'storage': {
+            'file_name': invoice['file_name'],
+            'location': invoice.get('folder_path', ''),
+            'web_url': invoice.get('web_url', ''),
+        },
     }
 
 
@@ -2122,6 +2232,55 @@ def _store_continuing_education_voucher(
     }
 
 
+def _store_continuing_education_invoice(
+    payload: dict[str, Any],
+    *,
+    codigo_estud: str,
+    course_name: str,
+    cut_name: str,
+    student_name: str,
+) -> dict[str, str]:
+    content = _clean_text(payload.get('invoice_base64') or payload.get('factura_base64'))
+    original_name = Path(_clean_text(payload.get('invoice_name') or payload.get('factura_nombre'))).name
+    if not content:
+        raise PaymentGatewayError('Debes adjuntar el documento PDF de la factura.')
+    if ',' in content:
+        content = content.split(',', 1)[1]
+    try:
+        raw = b64decode(content, validate=True)
+    except Exception as exc:
+        raise PaymentGatewayError('El documento de factura no tiene un formato válido.') from exc
+    if not raw or len(raw) > 5 * 1024 * 1024:
+        raise PaymentGatewayError('La factura debe pesar entre 1 byte y 5 MB.')
+    extension = Path(original_name).suffix.lower()
+    if extension != '.pdf':
+        raise PaymentGatewayError('La factura debe ser un archivo PDF.')
+    _validate_voucher_content(raw, extension)
+    digest = sha256(raw).hexdigest()
+    invoice_number = _clean_text(payload.get('numero_factura'))
+    number_part = f'{invoice_number}_' if invoice_number else ''
+    safe_name = f'FACTURA_{number_part}{digest[:8]}.pdf'
+    try:
+        uploaded = upload_continuing_education_voucher(
+            raw,
+            course_name=course_name,
+            cut_name=cut_name,
+            student_name=student_name,
+            student_code=codigo_estud,
+            file_name=safe_name,
+            document_folder='FACTURAS',
+        )
+    except Microsoft365Error as exc:
+        raise PaymentGatewayError(f'No fue posible guardar la factura en OneDrive. {exc}') from exc
+    return {
+        'relative_path': uploaded.get('web_url') or uploaded.get('relative_path') or '',
+        'folder_path': (uploaded.get('relative_path') or '').rsplit('/', 1)[0],
+        'web_url': uploaded.get('web_url') or '',
+        'file_name': uploaded.get('file_name') or original_name or safe_name,
+        'sha256': digest,
+    }
+
+
 def _validate_voucher_content(content: bytes, extension: str) -> None:
     signatures = {
         '.pdf': (b'%PDF-',),
@@ -2138,6 +2297,9 @@ def _validate_voucher_content(content: bytes, extension: str) -> None:
 def _fetch_payment_rows(query: str, params: list[Any]) -> list[dict[str, Any]]:
     with connection_for_query(query, params).cursor() as cursor:
         cursor.execute(query, params)
+        while cursor.description is None:
+            if not cursor.nextset():
+                return []
         columns = [column[0] for column in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -2427,7 +2589,7 @@ def _sync_confirmed_link_payment_to_complement(payment: dict[str, Any]) -> None:
             ],
         )
         payment['complement_payment_status'] = 'SINCRONIZADO'
-        cache.delete(f'dashboard:continuing-education-payment-metrics:v5:{complement_database_name()}')
+        cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
     except Exception as exc:
         payment['complement_payment_status'] = 'PENDIENTE'
         payment['complement_payment_error'] = str(exc)
@@ -2512,6 +2674,7 @@ def _ensure_continuing_education_payments_available() -> None:
         ('edu', 'VW_MatriculaEstudianteCompleta', 'V'),
         ('fin', 'CuentaEstudiante', 'U'),
         ('fin', 'MovimientoCuenta', 'U'),
+        ('fin', 'FacturaMovimiento', 'U'),
     ]
     if not is_complement_available(required_objects):
         raise PaymentGatewayError(
@@ -2530,6 +2693,13 @@ def _is_excel_net_adjustment(row: dict[str, Any]) -> bool:
     )
 
 
+def _effective_total_value(total_value: Decimal, registered_value: Decimal) -> Decimal:
+    """Use a confirmed payment as total when a legacy account has no initial charge."""
+    if total_value <= 0 and registered_value > 0:
+        return registered_value
+    return total_value
+
+
 def _serialize_registered_user_payment(row: dict[str, Any]) -> dict[str, Any]:
     total_value = _to_decimal(row.get('total_value'))
     registered_value = _to_decimal(row.get('registered_value'))
@@ -2541,8 +2711,11 @@ def _serialize_registered_user_payment(row: dict[str, Any]) -> dict[str, Any]:
             Decimal('0.00'),
             discount_value - _to_decimal(row.get('excel_net_adjustment')),
         )
+    total_value = _effective_total_value(total_value, registered_value)
     pending_balance = max(Decimal('0.00'), total_value - registered_value - discount_value)
     payment_complete = total_value > 0 and pending_balance <= 0
+    payment_count = int(row.get('payment_count') or 0)
+    invoice_count = int(row.get('invoice_count') or 0)
     return {
         'codigo_estud': _clean_text(row.get('codigo_estud')),
         'estudiante_corte_id': _clean_text(row.get('estudiante_corte_id')),
@@ -2556,7 +2729,14 @@ def _serialize_registered_user_payment(row: dict[str, Any]) -> dict[str, Any]:
         'cut_name': _clean_text(row.get('cut_name')),
         'enrollment_status': _clean_text(row.get('enrollment_status')),
         'enrollment_origin': 'EXCEL' if is_excel_enrollment else '',
-        'payment_count': int(row.get('payment_count') or 0),
+        'payment_count': payment_count,
+        'invoice_count': invoice_count,
+        'pending_invoice_count': max(0, payment_count - invoice_count),
+        'invoice_status': (
+            'SIN_PAGOS' if payment_count == 0
+            else 'SUBIDA' if invoice_count >= payment_count
+            else 'PENDIENTE'
+        ),
         'total_value': str(total_value),
         'registered_value': str(registered_value),
         'discount_value': str(discount_value),
@@ -2576,8 +2756,9 @@ def _registered_payment_metrics(
     complement_enrollments: str,
     accounts_table: str,
     movements_table: str,
+    invoices_table: str,
 ) -> dict[str, Any]:
-    cache_key = f'dashboard:continuing-education-payment-metrics:v5:{complement_database_name()}'
+    cache_key = f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}'
     cached_metrics = cache.get(cache_key)
     if isinstance(cached_metrics, dict):
         return cached_metrics
@@ -2588,6 +2769,7 @@ def _registered_payment_metrics(
             SELECT
                 CE.CorteEstudianteIdPrincipal,
                 COUNT(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO' THEN 1 END) AS payment_count,
+                COUNT(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO' AND F.FacturaMovimientoId IS NOT NULL AND F.EstadoFactura = 'SUBIDA' THEN 1 END) AS invoice_count,
                 SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'DEBE' THEN M.Valor ELSE 0 END) AS total_value,
                 SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO' THEN M.Valor ELSE 0 END) AS registered_value,
                 SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO' THEN M.Valor ELSE 0 END) AS discount_value,
@@ -2595,17 +2777,19 @@ def _registered_payment_metrics(
             FROM {complement_enrollments} AS CE
             LEFT JOIN {accounts_table} AS C ON C.EstudianteCorteId = CE.EstudianteCorteId
             LEFT JOIN {movements_table} AS M ON M.CuentaId = C.CuentaId
+            LEFT JOIN {invoices_table} AS F ON F.MovimientoId = M.MovimientoId
             GROUP BY CE.CorteEstudianteIdPrincipal
         )
         SELECT
             COUNT(*) AS registered_users,
             SUM(CASE WHEN ISNULL(P.payment_count, 0) > 0 THEN 1 ELSE 0 END) AS users_with_payments,
             SUM(ISNULL(P.payment_count, 0)) AS payment_records,
+            SUM(ISNULL(P.invoice_count, 0)) AS uploaded_invoices,
             SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%' THEN {EXCEL_ENROLLMENT_NET_AMOUNT} ELSE ISNULL(P.total_value, 0) END) AS total_value,
             SUM(ISNULL(P.registered_value, 0)) AS registered_value,
             SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%' THEN ISNULL(P.discount_value, 0) - ISNULL(P.excel_net_adjustment, 0) ELSE ISNULL(P.discount_value, 0) END) AS discount_value
-        FROM dbo.CORTE_CURSO_ESTUDIANTE AS E
-        LEFT JOIN AccountSummary AS P ON P.CorteEstudianteIdPrincipal = E.CorteEstudianteId
+        FROM {complement_enrollments} AS E
+        LEFT JOIN AccountSummary AS P ON P.CorteEstudianteIdPrincipal = E.CorteEstudianteIdPrincipal
         """,
         [],
     )
@@ -2614,6 +2798,11 @@ def _registered_payment_metrics(
         'registered_users': int(row.get('registered_users') or 0),
         'users_with_payments': int(row.get('users_with_payments') or 0),
         'payment_records': int(row.get('payment_records') or 0),
+        'uploaded_invoices': int(row.get('uploaded_invoices') or 0),
+        'pending_invoices': max(
+            0,
+            int(row.get('payment_records') or 0) - int(row.get('uploaded_invoices') or 0),
+        ),
         'total_value': str(row.get('total_value') or '0.00'),
         'registered_value': str(row.get('registered_value') or '0.00'),
         'discount_value': str(row.get('discount_value') or '0.00'),

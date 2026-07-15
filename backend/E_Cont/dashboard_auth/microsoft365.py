@@ -65,6 +65,7 @@ def upload_continuing_education_voucher(
     student_name: str,
     student_code: str,
     file_name: str,
+    document_folder: str = '',
 ) -> dict[str, str]:
     """Store a payment receipt in the configured institutional OneDrive."""
     if not content:
@@ -90,6 +91,8 @@ def upload_continuing_education_voucher(
         _safe_onedrive_name(cut_name or 'CORTE_SIN_NOMBRE'),
         student_folder,
     ]
+    if document_folder:
+        folders.append(_safe_onedrive_name(document_folder))
     _ensure_onedrive_folder_path(config, token, owner, folders)
 
     safe_file_name = _safe_onedrive_name(file_name or f'comprobante_{student_code}', max_length=140)

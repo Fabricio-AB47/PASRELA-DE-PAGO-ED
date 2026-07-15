@@ -59,7 +59,7 @@ def create_notification(
                 json.dumps(data or {}, ensure_ascii=False, default=str),
             ],
         )
-        row = cursor.fetchone()
+        row = _fetch_first_result_row(cursor)
     return bool(row and row[0])
 
 
@@ -315,6 +315,14 @@ def _migrate_legacy_notifications(cursor: Any, database: str, notification_table
 
 def _trim(value: Any, max_length: int) -> str:
     return str(value or '').strip()[:max_length]
+
+
+def _fetch_first_result_row(cursor: Any) -> Any:
+    """Advance past SQL Server row-count result sets and return the first row."""
+    while cursor.description is None:
+        if not cursor.nextset():
+            return None
+    return cursor.fetchone()
 
 
 def _safe_int(value: Any, default: int) -> int:

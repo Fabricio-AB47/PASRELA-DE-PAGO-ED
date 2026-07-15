@@ -243,9 +243,7 @@ def certificate_template_complement_logo_paths(corte_id: Any = '') -> list[Path]
         if not isinstance(logo, dict) or not logo.get('enabled', True):
             continue
         logo_id = _clean_text(logo.get('id'))
-        if has_cut_setting and selected_ids and logo_id not in selected_ids:
-            continue
-        if not has_cut_setting and selected_ids and logo_id not in selected_ids:
+        if has_cut_setting and logo_id not in selected_ids:
             continue
         filename = _clean_text(logo.get('filename'))
         if not filename:
@@ -318,8 +316,19 @@ def _load_raw_config() -> dict[str, Any]:
 
 def _write_raw_config(config: dict[str, Any]) -> None:
     path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
+    temporary_path = path.with_suffix(f'{path.suffix}.{uuid4().hex}.tmp')
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
+        temporary_path.replace(path)
+    except OSError as exc:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise CertificateTemplateError(
+            'No fue posible guardar la plantilla en el servidor. Verifica los permisos de almacenamiento.'
+        ) from exc
 
 
 def _public_config(config: dict[str, Any], *, corte_id: Any = '') -> dict[str, Any]:
@@ -396,8 +405,17 @@ def _store_asset(
     display_name = _trim(_clean_text(payload.get('display_name') or payload.get('name')), 90) or default_label
     filename = f'{asset_id}{extension}'
     storage_path = storage_dir / filename
-    storage_path.parent.mkdir(parents=True, exist_ok=True)
-    storage_path.write_bytes(content)
+    try:
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        storage_path.write_bytes(content)
+    except OSError as exc:
+        try:
+            storage_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise CertificateTemplateError(
+            'No fue posible almacenar la imagen en el servidor. Verifica los permisos de almacenamiento.'
+        ) from exc
     now = _utc_now()
     return {
         'id': asset_id,

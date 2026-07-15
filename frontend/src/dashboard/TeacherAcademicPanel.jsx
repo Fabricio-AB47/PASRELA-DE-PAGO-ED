@@ -358,7 +358,7 @@ function AttendanceManager({ courses, onDashboardRefresh }) {
           <label className="field">
             <span>Período</span>
             <select value={selectedCourseKey} onChange={handleCourseChange} required>
-              <option value="">Selecciona un periodo</option>
+              <option value="">Selecciona un período</option>
               {selectedSubjectCourses.map((course) => (
                 <option key={courseKey(course)} value={courseKey(course)}>
                   {coursePeriodOptionLabel(course)}
@@ -388,7 +388,7 @@ function AttendanceManager({ courses, onDashboardRefresh }) {
                   <th>Jornada</th>
                   <th>Estudiantes</th>
                   <th>Registros</th>
-                  <th>Accion</th>
+                  <th>Acción</th>
                 </tr>
               </thead>
               <tbody>

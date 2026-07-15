@@ -5,11 +5,13 @@ from unittest.mock import patch
 from dashboard_auth.payments import (
     EXCEL_ENROLLMENT_NET_AMOUNT,
     _generated_payment_link_metrics,
+    _fetch_payment_rows,
     _ensure_all_digital_payment_receipt,
     _list_generated_payment_links,
     _serialize_registered_user_payment,
     _sync_excel_course_charge_adjustments,
     _store_continuing_education_voucher,
+    _store_continuing_education_invoice,
     PaymentGatewayError,
     admin_cancel_payment,
     admin_get_payment_info,
@@ -17,6 +19,37 @@ from dashboard_auth.payments import (
     reconcile_pending_all_digital_payments,
 )
 from dashboard_auth.payment_receipt import build_all_digital_payment_receipt
+
+
+class _MultiResultCursor:
+    def __init__(self):
+        self.description = None
+
+    def execute(self, _query, _params):
+        return None
+
+    def nextset(self):
+        self.description = [('value',)]
+        return True
+
+    def fetchall(self):
+        return [(7,)]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+
+class PaymentSqlResultTests(TestCase):
+    @patch('dashboard_auth.payments.connection_for_query')
+    def test_skips_rowcount_result_before_reading_procedure_output(self, select_connection):
+        select_connection.return_value.cursor.return_value = _MultiResultCursor()
+
+        rows = _fetch_payment_rows('EXEC fin.usp_Prueba', [])
+
+        self.assertEqual(rows, [{'value': 7}])
 
 
 class AdminPaymentPayloadTests(TestCase):
@@ -191,6 +224,26 @@ class ContinuingEducationManualPaymentTests(TestCase):
         )
         self.assertEqual(result['relative_path'], 'https://example.test/comprobante')
 
+    @patch('dashboard_auth.payments.upload_continuing_education_voucher')
+    def test_stores_invoice_in_dedicated_onedrive_folder(self, upload_document):
+        upload_document.return_value = {
+            'file_name': 'FACTURA_001_6ca13d52.pdf',
+            'relative_path': 'EDUCACION_CONTINUA/Curso/Corte/1954 - Estudiante/FACTURAS/FACTURA_001.pdf',
+            'web_url': 'https://example.test/factura',
+        }
+
+        result = _store_continuing_education_invoice(
+            {
+                'invoice_base64': b64encode(b'%PDF-1.7\nfactura\n%%EOF').decode('ascii'),
+                'invoice_name': 'factura.pdf',
+                'numero_factura': '001',
+            },
+            codigo_estud='1954', course_name='Curso', cut_name='Corte', student_name='Estudiante',
+        )
+
+        self.assertEqual(upload_document.call_args.kwargs['document_folder'], 'FACTURAS')
+        self.assertEqual(result['web_url'], 'https://example.test/factura')
+
 
 class ExcelEnrollmentValueTests(TestCase):
     def test_excel_enrollment_net_amount_is_four_hundred(self):
@@ -223,3 +276,22 @@ class ExcelEnrollmentValueTests(TestCase):
         self.assertEqual(result['discount_value'], '0.00')
         self.assertEqual(result['pending_balance'], '400.00')
         self.assertEqual(result['enrollment_origin'], 'EXCEL')
+
+    def test_reports_pending_invoice_when_a_payment_has_no_document(self):
+        result = _serialize_registered_user_payment({'payment_count': 2, 'invoice_count': 1})
+
+        self.assertEqual(result['invoice_status'], 'PENDIENTE')
+        self.assertEqual(result['pending_invoice_count'], 1)
+
+    def test_marks_all_digital_payment_as_paid_when_legacy_charge_is_missing(self):
+        result = _serialize_registered_user_payment({
+            'total_value': '0.00',
+            'registered_value': '500.00',
+            'discount_value': '0.00',
+            'payment_count': 1,
+        })
+
+        self.assertEqual(result['total_value'], '500.00')
+        self.assertEqual(result['pending_balance'], '0.00')
+        self.assertEqual(result['payment_status'], 'PAGADO')
+        self.assertTrue(result['certificate_payment_ready'])

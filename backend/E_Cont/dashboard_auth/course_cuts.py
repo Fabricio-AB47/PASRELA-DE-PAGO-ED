@@ -1771,7 +1771,6 @@ def _grade_transfer_complement_status(*, require_write: bool) -> dict[str, Any]:
                 [
                     ('edu', 'usp_RegistrarNotaFinalCorte', 'P'),
                     ('edu', 'usp_PasarNotasCorte', 'P'),
-                    ('edu', 'usp_PasarNotaPrincipalOpcional', 'P'),
                 ]
             )
     else:
@@ -3078,13 +3077,13 @@ def _fetch_complement_enrollment_rows(corte_id: int, *, search: Any = '', limit:
                 M.[EstudianteCorteId],
                 M.[CorteId],
                 D.[TipoOferta],
-                M.[Cod_AnioBasica],
+                D.[Cod_AnioBasica],
                 CAST(NULL AS nvarchar(150)) AS [NombreCarrera],
-                M.[CodigoPeriodo],
-                M.[CodigoMateria],
-                M.[CodCurso],
-                M.[NombreCursoMateria] AS [NombreCurso],
-                M.[NombreCorte],
+                D.[CodigoPeriodo],
+                D.[CodigoMateria],
+                D.[CodCurso],
+                D.[NombreCursoMateria] AS [NombreCurso],
+                D.[NombreCorte],
                 M.[CodigoEstud],
                 M.[CorteEstudianteIdPrincipal],
                 M.[CedulaEst],
@@ -3561,7 +3560,9 @@ def _sync_grade_to_primary_optional(
     nota_final: Decimal,
     usuario_registro: str,
 ) -> dict[str, Any]:
-    if complement_version() == 'v5':
+    if complement_version() == 'v5' and is_complement_available(
+        [('edu', 'usp_PasarNotaPrincipalOpcional', 'P')]
+    ):
         rows = _fetch_all(
             f"""
             EXEC [{complement_database_name()}].[edu].[usp_PasarNotaPrincipalOpcional]
@@ -3711,19 +3712,12 @@ def _fetch_complement_student_index(corte_id: int) -> dict[str, dict[str, Any]]:
         rows = _fetch_all(
             f"""
             SELECT
-                CAST(COALESCE(E.[CorteEstudianteIdPrincipal], CCE.[CorteEstudianteId]) AS varchar(30)) AS CorteEstudianteId,
+                CAST(E.[CorteEstudianteIdPrincipal] AS varchar(30)) AS CorteEstudianteId,
                 CAST(E.[EstudianteCorteId] AS varchar(30)) AS EstudianteCorteId,
                 E.[CodigoEstud],
                 E.[EstadoMatricula],
                 E.[FechaMatricula]
             FROM [{complement_database_name()}].[edu].[CorteEstudiante] E
-            OUTER APPLY (
-                SELECT TOP 1 CCE0.[CorteEstudianteId]
-                FROM dbo.CORTE_CURSO_ESTUDIANTE CCE0
-                WHERE CCE0.[CorteId] = E.[CorteId]
-                  AND CCE0.[CodigoEstud] = E.[CodigoEstud]
-                ORDER BY CCE0.[CorteEstudianteId] DESC
-            ) CCE
             WHERE E.[CorteId] = %s
             """,
             [corte_id],

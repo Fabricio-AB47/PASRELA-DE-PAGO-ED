@@ -23,11 +23,19 @@ function formatMoney(value) {
   return moneyFormatter.format(Number.isFinite(number) ? number : 0)
 }
 
+function isAccountPaid(account) {
+  return Number(account?.registered_value || 0) > 0 && Number(account?.pending_balance || 0) <= 0
+}
+
+function accountBalanceStatus(account) {
+  return isAccountPaid(account) ? 'PAGADO' : 'PENDIENTE'
+}
+
 function fileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('No fue posible leer el voucher seleccionado.'))
+    reader.onerror = () => reject(new Error('No fue posible leer el documento seleccionado.'))
     reader.readAsDataURL(file)
   })
 }
@@ -89,6 +97,12 @@ export default function AdminPaymentsPanel() {
   const [paymentEntryError, setPaymentEntryError] = useState('')
   const [paymentEntryResult, setPaymentEntryResult] = useState(null)
   const [isSavingPayment, setIsSavingPayment] = useState(false)
+  const [invoiceUploadId, setInvoiceUploadId] = useState('')
+  const [invoiceUploadError, setInvoiceUploadError] = useState('')
+  const [invoiceEntryData, setInvoiceEntryData] = useState(null)
+  const [invoiceEntryForm, setInvoiceEntryForm] = useState({ movimiento_id: '', numero_factura: '', file: null })
+  const [invoiceEntryError, setInvoiceEntryError] = useState('')
+  const [isLoadingInvoiceEntry, setIsLoadingInvoiceEntry] = useState(false)
   const [isBankCatalogOpen, setIsBankCatalogOpen] = useState(false)
   const [generatingReceiptId, setGeneratingReceiptId] = useState('')
   const [copiedPaymentLinkId, setCopiedPaymentLinkId] = useState('')
@@ -196,6 +210,7 @@ export default function AdminPaymentsPanel() {
   }
 
   function openPaymentEntry(user) {
+    if (isAccountPaid(user)) return
     setPaymentEntryUser(user)
     setPaymentEntryError('')
     setPaymentEntryResult(null)
@@ -301,6 +316,112 @@ export default function AdminPaymentsPanel() {
       setPaymentEntryError(error.message)
     } finally {
       setIsSavingPayment(false)
+    }
+  }
+
+  async function uploadPaymentInvoice(payment, file) {
+    if (!file || !selectedPaymentUser?.student) return
+    const movementId = String(payment?.num || '')
+    setInvoiceUploadId(movementId)
+    setInvoiceUploadError('')
+    try {
+      const invoiceBase64 = await fileAsDataUrl(file)
+      const response = await adminFetch('/api/auth/admin/payments/invoice/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          movimiento_id: movementId,
+          invoice_base64: invoiceBase64,
+          invoice_name: file.name,
+        }),
+      })
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok) {
+        throw new Error(payload?.message ?? `No fue posible guardar la factura (${response.status}).`)
+      }
+      await Promise.all([
+        openPaymentDetail(selectedPaymentUser.student),
+        loadRegisteredPayments({
+          page: paymentsResult?.pagination?.page || 1,
+          query: paymentsQuery,
+          status: paymentStatus,
+        }),
+      ])
+    } catch (error) {
+      setInvoiceUploadError(error.message)
+    } finally {
+      setInvoiceUploadId('')
+    }
+  }
+
+  async function openInvoiceEntry(user) {
+    setInvoiceEntryData(null)
+    setInvoiceEntryError('')
+    setInvoiceEntryForm({ movimiento_id: '', numero_factura: '', file: null })
+    setIsLoadingInvoiceEntry(true)
+    setActivePaymentModal('upload-invoice')
+    try {
+      const params = new URLSearchParams({ codigo_estud: user.codigo_estud })
+      if (user.cuenta_id) params.set('cuenta_id', user.cuenta_id)
+      const response = await adminFetch(`/api/auth/admin/payments/?${params.toString()}`)
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok || !payload.result) {
+        throw new Error(payload?.message ?? `No fue posible cargar los movimientos (${response.status}).`)
+      }
+      const billablePayments = (payload.result.payments || []).filter(
+        (payment) => payment.estado_factura !== 'NO_APLICA',
+      )
+      if (!billablePayments.length) throw new Error('La cuenta no tiene pagos que puedan facturarse.')
+      const preferredPayment = billablePayments.find((payment) => payment.estado_factura === 'PENDIENTE') || billablePayments[0]
+      setInvoiceEntryData({ user, payments: billablePayments })
+      setInvoiceEntryForm((current) => ({ ...current, movimiento_id: String(preferredPayment.num || '') }))
+    } catch (error) {
+      setInvoiceEntryError(error.message)
+    } finally {
+      setIsLoadingInvoiceEntry(false)
+    }
+  }
+
+  function handleInvoiceEntryChange(event) {
+    const { name, value, files } = event.target
+    setInvoiceEntryForm((current) => ({ ...current, [name]: files ? files[0] || null : value }))
+  }
+
+  async function handleInvoiceEntrySubmit(event) {
+    event.preventDefault()
+    if (!invoiceEntryForm.file) {
+      setInvoiceEntryError('Debes seleccionar el PDF de la factura.')
+      return
+    }
+    setInvoiceUploadId(invoiceEntryForm.movimiento_id)
+    setInvoiceEntryError('')
+    try {
+      const invoiceBase64 = await fileAsDataUrl(invoiceEntryForm.file)
+      const response = await adminFetch('/api/auth/admin/payments/invoice/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          movimiento_id: invoiceEntryForm.movimiento_id,
+          numero_factura: invoiceEntryForm.numero_factura,
+          invoice_base64: invoiceBase64,
+          invoice_name: invoiceEntryForm.file.name,
+        }),
+      })
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok) {
+        throw new Error(payload?.message ?? `No fue posible guardar la factura (${response.status}).`)
+      }
+      setActivePaymentModal(null)
+      setInvoiceEntryData(null)
+      await loadRegisteredPayments({
+        page: paymentsResult?.pagination?.page || 1,
+        query: paymentsQuery,
+        status: paymentStatus,
+      })
+    } catch (error) {
+      setInvoiceEntryError(error.message)
+    } finally {
+      setInvoiceUploadId('')
     }
   }
 
@@ -602,6 +723,14 @@ export default function AdminPaymentsPanel() {
             <strong>{paymentsResult.metrics.payment_records}</strong>
           </div>
           <div>
+            <span>Facturas subidas</span>
+            <strong>{paymentsResult.metrics.uploaded_invoices || 0}</strong>
+          </div>
+          <div>
+            <span>Facturas pendientes</span>
+            <strong>{paymentsResult.metrics.pending_invoices || 0}</strong>
+          </div>
+          <div>
             <span>Total facturado</span>
             <strong>{formatMoney(paymentsResult.metrics.total_value)}</strong>
           </div>
@@ -631,6 +760,7 @@ export default function AdminPaymentsPanel() {
                 <th>Usuario</th>
                 <th>Identificación</th>
                 <th>Movimientos</th>
+                <th>Facturación</th>
                 <th>Valor curso</th>
                 <th>Pagado</th>
                 <th>Descuento</th>
@@ -641,7 +771,7 @@ export default function AdminPaymentsPanel() {
             </thead>
             <tbody>
               {isLoadingPayments ? (
-                <tr><td colSpan="9">Cargando usuarios y pagos...</td></tr>
+                <tr><td colSpan="10">Cargando usuarios y pagos...</td></tr>
               ) : paymentsResult?.users?.length ? (
                 paymentsResult.users.map((user) => (
                   <tr key={`${user.codigo_estud}-${user.estudiante_corte_id || user.corte_id}`}>
@@ -652,14 +782,20 @@ export default function AdminPaymentsPanel() {
                         {user.payment_count ? `${user.payment_count} pagos` : 'Sin pagos'}
                       </span>
                     </td>
+                    <td>
+                      <span className={`cut-status-badge ${user.invoice_status === 'SUBIDA' ? 'is-open' : 'is-unavailable'}`}>
+                        {user.invoice_status === 'SUBIDA' ? 'Subida' : user.invoice_status === 'SIN_PAGOS' ? 'Sin pagos' : 'Pendiente'}
+                      </span>
+                      {user.pending_invoice_count ? <span>{user.pending_invoice_count} pendiente(s)</span> : null}
+                    </td>
                     <td>{formatMoney(user.total_value)}</td>
                     <td>{formatMoney(user.registered_value)}</td>
                     <td>{formatMoney(user.discount_value)}</td>
                     <td>{user.last_payment_date || '-'}<span>{user.last_payment_detail || ''}</span></td>
                     <td>
                       {formatMoney(user.pending_balance)}
-                      <span className={`payment-account-status ${user.certificate_payment_ready ? 'is-paid' : 'is-pending'}`}>
-                        {user.payment_status || 'PENDIENTE'}
+                      <span className={`payment-account-status ${isAccountPaid(user) ? 'is-paid' : 'is-pending'}`}>
+                        {accountBalanceStatus(user)}
                       </span>
                     </td>
                     <td>
@@ -670,8 +806,16 @@ export default function AdminPaymentsPanel() {
                         <button type="button" className="ghost-button compact-button" onClick={() => openStudentProfile(user)}>
                           Datos del estudiante
                         </button>
-                        <button type="button" className="submit-button compact-button" onClick={() => openPaymentEntry(user)}>
-                          Registrar pago
+                        <button type="button" className="submit-button compact-button" disabled={isAccountPaid(user)} onClick={() => openPaymentEntry(user)}>
+                          {isAccountPaid(user) ? 'Cuenta pagada' : 'Registrar pago'}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button compact-button"
+                          disabled={!user.payment_count}
+                          onClick={() => openInvoiceEntry(user)}
+                        >
+                          {!user.payment_count ? 'Sin pago para facturar' : user.invoice_status === 'SUBIDA' ? 'Reemplazar factura' : 'Subir factura'}
                         </button>
                         <button
                           type="button"
@@ -686,7 +830,7 @@ export default function AdminPaymentsPanel() {
                   </tr>
                 ))
               ) : (
-                <tr><td colSpan="9">No se encontraron usuarios para los filtros seleccionados.</td></tr>
+                <tr><td colSpan="10">No se encontraron usuarios para los filtros seleccionados.</td></tr>
               )}
             </tbody>
           </table>
@@ -929,6 +1073,53 @@ export default function AdminPaymentsPanel() {
         </div>
       ) : null}
 
+      {activePaymentModal === 'upload-invoice' ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="career-modal payment-modal payment-entry-modal" role="dialog" aria-modal="true" aria-labelledby="upload-invoice-title">
+            <div className="career-modal-header">
+              <div>
+                <h4 id="upload-invoice-title">Subir factura</h4>
+                <p>{invoiceEntryData?.user?.nombre || 'Cuenta de Educación Continua'}</p>
+              </div>
+              <button type="button" className="ghost-button compact-button" onClick={() => setActivePaymentModal(null)}>Cerrar</button>
+            </div>
+            <div className="career-modal-body">
+              {isLoadingInvoiceEntry ? <p>Cargando movimientos de pago...</p> : null}
+              {invoiceEntryData ? (
+                <form className="auth-form payment-entry-form" onSubmit={handleInvoiceEntrySubmit}>
+                  <div className="lookup-grid payment-entry-grid">
+                    <label className="field full-span">
+                      <span>Pago correspondiente *</span>
+                      <select name="movimiento_id" required value={invoiceEntryForm.movimiento_id} onChange={handleInvoiceEntryChange}>
+                        {invoiceEntryData.payments.map((payment) => (
+                          <option key={payment.num} value={payment.num}>
+                            {payment.fecha_deposito || payment.fecha_pago || 'Sin fecha'} · {formatMoney(payment.valor_registrado)} · {payment.estado_factura === 'SUBIDA' ? 'Factura subida' : 'Factura pendiente'}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field full-span">
+                      <span>Número de factura</span>
+                      <input name="numero_factura" maxLength="100" value={invoiceEntryForm.numero_factura} onChange={handleInvoiceEntryChange} placeholder="Ejemplo: 001-001-000012345" />
+                    </label>
+                    <label className="field full-span payment-voucher-field">
+                      <span>Documento de factura PDF *</span>
+                      <input name="file" type="file" accept="application/pdf,.pdf" required onChange={handleInvoiceEntryChange} />
+                      <small className="field-hint">Solo PDF. Tamaño máximo: 5 MB.</small>
+                    </label>
+                  </div>
+                  {invoiceEntryError ? <p className="form-error">{invoiceEntryError}</p> : null}
+                  <button type="submit" className="submit-button payment-entry-submit" disabled={Boolean(invoiceUploadId)}>
+                    {invoiceUploadId ? 'Subiendo factura...' : 'Guardar factura'}
+                  </button>
+                </form>
+              ) : null}
+              {!isLoadingInvoiceEntry && invoiceEntryError && !invoiceEntryData ? <p className="form-error">{invoiceEntryError}</p> : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {activePaymentModal === 'register-discount' && discountEntryUser ? (
         <div className="modal-backdrop" role="presentation">
           <section className="career-modal payment-modal payment-entry-modal discount-entry-modal" role="dialog" aria-modal="true" aria-labelledby="register-discount-title">
@@ -988,16 +1179,17 @@ export default function AdminPaymentsPanel() {
                   </div>
                 </div>
               ) : null}
+              {invoiceUploadError ? <p className="form-error">{invoiceUploadError}</p> : null}
               <div className="admin-table-wrap">
                 <table className="admin-table payment-detail-table">
                   <thead>
                     <tr>
-                      <th>Fecha</th><th>Detalle</th><th>Período</th><th>Cargo</th><th>Valor cancelado</th><th>Estado</th><th>Banco / referencia / comprobante</th>
+                      <th>Fecha</th><th>Detalle</th><th>Período</th><th>Cargo</th><th>Valor cancelado</th><th>Estado</th><th>Banco / referencia / comprobante</th><th>Facturación</th>
                     </tr>
                   </thead>
                   <tbody>
                     {isLoadingDetail ? (
-                      <tr><td colSpan="7">Cargando movimientos...</td></tr>
+                      <tr><td colSpan="8">Cargando movimientos...</td></tr>
                     ) : selectedPaymentUser?.payments?.length ? (
                       selectedPaymentUser.payments.map((payment) => (
                         <tr key={`${payment.codigo_periodo}-${payment.num}`}>
@@ -1012,10 +1204,35 @@ export default function AdminPaymentsPanel() {
                             <span>{payment.referencia || payment.numero_deposito || ''}</span>
                             {payment.url_deposito ? <a href={payment.url_deposito} target="_blank" rel="noreferrer">Abrir comprobante</a> : null}
                           </td>
+                          <td>
+                            {payment.estado_factura === 'NO_APLICA' ? (
+                              <span>No aplica</span>
+                            ) : (
+                              <>
+                                <span className={`cut-status-badge ${payment.estado_factura === 'SUBIDA' ? 'is-open' : 'is-unavailable'}`}>
+                                  {payment.estado_factura === 'SUBIDA' ? 'Subida' : 'Pendiente'}
+                                </span>
+                                {payment.url_factura ? <a href={payment.url_factura} target="_blank" rel="noreferrer">Abrir factura</a> : null}
+                                <label className="ghost-button compact-button invoice-upload-button">
+                                  {invoiceUploadId === String(payment.num) ? 'Subiendo...' : payment.estado_factura === 'SUBIDA' ? 'Reemplazar PDF' : 'Subir factura PDF'}
+                                  <input
+                                    type="file"
+                                    accept="application/pdf,.pdf"
+                                    disabled={invoiceUploadId === String(payment.num)}
+                                    onChange={(event) => {
+                                      const file = event.target.files?.[0]
+                                      event.target.value = ''
+                                      uploadPaymentInvoice(payment, file)
+                                    }}
+                                  />
+                                </label>
+                              </>
+                            )}
+                          </td>
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan="7">El usuario no tiene movimientos registrados.</td></tr>
+                      <tr><td colSpan="8">El usuario no tiene movimientos registrados.</td></tr>
                     )}
                   </tbody>
                 </table>

@@ -570,7 +570,7 @@ export default function AdminCourseCutsPanel() {
                 disabled={isLoading}
                 required
               >
-                <option value="">Selecciona un periodo</option>
+                <option value="">Selecciona un período</option>
                 {activePeriods.map((period) => (
                   <option key={period.cod_periodo} value={period.cod_periodo}>
                     {removeNumbersFromLabel(period.detalle_periodo)}

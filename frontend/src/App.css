@@ -1708,6 +1708,16 @@ textarea {
   width: fit-content;
 }
 
+.invoice-upload-button {
+  display: inline-flex;
+  margin-top: 0.4rem;
+  cursor: pointer;
+}
+
+.invoice-upload-button input {
+  display: none;
+}
+
 .attendance-roster-table {
   max-height: 460px;
   overflow: auto;

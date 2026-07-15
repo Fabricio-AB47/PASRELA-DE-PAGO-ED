@@ -5,9 +5,9 @@ from typing import Any
 
 from .academic_rules import is_passing_grade
 from .continuing_education import (
-    complement_connection,
     complement_database_name,
     complement_version,
+    connection_for_query,
     is_complement_available,
 )
 from .inscription_certificate import (
@@ -784,7 +784,7 @@ def _session_identifiers(session_user: dict[str, Any]) -> list[str]:
 
 
 def _fetch_all(query: str, params: list[Any]) -> list[dict[str, Any]]:
-    with complement_connection().cursor() as cursor:
+    with connection_for_query(query, params).cursor() as cursor:
         cursor.execute(query, params)
         if cursor.description is None:
             return []

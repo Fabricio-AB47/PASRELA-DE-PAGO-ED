@@ -1325,7 +1325,7 @@ def _certificate_background_path(payload: dict[str, Any]) -> Path | None:
 def _build_pdf_story(payload: dict[str, Any]) -> list[Any]:
     styles = _pdf_styles()
     story: list[Any] = []
-    header_flowables = _certificate_header_flowables()
+    header_flowables = _certificate_header_flowables(payload)
     if header_flowables:
         story.extend([*header_flowables, Spacer(1, 0.07 * inch)])
 
@@ -1631,10 +1631,10 @@ def _draw_footer(canvas, document) -> None:
     canvas.restoreState()
 
 
-def _certificate_header_flowables() -> list[Any]:
+def _certificate_header_flowables(payload: dict[str, Any]) -> list[Any]:
     flowables: list[Any] = []
     try:
-        use_default_logo = certificate_template_use_default_logo()
+        use_default_logo = certificate_template_use_default_logo(payload.get('corte_id'))
     except Exception:
         use_default_logo = True
 
@@ -1643,7 +1643,7 @@ def _certificate_header_flowables() -> list[Any]:
         if logo:
             flowables.append(logo)
 
-    complement_logos = _complement_logo_flowables()
+    complement_logos = _complement_logo_flowables(payload)
     if complement_logos:
         if flowables:
             flowables.append(Spacer(1, 0.03 * inch))
@@ -1662,9 +1662,9 @@ def _logo_flowable() -> SvgLogoFlowable | None:
         return None
 
 
-def _complement_logo_flowables() -> list[ReportLabImage]:
+def _complement_logo_flowables(payload: dict[str, Any]) -> list[ReportLabImage]:
     try:
-        paths = certificate_template_complement_logo_paths()
+        paths = certificate_template_complement_logo_paths(payload.get('corte_id'))
     except Exception:
         return []
 

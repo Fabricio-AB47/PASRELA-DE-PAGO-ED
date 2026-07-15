@@ -360,7 +360,7 @@ export default function AdminBulkEnrollmentPanel() {
       <div className="admin-section-heading">
         <div>
           <h3>Matrícula académica</h3>
-          <p>Sube un Excel o selecciona estudiantes registrados para aplicar la misma carrera, curso y periodo.</p>
+          <p>Sube un Excel o selecciona estudiantes registrados para aplicar la misma carrera, curso y período.</p>
         </div>
       </div>
 
@@ -412,7 +412,7 @@ export default function AdminBulkEnrollmentPanel() {
                 disabled={isLoadingCatalogs}
                 required
               >
-                <option value="">Selecciona un periodo</option>
+                <option value="">Selecciona un período</option>
                 {activePeriods.map((period) => (
                   <option key={period.cod_periodo} value={period.cod_periodo}>
                     {removeNumbersFromLabel(period.detalle_periodo)}

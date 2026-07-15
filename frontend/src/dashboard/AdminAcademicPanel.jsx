@@ -79,7 +79,7 @@ export default function AdminAcademicPanel() {
       const payload = await readResponsePayload(response)
 
       if (!payload || !response.ok || !payload.ok) {
-        throw new Error(payload?.message ?? `No fue posible cargar el catalogo (${response.status}).`)
+        throw new Error(payload?.message ?? `No fue posible cargar el catálogo (${response.status}).`)
       }
 
       const loadedCatalogs = payload.catalogs || { carreras: [], pensum: [] }
@@ -111,7 +111,7 @@ export default function AdminAcademicPanel() {
       .then(async (response) => {
         const payload = await readResponsePayload(response)
         if (!payload || !response.ok || !payload.ok) {
-          throw new Error(payload?.message ?? `No fue posible cargar el catalogo (${response.status}).`)
+          throw new Error(payload?.message ?? `No fue posible cargar el catálogo (${response.status}).`)
         }
         return payload.catalogs || { carreras: [], pensum: [] }
       })
@@ -399,7 +399,7 @@ export default function AdminAcademicPanel() {
               <div className="career-modal-header">
                 <div>
                   <h4 id="career-modal-title">Carreras</h4>
-                  <p>Lista ordenada por codigo.</p>
+                  <p>Lista ordenada por código.</p>
                 </div>
                 <button
                   type="button"
@@ -886,7 +886,7 @@ export default function AdminAcademicPanel() {
                 ))}
                 {!selectedCareerPensum.length ? (
                   <tr>
-                    <td colSpan="10">No hay materias registradas para esta busqueda.</td>
+                    <td colSpan="10">No hay materias registradas para esta búsqueda.</td>
                   </tr>
                 ) : null}
               </tbody>

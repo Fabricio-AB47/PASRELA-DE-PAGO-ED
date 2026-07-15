@@ -1,7 +1,30 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from dashboard_auth.course_cuts import _sync_student_to_complement
+from dashboard_auth.course_cuts import (
+    _fetch_complement_student_index,
+    _sync_student_to_complement,
+)
+
+
+class ComplementStudentIndexTests(TestCase):
+    @patch('dashboard_auth.course_cuts._fetch_all')
+    @patch('dashboard_auth.course_cuts.complement_version', return_value='v5')
+    def test_does_not_cross_query_primary_dbo_from_complement_server(self, _version, fetch_all):
+        fetch_all.return_value = [
+            {
+                'CorteEstudianteId': '24',
+                'EstudianteCorteId': '4',
+                'CodigoEstud': '2004',
+            }
+        ]
+
+        result = _fetch_complement_student_index(1)
+
+        query = fetch_all.call_args.args[0]
+        self.assertNotIn('dbo.CORTE_CURSO_ESTUDIANTE', query)
+        self.assertEqual(result['24']['EstudianteCorteId'], '4')
+        self.assertEqual(result['codigo:2004']['CorteEstudianteId'], '24')
 
 
 class ComplementCourseChargeTests(TestCase):

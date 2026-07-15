@@ -204,8 +204,8 @@ export default function AdminCertificateTemplatePanel() {
     const loadedBackgrounds = config.backgrounds || []
     const cutSetting = config.cut_setting || {}
     const defaultBackgroundId = config.default_background_id || loadedBackgrounds[0]?.id || ''
-    setUseDefaultLogo(Boolean(config.use_default_logo))
-    setShowComplementLogos(Boolean(config.show_complement_logos))
+    setUseDefaultLogo(Boolean(cutSetting.use_default_logo ?? config.use_default_logo))
+    setShowComplementLogos(Boolean(cutSetting.show_complement_logos ?? config.show_complement_logos))
     setLogos(config.logos || [])
     setNewLogos([])
     setRemoveLogoIds([])
@@ -466,6 +466,13 @@ export default function AdminCertificateTemplatePanel() {
         <button type="button" className="ghost-button compact-button" onClick={() => loadConfig(selectedCutId)} disabled={isSaving || isPreviewLoading}>
           Actualizar
         </button>
+        <button
+          type="button"
+          className="ghost-button compact-button"
+          onClick={() => document.getElementById('certificate-template-config')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          Configurar plantilla y logos
+        </button>
       </div>
 
       {message ? <p className="form-success">{message}</p> : null}
@@ -614,7 +621,7 @@ export default function AdminCertificateTemplatePanel() {
         </div>
       </article>
 
-      <form className="module-card teacher-panel-card certificate-template-form" onSubmit={handleSave}>
+      <form id="certificate-template-config" className="module-card teacher-panel-card certificate-template-form" onSubmit={handleSave}>
         <div className="admin-form-grid">
           <label className="field">
             <span>Formato</span>
@@ -827,6 +834,8 @@ export default function AdminCertificateTemplatePanel() {
             {isPreviewLoading ? 'Generando...' : 'Previsualizar'}
           </button>
         </div>
+        {message ? <p className="form-success" role="status">{message}</p> : null}
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
       </form>
 
       <article className="module-card teacher-panel-card certificate-preview-card">
