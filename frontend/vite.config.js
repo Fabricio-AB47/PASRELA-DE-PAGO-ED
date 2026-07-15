@@ -1,4 +1,5 @@
 import { dirname, resolve } from 'node:path'
+import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -20,11 +21,11 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',
-    port: 5174,
+    port: Number(process.env.FRONTEND_PORT || '5174'),
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: `http://127.0.0.1:${process.env.BACKEND_PORT || '8000'}`,
         changeOrigin: true,
       },
     },

@@ -22,7 +22,11 @@ DEFAULT_USAGE_LOCATION = 'EC'
 DEFAULT_STUDENT_LICENSE_KEYWORD = 'STUDENT'
 DEFAULT_STUDENT_LICENSE_DISPLAY_NAME = 'Office 365 A1 para estudiantes'
 DEFAULT_STUDENT_LICENSE_SKU_PART_NUMBER = 'STANDARDWOFFPACK_STUDENT'
+DEFAULT_TEACHER_LICENSE_KEYWORD = 'FACULTY'
+DEFAULT_TEACHER_LICENSE_DISPLAY_NAME = 'Office 365 A1 para profesores'
+DEFAULT_TEACHER_LICENSE_SKU_PART_NUMBER = 'STANDARDWOFFPACK_FACULTY'
 EXCLUDED_STAFF_LICENSE_KEYWORDS = ('FACULTY', 'TEACHER', 'PROFESSOR', 'PROFESOR')
+TEACHER_LICENSE_KEYWORDS = ('FACULTY', 'TEACHER', 'PROFESSOR', 'PROFESOR')
 READ_LICENSE_ROLES = {'Directory.Read.All', 'LicenseAssignment.Read.All', 'LicenseAssignment.ReadWrite.All'}
 CREATE_USER_ROLES = {'User.ReadWrite.All', 'Directory.ReadWrite.All'}
 ASSIGN_LICENSE_ROLES = {'LicenseAssignment.ReadWrite.All'}
@@ -51,9 +55,144 @@ class Microsoft365GraphError(Microsoft365Error):
         self.graph_status_code = graph_status_code
 
 
+def upload_continuing_education_voucher(
+    content: bytes,
+    *,
+    course_name: str,
+    cut_name: str,
+    student_name: str,
+    student_code: str,
+    file_name: str,
+) -> dict[str, str]:
+    """Store a payment receipt in the configured institutional OneDrive."""
+    if not content:
+        raise Microsoft365ValidationError('El comprobante está vacío.')
+    config = _graph_config()
+    token = _get_access_token(config)
+    owner = _env_first(
+        'ONEDRIVE_USER_ID',
+        'MS_SENDER_USER_ID',
+        'MS_SENDER_EMAIL',
+        'MICROSOFT_SENDER_USER_ID',
+    )
+    if not owner:
+        raise Microsoft365ConfigError(
+            'Configura ONEDRIVE_USER_ID con el correo propietario de la carpeta EDUCACION_CONTINUA.'
+        )
+
+    root_folder = _safe_onedrive_name(os.getenv('ONEDRIVE_EDUCATION_ROOT_FOLDER') or 'EDUCACION_CONTINUA')
+    student_folder = _safe_onedrive_name(f'{student_code} - {student_name}')
+    folders = [
+        root_folder,
+        _safe_onedrive_name(course_name or 'CURSO_SIN_NOMBRE'),
+        _safe_onedrive_name(cut_name or 'CORTE_SIN_NOMBRE'),
+        student_folder,
+    ]
+    _ensure_onedrive_folder_path(config, token, owner, folders)
+
+    safe_file_name = _safe_onedrive_name(file_name or f'comprobante_{student_code}', max_length=140)
+    encoded_owner = quote(owner, safe='')
+    encoded_path = '/'.join(quote(part, safe='') for part in [*folders, safe_file_name])
+    endpoint = f"{config['base_url']}/users/{encoded_owner}/drive/root:/{encoded_path}:/content"
+    item = _graph_binary_request('PUT', endpoint, token, content, operation='cargar comprobante en OneDrive')
+    return {
+        'item_id': str(item.get('id') or ''),
+        'file_name': str(item.get('name') or safe_file_name),
+        'relative_path': '/'.join([*folders, safe_file_name]),
+        'web_url': str(item.get('webUrl') or ''),
+    }
+
+
+def _safe_onedrive_name(value: str, *, max_length: int = 90) -> str:
+    clean = re.sub(r'[\\/:*?"<>|#%]', '-', str(value or '').strip())
+    clean = re.sub(r'\s+', ' ', clean).strip(' .')
+    return (clean or 'SIN_NOMBRE')[:max_length].rstrip(' .')
+
+
+def _ensure_onedrive_folder_path(
+    config: dict[str, str], token: str, owner: str, folders: list[str],
+) -> None:
+    encoded_owner = quote(owner, safe='')
+    parent = _graph_request(
+        'GET', f"{config['base_url']}/users/{encoded_owner}/drive/root", token,
+        operation='consultar raíz de OneDrive',
+    )
+    accumulated: list[str] = []
+    for folder_name in folders:
+        accumulated.append(folder_name)
+        encoded_path = '/'.join(quote(part, safe='') for part in accumulated)
+        endpoint = f"{config['base_url']}/users/{encoded_owner}/drive/root:/{encoded_path}"
+        try:
+            parent = _graph_request('GET', endpoint, token, operation=f'consultar carpeta {folder_name}')
+        except Microsoft365GraphError as exc:
+            if exc.graph_status_code != 404:
+                raise
+            parent_id = quote(str(parent.get('id') or ''), safe='')
+            try:
+                parent = _graph_request(
+                    'POST',
+                    f"{config['base_url']}/users/{encoded_owner}/drive/items/{parent_id}/children",
+                    token,
+                    body={
+                        'name': folder_name,
+                        'folder': {},
+                        '@microsoft.graph.conflictBehavior': 'fail',
+                    },
+                    operation=f'crear carpeta {folder_name}',
+                )
+            except Microsoft365GraphError as create_exc:
+                if create_exc.graph_status_code != 409:
+                    raise
+                parent = _graph_request('GET', endpoint, token, operation=f'consultar carpeta {folder_name}')
+
+
+def _graph_binary_request(
+    method: str, url: str, token: str, content: bytes, *, operation: str,
+) -> dict[str, Any]:
+    request = Request(
+        url,
+        data=content,
+        headers={
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/json',
+            'Content-Type': 'application/octet-stream',
+        },
+        method=method,
+    )
+    try:
+        with urlopen(request, timeout=60) as response:
+            raw = response.read().decode('utf-8')
+    except HTTPError as exc:
+        detail = exc.read().decode('utf-8', errors='ignore')
+        raise Microsoft365GraphError(
+            f'Microsoft Graph rechazó la operación "{operation}" ({exc.code}): '
+            f'{_graph_error_message(detail) or exc.reason}',
+            graph_status_code=exc.code,
+        ) from exc
+    except URLError as exc:
+        raise Microsoft365GraphError(f'No fue posible conectar con Microsoft Graph: {exc.reason}') from exc
+    try:
+        return json.loads(raw) if raw else {}
+    except json.JSONDecodeError as exc:
+        raise Microsoft365GraphError('Microsoft Graph devolvió una respuesta inválida al cargar el archivo.') from exc
+
+
 def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
+    return _create_microsoft365_user_with_license(payload, license_kind='student')
+
+
+def create_microsoft365_teacher_user(payload: dict[str, Any]) -> dict[str, Any]:
+    return _create_microsoft365_user_with_license(payload, license_kind='teacher')
+
+
+def _create_microsoft365_user_with_license(
+    payload: dict[str, Any],
+    *,
+    license_kind: str,
+) -> dict[str, Any]:
     profile: dict[str, str] | None = None
-    student_license: dict[str, Any] | None = None
+    selected_license: dict[str, Any] | None = None
+    license_label = _license_display_name(license_kind)
 
     try:
         profile = build_intec_account_identity(
@@ -75,8 +214,8 @@ def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
         token = _get_access_token(config)
         _validate_graph_token_roles(token, config=config)
         subscribed_skus = _fetch_subscribed_skus(config, token)
-        student_license = _resolve_student_license(subscribed_skus)
-        _validate_requested_sku(payload, student_license['skuId'])
+        selected_license = _resolve_license(subscribed_skus, license_kind=license_kind)
+        _validate_requested_sku(payload, selected_license['skuId'], license_label)
         profile = _resolve_available_user_profile(config, token, profile)
 
         user_payload = {
@@ -98,15 +237,21 @@ def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
         )
         user_identifier = _graph_user_identifier(created_user, profile['correo'])
         current_user = _fetch_user_for_license(config, token, user_identifier)
-        if not _user_has_license(current_user, student_license['skuId']):
-            _assign_student_license(config, token, user_identifier, student_license['skuId'])
+        if not _user_has_license(current_user, selected_license['skuId']):
+            _assign_microsoft365_license(
+                config,
+                token,
+                user_identifier,
+                selected_license['skuId'],
+                license_label,
+            )
         verified_user = _fetch_user_for_license(config, token, user_identifier)
 
         _record_microsoft365_audit(
             correo=profile['correo'],
-            accion='crear_usuario_microsoft365',
+            accion=f'crear_usuario_microsoft365_{license_kind}',
             estado='ok',
-            sku_id=student_license['skuId'],
+            sku_id=selected_license['skuId'],
             mensaje_error='',
         )
 
@@ -117,7 +262,8 @@ def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
             'surname': profile['apellidos'],
             'mailNickname': profile['alias'],
             'usageLocation': config['usage_location'],
-            'license': _license_summary(student_license),
+            'license': _license_summary(selected_license),
+            'licenseKind': license_kind,
             'accountCreated': created_new_user,
             'emailCollisionResolved': bool(profile.get('alias_suffix')),
             'baseCorreo': profile.get('correo_base') or profile['correo'],
@@ -127,9 +273,9 @@ def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
     except Microsoft365Error as exc:
         _record_microsoft365_audit(
             correo=(profile or {}).get('correo') or str(payload.get('correo') or payload.get('email') or '').strip(),
-            accion='crear_usuario_microsoft365',
+            accion=f'crear_usuario_microsoft365_{license_kind}',
             estado='error',
-            sku_id=(student_license or {}).get('skuId') or '',
+            sku_id=(selected_license or {}).get('skuId') or '',
             mensaje_error=str(exc),
         )
         raise
@@ -143,6 +289,17 @@ def get_student_license_summary() -> dict[str, Any]:
     student_license = _resolve_student_license(subscribed_skus)
     summary = _license_summary(student_license)
     summary['mensaje'] = 'Esta es la licencia que se usara para estudiantes.'
+    return summary
+
+
+def get_teacher_license_summary() -> dict[str, Any]:
+    config = _graph_config()
+    token = _get_access_token(config)
+    _validate_graph_token_roles(token, require_create=False, config=config)
+    subscribed_skus = _fetch_subscribed_skus(config, token)
+    teacher_license = _resolve_teacher_license(subscribed_skus)
+    summary = _license_summary(teacher_license)
+    summary['mensaje'] = 'Esta es la licencia que se usara para profesores.'
     return summary
 
 
@@ -371,7 +528,17 @@ def _fetch_subscribed_skus(config: dict[str, str], token: str) -> list[dict[str,
 
 
 def _resolve_student_license(subscribed_skus: list[dict[str, Any]]) -> dict[str, Any]:
-    configured_sku_id = str(os.getenv('MICROSOFT_STUDENT_LICENSE_SKU_ID') or '').strip()
+    return _resolve_license(subscribed_skus, license_kind='student')
+
+
+def _resolve_teacher_license(subscribed_skus: list[dict[str, Any]]) -> dict[str, Any]:
+    return _resolve_license(subscribed_skus, license_kind='teacher')
+
+
+def _resolve_license(subscribed_skus: list[dict[str, Any]], *, license_kind: str) -> dict[str, Any]:
+    env_prefix = _license_env_prefix(license_kind)
+    display_name = _license_display_name(license_kind)
+    configured_sku_id = str(os.getenv(f'{env_prefix}_SKU_ID') or '').strip()
     if configured_sku_id:
         selected = next(
             (
@@ -383,30 +550,32 @@ def _resolve_student_license(subscribed_skus: list[dict[str, Any]]) -> dict[str,
         )
         if not selected:
             raise Microsoft365ConfigError(
-                'MICROSOFT_STUDENT_LICENSE_SKU_ID no existe en subscribedSkus.'
+                f'{env_prefix}_SKU_ID no existe en subscribedSkus.'
             )
-        if _is_staff_license(selected):
+        if license_kind == 'student' and _is_staff_license(selected):
             raise Microsoft365ConfigError(
-                'MICROSOFT_STUDENT_LICENSE_SKU_ID corresponde a una licencia de profesores y no se puede usar.'
+                f'{env_prefix}_SKU_ID corresponde a una licencia de profesores y no se puede usar para estudiantes.'
+            )
+        if license_kind == 'teacher' and not _is_teacher_license(selected):
+            raise Microsoft365ConfigError(
+                f'{env_prefix}_SKU_ID no parece corresponder a Office 365 A1 para profesores.'
             )
         return selected
 
-    keyword = str(os.getenv('MICROSOFT_STUDENT_LICENSE_KEYWORD') or DEFAULT_STUDENT_LICENSE_KEYWORD).strip().upper()
+    keyword = str(os.getenv(f'{env_prefix}_KEYWORD') or _default_license_keyword(license_kind)).strip().upper()
     matches = [
         sku
         for sku in subscribed_skus
         if keyword in str(sku.get('skuPartNumber') or '').upper()
-        and not _is_staff_license(sku)
+        and (license_kind != 'student' or not _is_staff_license(sku))
+        and (license_kind != 'teacher' or _is_teacher_license(sku))
     ]
 
     if not matches:
-        display_name = str(
-            os.getenv('MICROSOFT_STUDENT_LICENSE_DISPLAY_NAME') or DEFAULT_STUDENT_LICENSE_DISPLAY_NAME
-        ).strip()
-        raise Microsoft365ConfigError(f'No se encontro la licencia {display_name}')
+        raise Microsoft365ConfigError(f'No se encontró la licencia {display_name}')
 
     preferred_part_number = str(
-        os.getenv('MICROSOFT_STUDENT_LICENSE_SKU_PART_NUMBER') or DEFAULT_STUDENT_LICENSE_SKU_PART_NUMBER
+        os.getenv(f'{env_prefix}_SKU_PART_NUMBER') or _default_license_part_number(license_kind)
     ).strip().upper()
     if preferred_part_number:
         exact_matches = [
@@ -419,22 +588,22 @@ def _resolve_student_license(subscribed_skus: list[dict[str, Any]]) -> dict[str,
 
     if len(matches) > 1:
         raise Microsoft365ConfigError(
-            'Se encontraron varias licencias de estudiantes. Configura MICROSOFT_STUDENT_LICENSE_SKU_ID '
-            'o MICROSOFT_STUDENT_LICENSE_SKU_PART_NUMBER manualmente.'
+            f'Se encontraron varias licencias para {display_name}. Configura {env_prefix}_SKU_ID '
+            f'o {env_prefix}_SKU_PART_NUMBER manualmente.'
         )
 
     return matches[0]
 
 
-def _validate_requested_sku(payload: dict[str, Any], student_sku_id: str) -> None:
+def _validate_requested_sku(payload: dict[str, Any], expected_sku_id: str, license_label: str) -> None:
     requested_sku = _first_non_empty(
         payload.get('skuId'),
         payload.get('licenseSkuId'),
         payload.get('assignedLicenseSkuId'),
     )
-    if requested_sku and str(requested_sku).strip().lower() != str(student_sku_id).strip().lower():
+    if requested_sku and str(requested_sku).strip().lower() != str(expected_sku_id).strip().lower():
         raise Microsoft365ValidationError(
-            'No se permite asignar una licencia distinta a Office 365 A1 para estudiantes.'
+            f'No se permite asignar una licencia distinta a {license_label}.'
         )
 
 
@@ -555,7 +724,13 @@ def _user_has_license(user_payload: dict[str, Any], sku_id: str) -> bool:
     return any(str(row.get('skuId') or '').strip().lower() == expected for row in assigned if isinstance(row, dict))
 
 
-def _assign_student_license(config: dict[str, str], token: str, user_identifier: str, sku_id: str) -> None:
+def _assign_microsoft365_license(
+    config: dict[str, str],
+    token: str,
+    user_identifier: str,
+    sku_id: str,
+    license_label: str,
+) -> None:
     _graph_request_with_retry(
         'POST',
         f"{config['base_url']}/users/{quote(user_identifier, safe='')}/assignLicense",
@@ -568,7 +743,7 @@ def _assign_student_license(config: dict[str, str], token: str, user_identifier:
             ],
             'removeLicenses': [],
         },
-        operation='asignar licencia Office 365 A1 para estudiantes',
+        operation=f'asignar licencia {license_label}',
         retry_statuses={404},
     )
 
@@ -738,9 +913,42 @@ def _is_staff_license(sku: dict[str, Any]) -> bool:
     return any(keyword in part_number for keyword in EXCLUDED_STAFF_LICENSE_KEYWORDS)
 
 
+def _is_teacher_license(sku: dict[str, Any]) -> bool:
+    part_number = str(sku.get('skuPartNumber') or '').upper()
+    return any(keyword in part_number for keyword in TEACHER_LICENSE_KEYWORDS)
+
+
+def _license_env_prefix(license_kind: str) -> str:
+    if license_kind == 'teacher':
+        return 'MICROSOFT_TEACHER_LICENSE'
+    return 'MICROSOFT_STUDENT_LICENSE'
+
+
+def _license_display_name(license_kind: str) -> str:
+    if license_kind == 'teacher':
+        return str(
+            os.getenv('MICROSOFT_TEACHER_LICENSE_DISPLAY_NAME') or DEFAULT_TEACHER_LICENSE_DISPLAY_NAME
+        ).strip()
+    return str(
+        os.getenv('MICROSOFT_STUDENT_LICENSE_DISPLAY_NAME') or DEFAULT_STUDENT_LICENSE_DISPLAY_NAME
+    ).strip()
+
+
+def _default_license_keyword(license_kind: str) -> str:
+    if license_kind == 'teacher':
+        return DEFAULT_TEACHER_LICENSE_KEYWORD
+    return DEFAULT_STUDENT_LICENSE_KEYWORD
+
+
+def _default_license_part_number(license_kind: str) -> str:
+    if license_kind == 'teacher':
+        return DEFAULT_TEACHER_LICENSE_SKU_PART_NUMBER
+    return DEFAULT_STUDENT_LICENSE_SKU_PART_NUMBER
+
+
 def _validate_domain_email(email: str, domain: str) -> None:
     if not email or '@' not in email:
-        raise Microsoft365ValidationError('El correo institucional es invalido.')
+        raise Microsoft365ValidationError('El correo institucional es inválido.')
     if not email.lower().endswith(f'@{domain.lower()}'):
         raise Microsoft365ValidationError(f'El correo debe pertenecer al dominio @{domain}.')
 

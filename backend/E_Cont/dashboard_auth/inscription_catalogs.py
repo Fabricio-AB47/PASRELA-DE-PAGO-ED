@@ -25,11 +25,17 @@ def fetch_inscription_catalogs() -> dict[str, Any]:
     carreras = _fetch_carreras(include_inactive=False)
     periodos = _fetch_periodos()
     cursos_por_carrera = _fetch_cursos_por_carrera(include_inactive=False)
+    paralelos_por_materia = _fetch_paralelos_por_materia()
+    paralelos = _fetch_paralelos()
+    jornadas = _fetch_jornadas()
 
     return {
         'carreras': carreras,
         'periodos': periodos,
         'cursos_por_carrera': cursos_por_carrera,
+        'paralelos_por_materia': paralelos_por_materia,
+        'paralelos': paralelos,
+        'jornadas': jornadas,
     }
 
 
@@ -62,7 +68,7 @@ def update_carrera_status(payload: dict[str, Any]) -> dict[str, Any]:
         updated = cursor.rowcount
 
     if updated <= 0:
-        raise AcademicCatalogError('No se encontro la carrera seleccionada.')
+        raise AcademicCatalogError('No se encontró la carrera seleccionada.')
 
     return {
         'cod_anio_basica': cod_anio_basica,
@@ -102,7 +108,7 @@ def upsert_pensum_entry(payload: dict[str, Any]) -> dict[str, Any]:
     if len(tipo_materia) > 1:
         raise AcademicCatalogError('La categoria de la materia debe tener un solo caracter.')
     if len(cod_materia) > 50:
-        raise AcademicCatalogError('El codigo alterno de materia no puede superar 50 caracteres.')
+        raise AcademicCatalogError('El código alterno de materia no puede superar 50 caracteres.')
     if len(secuencia_materia) > 50:
         raise AcademicCatalogError('La secuencia de materia no puede superar 50 caracteres.')
     if modalidad_valor not in {'presencial', 'online'}:
@@ -276,7 +282,7 @@ def update_pensum_status(payload: dict[str, Any]) -> dict[str, Any]:
         updated = cursor.rowcount
 
     if updated <= 0:
-        raise AcademicCatalogError('No se encontro la materia seleccionada en PENSUM.')
+        raise AcademicCatalogError('No se encontró la materia seleccionada en PENSUM.')
 
     return {
         'cod_anio_basica': cod_anio_basica,
@@ -398,7 +404,7 @@ def _fetch_cursos_por_carrera(include_inactive: bool = False) -> dict[str, list[
                 'monto_calculado': str(row.get('monto_calculado') or '0.00'),
                 'unidad_organiza': str(row.get('unidad_organiza') or '').strip(),
                 'tipo_materia': str(row.get('tipo_materia') or '').strip(),
-                'categoria': str(row.get('categoria') or 'Sin categoria'),
+                'categoria': str(row.get('categoria') or 'Sin categoría'),
                 'creditos': str(row.get('creditos') or '0').strip(),
                 'num_malla': str(row.get('num_malla') or '').strip(),
                 'cod_materia': str(row.get('cod_materia') or '').strip(),
@@ -410,6 +416,192 @@ def _fetch_cursos_por_carrera(include_inactive: bool = False) -> dict[str, list[
                 'es_activo': bool(row.get('es_activo')),
             }
         )
+
+    return grouped
+
+
+def _fetch_paralelos() -> list[dict[str, str]]:
+    rows = _fetch_all(
+        """
+        SELECT codigo, paralelo, fuente
+        FROM (
+            SELECT
+                CAST(codigo_paralelo AS varchar(20)) AS codigo,
+                UPPER(LTRIM(RTRIM(ISNULL(nombre_paralelo, '')))) AS paralelo,
+                'Paralelo' AS fuente,
+                TRY_CONVERT(int, codigo_paralelo) AS orden
+            FROM dbo.Paralelo
+            WHERE LTRIM(RTRIM(ISNULL(nombre_paralelo, ''))) <> ''
+              AND ISNULL(activo, 1) = 1
+
+            UNION ALL
+
+            SELECT
+                CAST(num AS varchar(20)) AS codigo,
+                UPPER(LTRIM(RTRIM(ISNULL(paralelo, '')))) AS paralelo,
+                'PARALELOS' AS fuente,
+                TRY_CONVERT(int, num) AS orden
+            FROM dbo.PARALELOS
+            WHERE LTRIM(RTRIM(ISNULL(paralelo, ''))) <> ''
+        ) P
+        ORDER BY
+            CASE WHEN fuente = 'Paralelo' THEN 0 ELSE 1 END,
+            orden ASC,
+            paralelo ASC
+        """,
+        [],
+    )
+    paralelos: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        paralelo = str(row.get('paralelo') or '').strip().upper()
+        if not paralelo or paralelo in seen:
+            continue
+        seen.add(paralelo)
+        paralelos.append(
+            {
+                'codigo': str(row.get('codigo') or '').strip(),
+                'paralelo': paralelo,
+                'fuente': str(row.get('fuente') or '').strip(),
+            }
+        )
+    return paralelos
+
+
+def _fetch_jornadas() -> list[dict[str, str]]:
+    rows = _fetch_all(
+        """
+        SELECT
+            CAST(NumJ AS varchar(20)) AS codigo_jornada,
+            LTRIM(RTRIM(ISNULL(DetalleJ, ''))) AS jornada,
+            CAST(ISNULL(codmodalidad, 0) AS varchar(20)) AS cod_modalidad
+        FROM dbo.JORNADA
+        WHERE LTRIM(RTRIM(ISNULL(DetalleJ, ''))) <> ''
+        ORDER BY NumJ ASC
+        """,
+        [],
+    )
+    return [
+        {
+            'codigo_jornada': str(row.get('codigo_jornada') or '').strip(),
+            'jornada': str(row.get('jornada') or '').strip(),
+            'cod_modalidad': str(row.get('cod_modalidad') or '').strip(),
+        }
+        for row in rows
+        if str(row.get('codigo_jornada') or '').strip()
+    ]
+
+
+def _fetch_paralelos_por_materia() -> dict[str, list[dict[str, str]]]:
+    rows = _fetch_all(
+        """
+        WITH ParalelosBase AS (
+            SELECT
+                CAST(CE.cod_anio_Basica AS varchar(20)) AS cod_anio_basica,
+                CAST(CE.codigo_materia AS varchar(50)) AS codigo_materia,
+                CAST(CE.codigo_periodo AS varchar(20)) AS codigo_periodo,
+                UPPER(LTRIM(RTRIM(ISNULL(CE.paralelo, '')))) AS paralelo,
+                CAST(ISNULL(CE.NumGrupo, 1) AS varchar(20)) AS cod_jornada,
+                '' AS jornada,
+                COUNT(DISTINCT CAST(CE.codigo_estud AS varchar(30))) AS total_estudiantes,
+                CAST(0 AS int) AS total_docentes
+            FROM dbo.CARRERAXESTUD CE
+            WHERE LTRIM(RTRIM(ISNULL(CE.paralelo, ''))) <> ''
+              AND CE.cod_anio_Basica IS NOT NULL
+              AND CE.codigo_materia IS NOT NULL
+              AND CE.codigo_periodo IS NOT NULL
+            GROUP BY
+                CE.cod_anio_Basica,
+                CE.codigo_materia,
+                CE.codigo_periodo,
+                UPPER(LTRIM(RTRIM(ISNULL(CE.paralelo, '')))),
+                CE.NumGrupo
+
+            UNION ALL
+
+            SELECT
+                CAST(CXD.cod_Anio_Basica AS varchar(20)) AS cod_anio_basica,
+                CAST(CXD.codigo_materia AS varchar(50)) AS codigo_materia,
+                CAST(CXD.codigo_periodo AS varchar(20)) AS codigo_periodo,
+                UPPER(LTRIM(RTRIM(ISNULL(CXD.Paralelo, '')))) AS paralelo,
+                CAST(ISNULL(CXD.Cod_Jornada, 0) AS varchar(20)) AS cod_jornada,
+                LTRIM(RTRIM(ISNULL(J.DetalleJ, ''))) AS jornada,
+                CAST(0 AS int) AS total_estudiantes,
+                COUNT(DISTINCT CAST(CXD.codigo_doc AS varchar(30))) AS total_docentes
+            FROM dbo.CARRERAXDOCENTE CXD
+            LEFT JOIN dbo.JORNADA J
+              ON CAST(J.NumJ AS varchar(20)) = CAST(CXD.Cod_Jornada AS varchar(20))
+            WHERE LTRIM(RTRIM(ISNULL(CXD.Paralelo, ''))) <> ''
+              AND CXD.cod_Anio_Basica IS NOT NULL
+              AND CXD.codigo_materia IS NOT NULL
+              AND CXD.codigo_periodo IS NOT NULL
+            GROUP BY
+                CXD.cod_Anio_Basica,
+                CXD.codigo_materia,
+                CXD.codigo_periodo,
+                UPPER(LTRIM(RTRIM(ISNULL(CXD.Paralelo, '')))),
+                CXD.Cod_Jornada,
+                LTRIM(RTRIM(ISNULL(J.DetalleJ, '')))
+        )
+        SELECT
+            cod_anio_basica,
+            codigo_materia,
+            codigo_periodo,
+            paralelo,
+            cod_jornada,
+            jornada,
+            SUM(total_estudiantes) AS total_estudiantes,
+            SUM(total_docentes) AS total_docentes
+        FROM ParalelosBase
+        GROUP BY
+            cod_anio_basica,
+            codigo_materia,
+            codigo_periodo,
+            paralelo,
+            cod_jornada,
+            jornada
+        ORDER BY
+            cod_anio_basica ASC,
+            codigo_materia ASC,
+            codigo_periodo DESC,
+            paralelo ASC,
+            cod_jornada ASC
+        """,
+        [],
+    )
+    grouped: dict[str, list[dict[str, str]]] = {}
+    seen: dict[str, set[str]] = {}
+
+    for row in rows:
+        career_code = str(row.get('cod_anio_basica') or '').strip()
+        subject_code = str(row.get('codigo_materia') or '').strip()
+        period_code = str(row.get('codigo_periodo') or '').strip()
+        paralelo = str(row.get('paralelo') or '').strip().upper()
+        if not career_code or not subject_code or not period_code or not paralelo:
+            continue
+
+        exact_key = f'{career_code}|{subject_code}|{period_code}'
+        subject_key = f'{career_code}|{subject_code}|*'
+        option_key = f"{paralelo}|{str(row.get('cod_jornada') or '').strip()}"
+
+        option = {
+            'paralelo': paralelo,
+            'cod_jornada': str(row.get('cod_jornada') or '').strip(),
+            'jornada': str(row.get('jornada') or '').strip(),
+            'codigo_periodo': period_code,
+            'total_estudiantes': str(row.get('total_estudiantes') or '0').strip(),
+            'total_docentes': str(row.get('total_docentes') or '0').strip(),
+        }
+
+        for key in (exact_key, subject_key):
+            if key not in grouped:
+                grouped[key] = []
+                seen[key] = set()
+            if option_key in seen[key]:
+                continue
+
+            seen[key].add(option_key)
+            grouped[key].append(option)
 
     return grouped
 
@@ -494,7 +686,7 @@ def _fetch_pensum_rows(include_inactive: bool = False) -> list[dict[str, Any]]:
     return pensum
 
 
-def _category_label(value: Any, fallback: str = 'Sin categoria') -> str:
+def _category_label(value: Any, fallback: str = 'Sin categoría') -> str:
     text = str(value or '').strip()
     return text or fallback
 
@@ -694,7 +886,7 @@ def _table_columns(table_name: str) -> list[str]:
 
 def _quote_identifier(identifier: str) -> str:
     if not identifier.replace('_', '').isalnum():
-        raise AcademicCatalogError('Nombre de columna invalido en el catalogo academico.')
+        raise AcademicCatalogError('Nombre de columna inválido en el catálogo académico.')
     return f'[{identifier}]'
 
 

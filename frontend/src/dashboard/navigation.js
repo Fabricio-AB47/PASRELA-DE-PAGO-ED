@@ -23,12 +23,77 @@ export const DASHBOARD_ROUTES = [
     description: 'Abre y cierra cortes para organizar matrículas, certificados y cargas Excel.',
   },
   {
+    id: 'course-students',
+    hash: '#course-students',
+    aliases: ['#admin-course-students'],
+    label: 'Estudiantes corte',
+    title: 'Estudiantes de corte',
+    description: 'Consulta estudiantes por corte y sincronízalos con educación continua.',
+  },
+  {
+    id: 'enrolled-students',
+    hash: '#enrolled-students',
+    aliases: ['#admin-enrolled-students', '#matriculados'],
+    label: 'Matriculados',
+    title: 'Estudiantes matriculados',
+    description: 'Consulta los estudiantes matriculados en educación continua por corte.',
+  },
+  {
+    id: 'attendance',
+    hash: '#attendance',
+    aliases: ['#admin-attendance', '#asistencia'],
+    label: 'Asistencia',
+    title: 'Asistencia',
+    description: 'Registra asistencia de estudiantes matriculados en educación continua por corte.',
+  },
+  {
+    id: 'admin-schedule',
+    hash: '#admin-schedule',
+    aliases: ['#admin-horario', '#horario-admin', '#schedule-admin'],
+    label: 'Horario',
+    title: 'Horario',
+    description: 'Crea horarios por corte y genera sesiones de clase.',
+  },
+  {
+    id: 'admin-teams',
+    hash: '#admin-teams',
+    aliases: ['#teams-admin', '#matricula-teams', '#admin-teams-enrollment'],
+    label: 'Teams',
+    title: 'Matrícula por Teams',
+    description: 'Matricula docentes y estudiantes en Teams usando el horario guardado.',
+  },
+  {
+    id: 'grade-transfer',
+    hash: '#grade-transfer',
+    aliases: ['#admin-grade-transfer', '#pase-notas'],
+    label: 'Pase de notas',
+    title: 'Pase de notas',
+    description: 'Registra una nota final y sincronízala en complemento e INTECBDD.',
+  },
+  {
+    id: 'certificate-template',
+    hash: '#certificate-template',
+    aliases: ['#admin-certificados', '#plantilla-certificado', '#certificado'],
+    label: 'Certificado',
+    title: 'Certificado',
+    description: 'Genera certificados por corte y administra la plantilla institucional.',
+  },
+  {
     id: 'payments',
     hash: '#payments',
     aliases: ['#admin-payments'],
     label: 'Pagos',
     title: 'Pagos',
-    description: 'Consulta transacciones y ejecuta anulaciones desde un módulo independiente.',
+    description: 'Consulta estudiantes, enlaces y movimientos registrados.',
+  },
+  {
+    id: 'payment-operations',
+    hash: '#payment-operations',
+    aliases: ['#operaciones-pagos', '#all-digital'],
+    parentId: 'payments',
+    label: 'Operaciones All Digital',
+    title: 'Operaciones All Digital',
+    description: 'Consulta y anula transacciones directamente con la pasarela.',
   },
   {
     id: 'bulk-enrollment',
@@ -38,7 +103,98 @@ export const DASHBOARD_ROUTES = [
     title: 'Matrícula académica',
     description: 'Procesa estudiantes por Excel o selección, matricula materias y envía credenciales INTEC.',
   },
+  {
+    id: 'teacher-entry',
+    hash: '#teacher-entry',
+    aliases: ['#admin-teacher-entry'],
+    label: 'Registro docente',
+    title: 'Registro docente',
+    description: 'Registra docentes y envía credenciales Microsoft 365 para profesores.',
+  },
+  {
+    id: 'teacher-enrollment',
+    hash: '#teacher-enrollment',
+    aliases: ['#admin-teacher-enrollment'],
+    label: 'Matrícula docente',
+    title: 'Matrícula docente',
+    description: 'Busca docentes ingresados por nombre o cédula y asígnalos a materias.',
+  },
+  {
+    id: 'teacher-attendance',
+    hash: '#teacher-attendance',
+    aliases: ['#asistencia-docente'],
+    label: 'Asistencia',
+    title: 'Asistencia',
+    description: 'Consulta el resumen de asistencia de los cursos asignados al docente.',
+  },
+  {
+    id: 'teacher-grades',
+    hash: '#teacher-grades',
+    aliases: ['#calificaciones-docente'],
+    label: 'Calificaciones',
+    title: 'Calificaciones',
+    description: 'Consulta el avance de calificaciones de los cursos asignados al docente.',
+  },
+  {
+    id: 'teacher-schedule',
+    hash: '#teacher-schedule',
+    aliases: ['#horario-docente'],
+    label: 'Horario',
+    title: 'Horario docente',
+    description: 'Carga horarios por corte para reflejarlos a estudiantes.',
+  },
+  {
+    id: 'student-schedule',
+    hash: '#student-schedule',
+    aliases: ['#horario-estudiante', '#horario'],
+    label: 'Horario',
+    title: 'Horario',
+    description: 'Consulta los horarios cargados por el docente para tus materias matriculadas.',
+  },
+  {
+    id: 'student-grades',
+    hash: '#student-grades',
+    aliases: ['#calificaciones-estudiante', '#certificados-estudiante', '#certificado'],
+    label: 'Calificaciones',
+    title: 'Calificaciones',
+    description: 'Consulta tus notas en modo lectura y gestiona el certificado de aprobación.',
+  },
 ]
+
+const TEACHER_ADMIN_ROUTE_IDS = new Set(['teacher-entry', 'teacher-enrollment'])
+const TEACHER_PANEL_ROUTE_IDS = new Set(['teacher-attendance', 'teacher-grades', 'teacher-schedule'])
+const STUDENT_PANEL_ROUTE_IDS = new Set(['student-schedule', 'student-grades'])
+const FINANCIAL_ROUTE_IDS = new Set(['home', 'enrolled-students', 'payments', 'payment-operations'])
+
+export function normalizedRoleName(user) {
+  return String(user?.role?.name || '').trim().toUpperCase()
+}
+
+export function visibleRoutesForUser(user) {
+  if (user?.category === 'staff') {
+    if (normalizedRoleName(user) === 'FINANCIERO') {
+      return DASHBOARD_ROUTES.filter((route) => FINANCIAL_ROUTE_IDS.has(route.id))
+    }
+    return DASHBOARD_ROUTES.filter(
+      (route) => !TEACHER_PANEL_ROUTE_IDS.has(route.id) && !STUDENT_PANEL_ROUTE_IDS.has(route.id),
+    )
+  }
+  if (user?.category === 'teacher') {
+    return DASHBOARD_ROUTES.filter((route) => route.id === 'home' || TEACHER_PANEL_ROUTE_IDS.has(route.id))
+  }
+  if (user?.category === 'student') {
+    return DASHBOARD_ROUTES.filter((route) => route.id === 'home' || STUDENT_PANEL_ROUTE_IDS.has(route.id))
+  }
+  return DASHBOARD_ROUTES.filter((route) => route.id === 'home')
+}
+
+export function canAccessDashboardRoute(user, routeId) {
+  return visibleRoutesForUser(user).some((route) => route.id === routeId)
+}
+
+export function isTeacherAdminRoute(routeId) {
+  return TEACHER_ADMIN_ROUTE_IDS.has(routeId)
+}
 
 export function routeFromHash(hash) {
   const normalizedHash = hash || '#dashboard'

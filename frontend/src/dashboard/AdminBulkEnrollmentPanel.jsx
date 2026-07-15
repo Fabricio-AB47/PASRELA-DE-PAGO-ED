@@ -394,7 +394,7 @@ export default function AdminBulkEnrollmentPanel() {
             </label>
 
             <label className="field">
-              <span>Periodo *</span>
+              <span>Período *</span>
               <select
                 name="codigo_periodo"
                 value={bulkForm.codigo_periodo}
@@ -578,6 +578,10 @@ export default function AdminBulkEnrollmentPanel() {
             <div>
               <span>Exitosos</span>
               <strong>{bulkResult.exitosos}</strong>
+            </div>
+            <div>
+              <span>Omitidos</span>
+              <strong>{bulkResult.omitidos || 0}</strong>
             </div>
             <div>
               <span>Fallidos</span>

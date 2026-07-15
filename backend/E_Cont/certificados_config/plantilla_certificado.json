@@ -1,0 +1,31 @@
+{
+  "use_default_logo": true,
+  "show_complement_logos": true,
+  "default_background_id": "intec_background_default",
+  "backgrounds": [
+    {
+      "id": "intec_background_default",
+      "display_name": "Formato INTEC educación continua",
+      "filename": "background_certificado_intec.png",
+      "content_type": "image/png",
+      "size_bytes": 179215,
+      "enabled": true,
+      "built_in": true,
+      "created_at": ""
+    }
+  ],
+  "logos": [],
+  "cut_settings": {
+    "1": {
+      "template_type": "EDUCACION_CONTINUA",
+      "background_id": "intec_background_default",
+      "logo_ids": [],
+      "use_default_logo": true,
+      "show_complement_logos": true,
+      "updated_at": "2026-07-14T20:02:09+00:00",
+      "updated_by": "dir.ca@intec.edu.ec"
+    }
+  },
+  "updated_at": "2026-07-14T20:02:09+00:00",
+  "updated_by": "dir.ca@intec.edu.ec"
+}

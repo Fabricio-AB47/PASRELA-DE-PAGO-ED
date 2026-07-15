@@ -417,7 +417,7 @@ export default function AdminAcademicPanel() {
                       type="search"
                       value={careerSearch}
                       onChange={(event) => setCareerSearch(event.target.value)}
-                      placeholder="Codigo, carrera o categoria"
+                      placeholder="Código, carrera o categoría"
                     />
                   </label>
                   <label className="field">
@@ -426,7 +426,7 @@ export default function AdminAcademicPanel() {
                       value={careerCategoryFilter}
                       onChange={(event) => setCareerCategoryFilter(event.target.value)}
                     >
-                      <option value="all">Todas las categorias</option>
+                      <option value="all">Todas las categorías</option>
                       {careerCategories.map((category) => (
                         <option key={category} value={category}>
                           {category}
@@ -454,7 +454,7 @@ export default function AdminAcademicPanel() {
                   <table className="admin-table">
                     <thead>
                       <tr>
-                        <th>Codigo</th>
+                        <th>Código</th>
                         <th>Carrera</th>
                         <th>Categoria</th>
                         <th>Estado</th>
@@ -542,7 +542,7 @@ export default function AdminAcademicPanel() {
                       </select>
                     </label>
                     <label className="field">
-                      <span>Codigo materia</span>
+                      <span>Código materia</span>
                       <input
                         name="codigo_materia"
                         type="text"
@@ -554,7 +554,7 @@ export default function AdminAcademicPanel() {
                       />
                     </label>
                     <label className="field">
-                      <span>Codigo alterno</span>
+                      <span>Código alterno</span>
                       <input
                         name="cod_materia"
                         type="text"
@@ -653,7 +653,7 @@ export default function AdminAcademicPanel() {
                       <div className="rate-mode-header">
                         <div>
                           <h5 id="rate-mode-title">Valor por modalidad</h5>
-                          <p>Selecciona si el valor aplica para modalidad presencial u online.</p>
+                          <p>Selecciona si el valor aplica para modalidad presencial o en línea.</p>
                         </div>
                         <label className="field compact-filter">
                           <span>Modalidad</span>
@@ -663,7 +663,7 @@ export default function AdminAcademicPanel() {
                             onChange={handlePensumChange}
                           >
                             <option value="presencial">Presencial</option>
-                            <option value="online">Online</option>
+                            <option value="online">En línea</option>
                           </select>
                         </label>
                       </div>
@@ -683,7 +683,7 @@ export default function AdminAcademicPanel() {
                           />
                         </label>
                         <label className={`field ${pensumForm.modalidad_valor === 'online' ? '' : 'muted-field'}`}>
-                          <span>Valor hora online</span>
+                          <span>Valor hora en línea</span>
                           <input
                             name="valor_hora_virtual"
                             type="number"
@@ -786,7 +786,7 @@ export default function AdminAcademicPanel() {
                 type="search"
                 value={pensumSearch}
                 onChange={(event) => setPensumSearch(event.target.value)}
-                placeholder="Codigo, materia o categoria"
+                placeholder="Código, materia o categoría"
               />
             </label>
             <label className="field">
@@ -795,7 +795,7 @@ export default function AdminAcademicPanel() {
                 value={pensumCategoryFilter}
                 onChange={(event) => setPensumCategoryFilter(event.target.value)}
               >
-                <option value="all">Todas las categorias</option>
+                <option value="all">Todas las categorías</option>
                 {pensumCategories.map((category) => (
                   <option key={category} value={category}>
                     {category}
@@ -837,7 +837,7 @@ export default function AdminAcademicPanel() {
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Codigo</th>
+                  <th>Código</th>
                   <th>Materia</th>
                   <th>Categoria</th>
                   <th>Semestre</th>

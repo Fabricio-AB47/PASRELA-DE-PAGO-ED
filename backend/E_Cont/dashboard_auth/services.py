@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from django.contrib.auth.hashers import check_password, identify_hasher
+from django.utils.crypto import constant_time_compare
 from django.db import connection
 
 
@@ -58,7 +60,7 @@ def authenticate_user(identifier: str, password: str, scope: str = 'auto') -> Au
     clean_scope = (scope or 'auto').strip().lower()
 
     if clean_scope not in VALID_SCOPES:
-        raise InvalidScopeError('El tipo de acceso solicitado no es valido.')
+        raise InvalidScopeError('El tipo de acceso solicitado no es válido.')
 
     if not clean_identifier or not clean_password:
         raise AuthError('Debes enviar el usuario y la contraseña.')
@@ -81,7 +83,7 @@ def authenticate_user(identifier: str, password: str, scope: str = 'auto') -> Au
         if user is not None:
             return user
 
-    raise AuthError('No encontramos un usuario valido con esas credenciales.')
+    raise AuthError('No encontramos un usuario válido con esas credenciales.')
 
 
 def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
@@ -92,10 +94,10 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
             CorreoPersonal,
             CorreoIntec,
             Estado,
-            CAST(Periodo AS varchar(50)) AS Periodo
+            CAST(Periodo AS varchar(50)) AS Periodo,
+            Password AS stored_password
         FROM dbo.CorreosEstudIntec
-        WHERE Password = %s
-          AND (
+        WHERE (
               LOWER(LTRIM(RTRIM(ISNULL(CorreoPersonal, '')))) = LOWER(%s)
               OR LOWER(LTRIM(RTRIM(ISNULL(CorreoIntec, '')))) = LOWER(%s)
               OR LTRIM(RTRIM(CAST(codestud AS varchar(50)))) = %s
@@ -108,7 +110,11 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
             END,
             Periodo DESC
     """
-    rows = _fetch_all(query, [password, identifier, identifier, identifier, identifier, identifier])
+    rows = [
+        row
+        for row in _fetch_all(query, [identifier, identifier, identifier, identifier, identifier])
+        if _password_matches(row.get('stored_password'), password)
+    ]
     if not rows:
         return None
 
@@ -134,7 +140,7 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
         summary=[
             {'label': 'Matrícula', 'value': student_code},
             {'label': 'Correo INTEC', 'value': intec_email or 'No disponible'},
-            {'label': 'Periodo', 'value': _clean_text(row.get('Periodo')) or 'No disponible'},
+            {'label': 'Período', 'value': _clean_text(row.get('Periodo')) or 'No disponible'},
         ],
         modules=[
             {
@@ -155,15 +161,15 @@ def _find_student(identifier: str, password: str) -> AuthenticatedUser | None:
 
 def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
     query = """
-        SELECT TOP (1)
+        SELECT
             CAST(Codigo_Usuario AS varchar(50)) AS Codigo_Usuario,
             cedula,
             login,
             Estado,
-            CAST(tipo_usuario AS varchar(50)) AS tipo_usuario
+            CAST(tipo_usuario AS varchar(50)) AS tipo_usuario,
+            password AS stored_password
         FROM dbo.USUARIOS
-        WHERE password = %s
-          AND (
+        WHERE (
               LOWER(LTRIM(RTRIM(ISNULL(login, '')))) = LOWER(%s)
               OR LTRIM(RTRIM(ISNULL(cedula, ''))) = %s
               OR LTRIM(RTRIM(CAST(Codigo_Usuario AS varchar(50)))) = %s
@@ -175,13 +181,14 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
                 ELSE 2
             END
     """
-    row = _fetch_one(query, [password, identifier, identifier, identifier, identifier, identifier])
+    rows = _fetch_all(query, [identifier, identifier, identifier, identifier, identifier])
+    row = next((candidate for candidate in rows if _password_matches(candidate.get('stored_password'), password)), None)
     if row is None:
         return None
 
     status = _clean_text(row.get('Estado')) or 'Sin estado'
     if not _is_active_teacher(status):
-        raise InactiveUserError('La cuenta docente no esta activa para ingresar al dashboard.')
+        raise InactiveUserError('La cuenta docente no está activa para ingresar al dashboard.')
 
     teacher_login = _clean_text(row.get('login')) or identifier
     teacher_code = _clean_text(row.get('Codigo_Usuario')) or 'No disponible'
@@ -197,7 +204,7 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
         role_code=_to_int(row.get('tipo_usuario')),
         role_name='DOCENTE',
         summary=[
-            {'label': 'Codigo', 'value': teacher_code},
+            {'label': 'Código', 'value': teacher_code},
             {'label': 'Cédula', 'value': teacher_id},
             {'label': 'Tipo docente', 'value': _clean_text(row.get('tipo_usuario')) or 'No disponible'},
         ],
@@ -208,7 +215,7 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
             },
             {
                 'title': 'Seguimiento',
-                'description': 'Monitorea pagos pendientes, validaciones y confirmaciones dentro del ciclo academico.',
+                'description': 'Monitorea pagos pendientes, validaciones y confirmaciones dentro del ciclo académico.',
             },
             {
                 'title': 'Historial',
@@ -220,40 +227,52 @@ def _find_teacher(identifier: str, password: str) -> AuthenticatedUser | None:
 
 def _find_staff(identifier: str, password: str) -> AuthenticatedUser | None:
     query = """
-        SELECT TOP (1)
-            login,
-            nombres,
-            estado,
-            email,
-            CAST(id_usuarios AS varchar(50)) AS id_usuarios,
-            CAST(coordcarrera AS varchar(50)) AS coordcarrera,
-            CAST(codprovincia AS varchar(50)) AS codprovincia,
-            CAST(tipousuario AS varchar(50)) AS tipousuario,
-            tp_us
-        FROM dbo.USUARIO_SIS
-        WHERE password = %s
-          AND (
-              LOWER(LTRIM(RTRIM(ISNULL(login, '')))) = LOWER(%s)
-              OR LOWER(LTRIM(RTRIM(ISNULL(email, '')))) = LOWER(%s)
-              OR LTRIM(RTRIM(CAST(id_usuarios AS varchar(50)))) = %s
+        SELECT
+            S.login,
+            S.nombres,
+            S.estado,
+            S.email,
+            CAST(S.id_usuarios AS varchar(50)) AS id_usuarios,
+            CAST(S.coordcarrera AS varchar(50)) AS coordcarrera,
+            CAST(S.codprovincia AS varchar(50)) AS codprovincia,
+            NULLIF(LTRIM(RTRIM(S.tp_us)), '') AS tp_us,
+            RTRIM(TU.detalle_tipo_us) AS role_name,
+            S.password AS stored_password
+        FROM dbo.USUARIO_SIS AS S
+        LEFT JOIN dbo.TIPO_USUARIO AS TU
+          ON TU.Codigo_tipo_us = TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(S.tp_us)), ''))
+        WHERE (
+              LOWER(LTRIM(RTRIM(ISNULL(S.login, '')))) = LOWER(%s)
+              OR LOWER(LTRIM(RTRIM(ISNULL(S.email, '')))) = LOWER(%s)
+              OR LTRIM(RTRIM(CAST(S.id_usuarios AS varchar(50)))) = %s
           )
         ORDER BY
             CASE
-                WHEN LOWER(LTRIM(RTRIM(ISNULL(login, '')))) = LOWER(%s) THEN 0
-                WHEN LOWER(LTRIM(RTRIM(ISNULL(email, '')))) = LOWER(%s) THEN 1
+                WHEN LOWER(LTRIM(RTRIM(ISNULL(S.login, '')))) = LOWER(%s) THEN 0
+                WHEN LOWER(LTRIM(RTRIM(ISNULL(S.email, '')))) = LOWER(%s) THEN 1
                 ELSE 2
             END
     """
-    row = _fetch_one(query, [password, identifier, identifier, identifier, identifier, identifier])
+    rows = _fetch_all(
+        query,
+        [
+            identifier,
+            identifier,
+            identifier,
+            identifier,
+            identifier,
+        ],
+    )
+    row = next((candidate for candidate in rows if _password_matches(candidate.get('stored_password'), password)), None)
     if row is None:
         return None
 
     status = _clean_text(row.get('estado')) or 'Sin estado'
     if not _is_active_staff(status):
-        raise InactiveUserError('La cuenta administrativa no esta activa para ingresar al dashboard.')
+        raise InactiveUserError('La cuenta administrativa no está activa para ingresar al dashboard.')
 
     role_code = _resolve_staff_role_code(row)
-    role_name = _resolve_staff_role_name(role_code)
+    role_name = _clean_text(row.get('role_name')) or _resolve_staff_role_name(role_code)
     staff_login = _clean_text(row.get('login')) or identifier
     display_name = _clean_text(row.get('nombres')) or staff_login
     email = _clean_text(row.get('email')) or (staff_login if '@' in staff_login else None)
@@ -277,11 +296,8 @@ def _find_staff(identifier: str, password: str) -> AuthenticatedUser | None:
 
 
 def _resolve_staff_role_code(row: dict[str, Any]) -> int | None:
-    for value in (_clean_text(row.get('tp_us')), _clean_text(row.get('tipousuario'))):
-        parsed = _to_int(value)
-        if parsed and 1 <= parsed <= 9:
-            return parsed
-    return None
+    parsed = _to_int(row.get('tp_us'))
+    return parsed if parsed is not None and parsed > 0 else None
 
 
 def _resolve_staff_role_name(role_code: int | None) -> str:
@@ -324,11 +340,11 @@ def _staff_modules(role_name: str) -> list[dict[str, str]]:
         'ADMISIONES': [
             {'title': 'Prospectos', 'description': 'Gestiona cobros y confirmaciones vinculadas a nuevos ingresos.'},
             {'title': 'Documentos', 'description': 'Centraliza revisiones, incidencias y pasos de validacion.'},
-            {'title': 'Embudo comercial', 'description': 'Sigue conversiones por canal, sede y periodo.'},
+            {'title': 'Embudo comercial', 'description': 'Sigue conversiones por canal, sede y período.'},
         ],
         'RECTOR': [
             {'title': 'Vista ejecutiva', 'description': 'Resume indicadores criticos de pagos, cartera y operacion.'},
-            {'title': 'Tendencias', 'description': 'Compara periodos y lectura institucional consolidada.'},
+            {'title': 'Tendencias', 'description': 'Compara períodos y lectura institucional consolidada.'},
             {'title': 'Decisiones', 'description': 'Accede a focos de riesgo y oportunidades de mejora.'},
         ],
         'VICERRECTOR': [
@@ -338,21 +354,26 @@ def _staff_modules(role_name: str) -> list[dict[str, str]]:
         ],
         'SOPORTE': [
             {'title': 'Incidentes', 'description': 'Atiende errores, caídas y validaciones técnicas del sistema.'},
-            {'title': 'Bitacora', 'description': 'Consulta accesos, eventos y rastreo de transacciones.'},
+            {'title': 'Bitácora', 'description': 'Consulta accesos, eventos y rastreo de transacciones.'},
             {'title': 'Salud del sistema', 'description': 'Monitorea integraciones y conectividad operativa.'},
         ],
         'INVITADO_SOP': [
             {'title': 'Consulta tecnica', 'description': 'Revisa estados operativos con permisos restringidos.'},
-            {'title': 'Bitacora visible', 'description': 'Accede a eventos habilitados para soporte externo.'},
+            {'title': 'Bitácora visible', 'description': 'Accede a eventos habilitados para soporte externo.'},
             {'title': 'Seguimiento guiado', 'description': 'Da soporte a incidencias bajo supervision interna.'},
+        ],
+        'SECRETARIA': [
+            {'title': 'Gestión académica', 'description': 'Consulta y actualiza los procesos académicos habilitados para secretaría.'},
+            {'title': 'Matrículas', 'description': 'Da seguimiento a estudiantes, matrículas y documentación académica.'},
+            {'title': 'Certificados', 'description': 'Consulta el estado de certificados y solicitudes institucionales.'},
         ],
     }
     return modules.get(
         role_name,
         [
-            {'title': 'Resumen', 'description': 'Consulta la informacion habilitada segun tu cuenta administrativa.'},
+            {'title': 'Resumen', 'description': 'Consulta la información habilitada según tu cuenta administrativa.'},
             {'title': 'Actividad', 'description': 'Revisa movimientos y estado operativo del tablero.'},
-            {'title': 'Accesos', 'description': 'Explora las vistas activas segun tu configuracion.'},
+            {'title': 'Accesos', 'description': 'Explora las vistas activas según tu configuración.'},
         ],
     )
 
@@ -378,6 +399,20 @@ def _clean_text(value: Any) -> str | None:
     return text or None
 
 
+def _password_matches(stored_password: Any, supplied_password: str) -> bool:
+    stored = str(stored_password or '')
+    supplied = str(supplied_password or '')
+    if not stored or not supplied:
+        return False
+    try:
+        identify_hasher(stored)
+    except ValueError:
+        # Compatibilidad temporal con las tablas heredadas. Los registros deben
+        # migrarse a hashes de Django/Argon2 y luego eliminar esta rama.
+        return constant_time_compare(stored, supplied)
+    return check_password(supplied, stored)
+
+
 def _to_int(value: Any) -> int | None:
     clean_value = _clean_text(value)
     if clean_value is None:
@@ -390,7 +425,7 @@ def _to_int(value: Any) -> int | None:
 
 def _is_active_student(status: str) -> bool:
     normalized = status.strip().lower()
-    return normalized.startswith('activo') or normalized.startswith('e continua')
+    return normalized in {'a', 'd'} or normalized.startswith('activo') or normalized.startswith('e continua')
 
 
 def _select_active_student_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -407,7 +442,7 @@ def _build_student_inactive_message(rows: list[dict[str, Any]]) -> str:
 
     for row in rows:
         status = _clean_text(row.get('Estado')) or 'Sin estado'
-        period = _clean_text(row.get('Periodo')) or 'Sin periodo'
+        period = _clean_text(row.get('Periodo')) or 'Sin período'
         aperture = (status, period)
         if aperture in seen:
             continue
@@ -425,7 +460,8 @@ def _build_student_inactive_message(rows: list[dict[str, Any]]) -> str:
 
 
 def _is_active_teacher(status: str) -> bool:
-    return status.lower() == 'activo'
+    normalized = status.strip().lower()
+    return normalized in {'a', 'activo'}
 
 
 def _is_active_staff(status: str) -> bool:

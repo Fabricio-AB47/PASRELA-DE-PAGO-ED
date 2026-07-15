@@ -1,11 +1,14 @@
 .env
 .env.*
+!.env.example
 .venv/
 __pycache__/
 *.py[cod]
 backend/logs/
+/backend/runserver.*.log
 /frontend/vite-dev.err.log
 /frontend/vite-dev.out.log
 frontend/dist/
 frontend/node_modules/
 frontend/vite-dev.*.log
+/vouchers_educontinua/

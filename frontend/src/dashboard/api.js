@@ -6,7 +6,7 @@ export function adminFetch(url, options = {}) {
   if (!sessionToken) {
     clearStoredSession()
     window.location.replace('/login/')
-    throw new Error('Debes iniciar sesión para acceder al dashboard administrativo.')
+    throw new Error('Debes iniciar sesión para acceder al dashboard.')
   }
 
   const headers = new Headers(options.headers || {})
@@ -17,7 +17,7 @@ export function adminFetch(url, options = {}) {
     ...options,
     headers,
   }).then((response) => {
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       clearStoredSession()
       window.location.replace('/login/')
     }

@@ -759,7 +759,7 @@ textarea {
 }
 
 .dashboard-layout {
-  padding: 28px;
+  padding: clamp(16px, 1.45vw, 24px);
   background:
     radial-gradient(circle at top left, rgba(var(--fintec-celeste-rgb), 0.32), transparent 24%),
     linear-gradient(180deg, var(--fintec-blanco) 0%, rgba(var(--fintec-celeste-rgb), 0.18) 100%);
@@ -770,7 +770,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 22px;
+  margin-bottom: 14px;
 }
 
 .dashboard-brand-heading {
@@ -780,50 +780,255 @@ textarea {
   min-width: 0;
 }
 
+.dashboard-brand-copy {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: clamp(58px, 4.6vw, 72px);
+}
+
+.dashboard-brand-copy .eyebrow {
+  position: absolute;
+  top: -0.95rem;
+  left: 0;
+  white-space: nowrap;
+}
+
 .dashboard-logo {
-  width: 138px;
+  width: clamp(116px, 7.4vw, 138px);
   height: auto;
   opacity: 0.76;
   flex: 0 0 auto;
+}
+
+.dashboard-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notification-center {
+  position: relative;
+  z-index: 80;
+}
+
+.notification-trigger {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(var(--fintec-celeste-rgb), 0.28);
+  color: var(--fintec-rojo);
+  cursor: pointer;
+}
+
+.notification-trigger svg {
+  width: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.notification-count {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border: 2px solid white;
+  border-radius: 999px;
+  background: var(--fintec-rojo);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.notification-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(410px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.25);
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 20px 55px rgba(var(--fintec-gris-oscuro-rgb), 0.2);
+}
+
+.notification-popover > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(var(--fintec-gris-rgb), 0.22);
+}
+
+.notification-popover header div,
+.notification-item > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.notification-popover header span,
+.notification-item time {
+  color: var(--text-soft);
+  font-size: 0.75rem;
+}
+
+.notification-popover header button {
+  border: 0;
+  background: transparent;
+  color: var(--fintec-rojo);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.notification-list {
+  max-height: 430px;
+  overflow-y: auto;
+}
+
+.notification-item {
+  display: grid;
+  grid-template-columns: 9px 1fr;
+  gap: 10px;
+  padding: 14px 18px;
+  color: var(--text-strong);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(var(--fintec-gris-rgb), 0.16);
+}
+
+.notification-item.is-unread {
+  background: rgba(var(--fintec-celeste-rgb), 0.18);
+}
+
+.notification-item small {
+  color: var(--text-soft);
+  line-height: 1.35;
+}
+
+.notification-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.notification-item.is-unread .notification-dot {
+  background: var(--fintec-rojo);
+}
+
+.notification-empty {
+  margin: 0;
+  padding: 24px 18px;
+  color: var(--text-soft);
+  text-align: center;
 }
 
 .dashboard-nav {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 22px;
+  margin-bottom: 14px;
   padding: 10px;
   border-radius: 999px;
   background: rgba(var(--fintec-blanco-rgb), 0.92);
   box-shadow: 0 18px 36px rgba(var(--fintec-gris-oscuro-rgb), 0.08);
 }
 
-.dashboard-nav a {
+.dashboard-nav a,
+.dashboard-nav-menu summary {
   display: inline-flex;
   align-items: center;
-  min-height: 42px;
-  padding: 10px 16px;
+  min-height: 38px;
+  padding: 8px 15px;
+  border: 0;
   border-radius: 999px;
+  background: transparent;
   color: var(--fintec-rojo);
+  cursor: pointer;
+  font: inherit;
   text-decoration: none;
   font-weight: 700;
 }
 
 .dashboard-nav a:hover,
 .dashboard-nav a:focus-visible,
-.dashboard-nav a.is-active {
+.dashboard-nav a.is-active,
+.dashboard-nav-menu summary:hover,
+.dashboard-nav-menu summary:focus-visible,
+.dashboard-nav-menu.is-active summary,
+.dashboard-nav-menu[open] summary {
   background: rgba(var(--fintec-celeste-rgb), 0.24);
   outline: none;
 }
 
+.dashboard-nav-menu {
+  position: relative;
+}
+
+.dashboard-nav-menu summary {
+  list-style: none;
+}
+
+.dashboard-nav-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.dashboard-nav-menu summary::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  margin-left: 10px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.16s ease;
+}
+
+.dashboard-nav-menu[open] summary::after {
+  transform: rotate(225deg) translateY(-2px);
+}
+
+.dashboard-nav-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 230px;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.08);
+  border-radius: 18px;
+  background: rgba(var(--fintec-blanco-rgb), 0.98);
+  box-shadow: 0 18px 36px rgba(var(--fintec-gris-oscuro-rgb), 0.14);
+}
+
+.dashboard-nav-dropdown a {
+  justify-content: flex-start;
+  border-radius: 14px;
+}
+
 .dashboard-title {
-  margin: 10px 0 0;
+  margin: 0;
   color: var(--text-strong);
-  font-size: 4rem;
+  font-size: clamp(3rem, 3.55vw, 4rem);
 }
 
 .ghost-button {
-  padding: 14px 18px;
+  padding: 12px 18px;
   border-radius: 999px;
   background: rgba(var(--fintec-celeste-rgb), 0.24);
   color: var(--fintec-rojo);
@@ -831,8 +1036,8 @@ textarea {
 
 .dashboard-shell {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 22px;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
   min-width: 0;
 }
 
@@ -847,20 +1052,20 @@ textarea {
 }
 
 .dashboard-sidebar {
-  padding: 22px;
+  padding: 18px;
 }
 
 .identity-card {
-  padding: 22px;
-  border-radius: 24px;
+  padding: 20px;
+  border-radius: 22px;
   background: linear-gradient(180deg, var(--fintec-rojo) 0%, rgba(var(--fintec-rojo-rgb), 0.88) 100%);
   color: var(--fintec-blanco);
 }
 
 .identity-card h2 {
-  margin-top: 12px;
+  margin-top: 10px;
   color: var(--fintec-blanco);
-  font-size: 1.5rem;
+  font-size: 1.36rem;
 }
 
 .identity-card p {
@@ -878,14 +1083,14 @@ textarea {
 }
 
 .identity-meta {
-  margin: 18px 0 0;
+  margin: 14px 0 0;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .identity-meta div {
-  padding: 16px 18px;
-  border-radius: 20px;
+  padding: 12px 16px;
+  border-radius: 18px;
   background: var(--surface-alt);
 }
 
@@ -897,32 +1102,32 @@ textarea {
 }
 
 .identity-meta dd {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--text-strong);
   font-weight: 700;
 }
 
 .dashboard-main {
   display: grid;
-  gap: 20px;
+  gap: 14px;
   min-width: 0;
 }
 
 .hero-card {
-  padding: 28px;
+  padding: 22px 28px;
   background:
     radial-gradient(circle at top right, rgba(var(--fintec-celeste-rgb), 0.34), transparent 18%),
     linear-gradient(180deg, rgba(var(--fintec-blanco-rgb), 0.98), rgba(var(--fintec-blanco-rgb), 0.92));
 }
 
 .hero-card h2 {
-  margin-top: 14px;
-  font-size: 2.2rem;
+  margin-top: 10px;
+  font-size: 2rem;
 }
 
 .hero-card p {
   max-width: 42rem;
-  margin-top: 10px;
+  margin-top: 8px;
   color: var(--text-soft);
 }
 
@@ -961,26 +1166,565 @@ textarea {
 
 .dashboard-home {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .dashboard-module-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .dashboard-module-card {
-  min-height: 150px;
+  min-height: 112px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
+  gap: 14px;
   min-width: 0;
 }
 
 .dashboard-module-card h3 {
   margin: 0;
+}
+
+.module-card.dashboard-module-card {
+  padding: 18px;
+}
+
+.dashboard-module-card p {
+  margin-top: 8px;
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.dashboard-module-card .compact-button {
+  align-self: center;
+  flex: 0 0 auto;
+}
+
+.teacher-overview {
+  display: grid;
+  gap: 18px;
+}
+
+.teacher-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.teacher-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.teacher-panel-card {
+  display: grid;
+  gap: 18px;
+}
+
+.teacher-panel-table td strong,
+.teacher-panel-table td span {
+  display: block;
+}
+
+.teacher-panel-table td strong {
+  margin-bottom: 4px;
+}
+
+.teacher-panel-table td span {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.teacher-panel-empty {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.student-certificate-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.student-certificate-actions span {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.student-certificate-actions span.is-pending {
+  color: var(--fintec-rojo);
+  font-weight: 700;
+}
+
+.student-certificate-preview-modal {
+  width: min(1080px, calc(100vw - 28px));
+  height: calc(100vh - 28px);
+  max-height: none;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.student-certificate-preview-modal .career-modal-header {
+  align-items: center;
+  padding-bottom: 8px;
+}
+
+.student-certificate-preview-modal .career-modal-header h4 {
+  font-size: 1.35rem;
+}
+
+.student-certificate-preview-modal .career-modal-header p {
+  max-width: 700px;
+  margin-top: 4px;
+  font-size: 0.94rem;
+  line-height: 1.35;
+}
+
+.student-certificate-preview-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.student-certificate-preview-meta div {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(var(--fintec-celeste-rgb), 0.22);
+}
+
+.student-certificate-preview-meta span,
+.student-certificate-preview-meta strong {
+  display: block;
+}
+
+.student-certificate-preview-meta span {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.student-certificate-preview-meta strong {
+  margin-top: 4px;
+  color: var(--fintec-rojo);
+  overflow-wrap: anywhere;
+}
+
+.student-certificate-preview-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--fintec-blanco);
+}
+
+.student-certificate-preview-image {
+  width: auto;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: block;
+  justify-self: center;
+  object-fit: contain;
+  border: 0;
+  border-radius: 0;
+  background: var(--fintec-blanco);
+}
+
+.student-certificate-pending {
+  margin: 14px 0 0;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(var(--fintec-rojo-rgb), 0.1);
+  color: var(--fintec-rojo);
+  font-weight: 800;
+}
+
+.student-certificate-pending.is-top {
+  margin: 0;
+  padding: 12px;
+  text-align: center;
+}
+
+.table-link-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--fintec-rojo);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.certificate-template-form {
+  gap: 14px;
+}
+
+.certificate-template-options,
+.certificate-logo-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content)) minmax(220px, 1fr) max-content;
+  align-items: center;
+  gap: 12px;
+}
+
+.certificate-template-options {
+  grid-template-columns: repeat(2, minmax(0, max-content));
+}
+
+.check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fintec-rojo);
+  font-weight: 700;
+}
+
+.check-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--fintec-rojo);
+}
+
+.certificate-logo-list {
+  display: grid;
+  gap: 10px;
+}
+
+.certificate-cut-logo-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.14);
+}
+
+.certificate-cut-logo-option {
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--fintec-blanco);
+}
+
+.certificate-cut-logo-option span {
+  overflow-wrap: anywhere;
+}
+
+.certificate-logo-row {
+  padding: 12px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.14);
+}
+
+.certificate-logo-row.is-pending {
+  background: rgba(var(--fintec-rojo-rgb), 0.07);
+}
+
+.certificate-logo-meta strong,
+.certificate-logo-meta span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.certificate-logo-meta strong {
+  color: var(--fintec-rojo);
+}
+
+.certificate-logo-meta span {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.certificate-preview-card {
+  min-height: 560px;
+}
+
+.certificate-preview-frame {
+  width: 100%;
+  min-height: 520px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 16px;
+  background: var(--fintec-blanco);
+}
+
+.admin-schedule-panel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-schedule-panel > .admin-section-heading,
+.admin-schedule-panel > .form-error,
+.admin-schedule-panel > .form-success,
+.admin-schedule-selector-card,
+.admin-schedule-editor-card,
+.admin-schedule-teams-card,
+.admin-schedule-panel > .dashboard-module-card {
+  grid-column: 1 / -1;
+}
+
+.admin-schedule-panel .admin-section-heading {
+  align-items: center;
+  min-height: 0;
+}
+
+.admin-schedule-panel .admin-section-heading h3 {
+  font-size: 1.15rem;
+}
+
+.admin-schedule-panel .admin-section-heading p,
+.admin-schedule-panel .admin-subsection-header p,
+.admin-schedule-panel .module-card-header p {
+  display: none;
+}
+
+.admin-schedule-panel .teacher-panel-card {
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+}
+
+.admin-schedule-selector-card {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.1fr) minmax(260px, 0.75fr) minmax(360px, 0.95fr);
+  align-items: end;
+}
+
+.admin-schedule-teacher-warning {
+  grid-column: 1 / -1;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(var(--fintec-rojo-rgb), 0.08);
+  color: var(--fintec-rojo);
+  font-weight: 800;
+}
+
+.admin-schedule-teacher-meta {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.admin-schedule-panel .schedule-summary-grid {
+  gap: 8px;
+}
+
+.admin-schedule-panel .schedule-summary-grid div {
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+.admin-schedule-panel .schedule-summary-grid span {
+  font-size: 0.68rem;
+}
+
+.admin-schedule-panel .schedule-summary-grid strong {
+  margin-top: 2px;
+  font-size: 0.86rem;
+}
+
+.admin-schedule-editor-card .schedule-form {
+  grid-template-columns: minmax(250px, 0.7fr) minmax(420px, 1.3fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px;
+}
+
+.admin-schedule-editor-card .schedule-calendar-panel {
+  grid-row: 1 / span 2;
+}
+
+.admin-schedule-editor-card .student-selection-actions {
+  grid-column: 2;
+  margin-top: 0;
+}
+
+.admin-schedule-panel .schedule-form-grid {
+  grid-template-columns: minmax(220px, 1.35fr) minmax(150px, 0.9fr) minmax(130px, 0.75fr) minmax(130px, 0.75fr);
+  gap: 8px;
+}
+
+.admin-schedule-panel .field span {
+  margin-bottom: 4px;
+  font-size: 0.76rem;
+}
+
+.admin-schedule-panel .field input,
+.admin-schedule-panel .field select {
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+}
+
+.admin-schedule-panel .compact-button,
+.admin-schedule-panel .submit-button,
+.admin-schedule-panel .ghost-button {
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 0.86rem;
+}
+
+.admin-schedule-panel .admin-table-wrap {
+  max-height: 190px;
+}
+
+.admin-schedule-panel .schedule-table {
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-schedule-panel .admin-table th,
+.admin-schedule-panel .admin-table td {
+  padding: 8px 10px;
+  font-size: 0.8rem;
+}
+
+.admin-schedule-panel .admin-table td span {
+  font-size: 0.76rem;
+}
+
+.attendance-entry-form {
+  display: grid;
+  gap: 16px;
+}
+
+.attendance-picker-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.85fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.attendance-picker-grid .field {
+  margin-bottom: 0;
+}
+
+.attendance-selected-course {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.12);
+}
+
+.attendance-selected-course strong {
+  color: var(--text-strong);
+}
+
+.attendance-selected-course span {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.attendance-selected-course .compact-button {
+  justify-self: start;
+  margin-top: 8px;
+}
+
+.attendance-period-list {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.1);
+}
+
+.attendance-period-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.attendance-period-header strong,
+.attendance-period-header span {
+  display: block;
+}
+
+.attendance-period-header strong {
+  color: var(--text-strong);
+}
+
+.attendance-period-header span {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.attendance-modal {
+  width: min(1040px, 96vw);
+}
+
+.attendance-modal-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.55fr) minmax(130px, 0.45fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.attendance-modal-controls .field {
+  margin-bottom: 0;
+}
+
+.status-message {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-weight: 700;
+}
+
+.status-message.success {
+  background: rgba(20, 120, 74, 0.12);
+  color: #14784a;
+}
+
+.status-message.error {
+  background: rgba(var(--fintec-rojo-rgb), 0.1);
+  color: var(--fintec-rojo);
+}
+
+.voucher-storage-status {
+  display: grid;
+  gap: 4px;
+}
+
+.voucher-storage-status a {
+  color: inherit;
+  width: fit-content;
+}
+
+.attendance-roster-table {
+  max-height: 460px;
+  overflow: auto;
+}
+
+.attendance-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.attendance-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--fintec-rojo);
 }
 
 .admin-payments {
@@ -1298,6 +2042,525 @@ textarea {
   font-size: 1.18rem;
 }
 
+.enrollment-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.payment-operations {
+  align-content: start;
+}
+
+.payment-operation-menu {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 8px;
+  border-radius: 24px;
+  background: rgba(var(--fintec-celeste-rgb), 0.22);
+}
+
+.payment-operation-menu button {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 17px 20px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--text-soft);
+  text-align: left;
+  cursor: pointer;
+}
+
+.payment-operation-menu button:hover {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.payment-operation-menu button.is-active {
+  border-color: rgba(var(--fintec-gris-rgb), 0.35);
+  background: var(--fintec-blanco);
+  box-shadow: 0 10px 24px rgba(var(--fintec-gris-rgb), 0.14);
+}
+
+.payment-operation-menu strong {
+  color: var(--fintec-rojo);
+  font-size: 0.98rem;
+}
+
+.payment-operation-menu span {
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.payment-identity-search {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+}
+
+.payment-identity-search .submit-button {
+  min-width: 210px;
+}
+
+.payment-operation-student {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.payment-operation-student > div,
+.payment-type-preview {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.28);
+}
+
+.payment-operation-student span,
+.payment-operation-row span,
+.payment-type-preview span {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.payment-operation-student strong {
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+}
+
+.payment-operation-list {
+  display: grid;
+}
+
+.payment-operation-row {
+  display: grid;
+  grid-template-columns: minmax(250px, 2fr) repeat(4, minmax(90px, 0.7fr)) minmax(150px, auto);
+  align-items: center;
+  gap: 14px;
+  padding: 16px 10px;
+  border-top: 1px solid rgba(var(--fintec-gris-rgb), 0.45);
+}
+
+.payment-operation-row:first-child {
+  border-top: 0;
+}
+
+.payment-operation-row.is-selected {
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.24);
+  box-shadow: inset 4px 0 0 var(--fintec-rojo);
+}
+
+.operation-paid {
+  color: #087443;
+}
+
+.operation-pending {
+  color: var(--fintec-rojo);
+}
+
+.payment-operation-row > div:not(.inline-actions) {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.payment-operation-course strong {
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.payment-operation-course span {
+  text-transform: none;
+}
+
+.transaction-row {
+  grid-template-columns: minmax(230px, 1.7fr) repeat(4, minmax(100px, 0.75fr)) minmax(205px, auto);
+}
+
+.payment-generation-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr) auto auto;
+  align-items: end;
+  gap: 14px;
+}
+
+.payment-generation-form .submit-button,
+.payment-generation-form .ghost-button {
+  min-height: 54px;
+}
+
+.payment-generation-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.payment-generation-steps > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px 16px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.35);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--text-soft);
+}
+
+.payment-generation-steps span {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(var(--fintec-celeste-rgb), 0.35);
+  font-weight: 800;
+}
+
+.payment-generation-steps .is-active {
+  border-color: rgba(var(--fintec-rojo-rgb), 0.32);
+  background: var(--fintec-blanco);
+  color: var(--text-strong);
+  box-shadow: 0 8px 20px rgba(var(--fintec-gris-rgb), 0.12);
+}
+
+.payment-generation-steps .is-active span {
+  background: var(--fintec-rojo);
+  color: var(--fintec-blanco);
+}
+
+.payment-generation-steps .is-complete span {
+  background: #087443;
+  color: white;
+}
+
+.generation-search-card .payment-identity-search {
+  margin-top: 4px;
+}
+
+.payment-generation-balance {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.payment-generation-balance > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 13px 14px;
+  border-radius: 15px;
+  background: rgba(var(--fintec-celeste-rgb), 0.2);
+}
+
+.payment-generation-balance span,
+.payment-generation-preview > span {
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+}
+
+.payment-generation-balance strong {
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.payment-generation-balance .is-highlighted {
+  background: rgba(var(--fintec-rojo-rgb), 0.09);
+}
+
+.payment-generation-balance .is-highlighted strong {
+  color: var(--fintec-rojo);
+}
+
+.enhanced-payment-generation-form {
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  align-items: stretch;
+  margin-top: 4px;
+}
+
+.payment-amount-editor {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.35);
+  border-radius: 18px;
+}
+
+.payment-amount-editor input {
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.payment-amount-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.payment-amount-shortcuts .ghost-button {
+  width: auto;
+  min-height: 42px;
+}
+
+.payment-generation-preview {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(var(--fintec-celeste-rgb), 0.25);
+}
+
+.payment-generation-preview div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(var(--fintec-gris-rgb), 0.25);
+}
+
+.payment-generation-preview small {
+  color: var(--text-soft);
+}
+
+.payment-generation-preview strong {
+  color: var(--fintec-rojo);
+  text-align: right;
+}
+
+.payment-generation-preview p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.payment-generation-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.payment-generation-actions .ghost-button {
+  width: auto;
+  min-width: 150px;
+}
+
+.payment-generation-actions .submit-button {
+  width: min(100%, 360px);
+}
+
+.payment-cancel-form {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+}
+
+.payment-cancel-form textarea {
+  min-height: 88px;
+}
+
+.danger-button {
+  background: var(--fintec-rojo);
+}
+
+.payment-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.payment-workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 8px;
+  border-radius: 24px;
+  background: rgba(var(--fintec-celeste-rgb), 0.2);
+}
+
+.payment-workspace-tabs button {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px 20px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--text-soft);
+  text-align: left;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.payment-workspace-tabs button:hover {
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.payment-workspace-tabs button.is-active {
+  border-color: rgba(var(--fintec-gris-rgb), 0.35);
+  background: var(--fintec-blanco);
+  box-shadow: 0 10px 24px rgba(var(--fintec-gris-rgb), 0.14);
+}
+
+.payment-workspace-tabs strong {
+  color: var(--fintec-rojo);
+  font-size: 1rem;
+}
+
+.payment-workspace-tabs span {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.payment-workspace {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.payment-filter-form {
+  margin-top: 18px;
+}
+
+.payment-users-table {
+  min-width: 1180px;
+}
+
+.payment-links-table {
+  table-layout: fixed;
+  min-width: 1320px;
+}
+
+.payment-links-table .payment-col-student { width: 16%; }
+.payment-links-table .payment-col-enrollment { width: 7%; }
+.payment-links-table .payment-col-value { width: 8%; }
+.payment-links-table .payment-col-status { width: 11%; }
+.payment-links-table .payment-col-transaction { width: 7%; }
+.payment-links-table .payment-col-date { width: 8%; }
+.payment-links-table .payment-col-actions { width: 43%; }
+
+.payment-links-table td {
+  overflow-wrap: anywhere;
+}
+
+.payment-links-table .cut-status-badge {
+  width: min(132px, 100%);
+  min-height: 46px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.payment-link-date {
+  white-space: nowrap;
+}
+
+.payment-link-actions {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  align-items: center;
+  justify-content: start;
+  gap: 8px;
+}
+
+.payment-link-actions .compact-button,
+.payment-link-actions .submit-button {
+  width: auto;
+  min-height: 42px;
+  padding: 9px 14px;
+  justify-content: center;
+  box-shadow: none;
+}
+
+.payment-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.payment-account-status {
+  margin-top: 5px;
+  font-size: 0.76rem !important;
+  font-weight: 800;
+}
+
+.payment-account-status.is-paid {
+  color: #14784a !important;
+}
+
+.payment-account-status.is-pending {
+  color: var(--fintec-rojo) !important;
+}
+
+.payment-pagination > div {
+  display: flex;
+  gap: 8px;
+}
+
+.payment-detail-modal {
+  width: min(1240px, 96vw);
+}
+
+.payment-detail-table {
+  min-width: 880px;
+}
+
+.payment-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.payment-detail-summary > div {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.24);
+}
+
+.payment-detail-summary span {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.payment-detail-summary strong {
+  color: var(--text-strong);
+}
+
+.payment-detail-status.is-paid {
+  background: rgba(25, 135, 84, 0.13);
+}
+
+.payment-detail-status.is-paid strong {
+  color: #087443;
+}
+
+.payment-detail-status.is-pending {
+  background: rgba(var(--fintec-rojo-rgb), 0.1);
+}
+
+.payment-detail-table td span {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
 .admin-academic {
   display: grid;
   gap: 18px;
@@ -1363,6 +2626,18 @@ textarea {
   border-radius: 8px;
   background: var(--fintec-blanco);
   box-shadow: 0 28px 72px rgba(var(--fintec-gris-oscuro-rgb), 0.26);
+}
+
+.registered-user-modal.student-certificate-preview-modal {
+  width: min(1080px, calc(100vw - 24px));
+  height: calc(100vh - 24px);
+  max-height: none;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 14px;
+  overflow: hidden;
+  border-radius: 16px;
 }
 
 .registered-user-modal h2 {
@@ -1502,6 +2777,76 @@ textarea {
   padding: 10px 24px 24px;
 }
 
+.payment-detail-modal .identity-meta {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.payment-detail-modal .identity-meta dd {
+  overflow-wrap: anywhere;
+}
+
+.student-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-flow: dense;
+  gap: 12px;
+  margin: 16px 0 22px;
+}
+
+.student-data-card {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(var(--fintec-celeste-rgb), 0.28);
+  border-radius: 18px;
+  background: var(--surface-alt);
+}
+
+.student-data-card.is-compact {
+  grid-column: span 2;
+}
+
+.student-data-card.is-medium {
+  grid-column: span 3;
+}
+
+.student-data-card.is-full {
+  grid-column: 1 / -1;
+}
+
+.student-data-card dt {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.student-data-card dd {
+  margin: 7px 0 0;
+  color: var(--text-strong);
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .student-data-card.is-compact,
+  .student-data-card.is-medium {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 560px) {
+  .student-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .student-data-card.is-compact,
+  .student-data-card.is-medium,
+  .student-data-card.is-full {
+    grid-column: 1;
+  }
+}
+
 .pensum-modal {
   width: min(860px, 96vw);
 }
@@ -1513,6 +2858,325 @@ textarea {
 
 .payment-modal {
   width: min(860px, 96vw);
+}
+
+.payment-entry-modal {
+  width: min(920px, 96vw);
+  max-height: min(880px, 94vh);
+}
+
+.payment-entry-modal .career-modal-header {
+  padding: 20px 24px;
+  background: linear-gradient(135deg, rgba(var(--fintec-celeste-rgb), 0.2), white 62%);
+}
+
+.payment-entry-modal .career-modal-header p {
+  font-weight: 700;
+}
+
+.payment-entry-modal .career-modal-body {
+  padding: 22px 24px 26px;
+}
+
+.payment-entry-context {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.7fr) minmax(130px, 0.8fr) repeat(2, minmax(125px, 0.75fr));
+  gap: 10px;
+  margin-bottom: 22px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(var(--fintec-celeste-rgb), 0.18);
+}
+
+.payment-entry-context > div {
+  min-width: 0;
+  padding: 5px 7px;
+}
+
+.payment-entry-context span,
+.payment-entry-context strong {
+  display: block;
+}
+
+.payment-entry-context span {
+  margin-bottom: 5px;
+  color: var(--text-soft);
+  font-size: 0.73rem;
+  text-transform: uppercase;
+}
+
+.payment-entry-context strong {
+  color: var(--fintec-rojo);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.payment-entry-modal .payment-entry-form {
+  margin-top: 0;
+}
+
+.payment-entry-grid {
+  gap: 18px 16px;
+}
+
+.payment-entry-grid .field {
+  margin-bottom: 0;
+}
+
+.payment-entry-grid .field > span {
+  margin-bottom: 7px;
+  color: var(--fintec-rojo);
+  font-size: 0.87rem;
+  font-weight: 700;
+}
+
+.payment-entry-grid .field input,
+.payment-entry-grid .field select,
+.payment-entry-grid .field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.18);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.06);
+  color: var(--text-strong);
+  font: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.payment-entry-grid .field input,
+.payment-entry-grid .field select {
+  min-height: 54px;
+  padding: 14px 16px;
+}
+
+.payment-entry-grid .field textarea {
+  min-height: 118px;
+  padding: 14px 16px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.payment-entry-grid .field input:focus-visible,
+.payment-entry-grid .field select:focus-visible,
+.payment-entry-grid .field textarea:focus-visible {
+  outline: none;
+  border-color: var(--fintec-rojo);
+  background: white;
+  box-shadow: 0 0 0 3px rgba(var(--fintec-rojo-rgb), 0.12);
+}
+
+.payment-voucher-field {
+  padding: 15px;
+  border: 1px dashed rgba(var(--fintec-rojo-rgb), 0.36);
+  border-radius: 18px;
+  background: rgba(var(--fintec-celeste-rgb), 0.08);
+}
+
+.payment-entry-grid .payment-voucher-field input[type='file'] {
+  min-height: 58px;
+  padding: 8px;
+  background: white;
+}
+
+.payment-voucher-field input[type='file']::file-selector-button {
+  margin-right: 12px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(var(--fintec-celeste-rgb), 0.3);
+  color: var(--fintec-rojo);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.payment-observation-field {
+  position: relative;
+}
+
+.payment-observation-field .field-hint:last-child {
+  text-align: right;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 7px;
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.bank-selector-field {
+  position: relative;
+  z-index: 4;
+}
+
+.bank-combobox {
+  position: relative;
+}
+
+.payment-entry-grid .bank-combobox input {
+  padding-right: 52px;
+}
+
+.payment-entry-grid .bank-combobox-toggle {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(var(--fintec-celeste-rgb), 0.28);
+  color: var(--fintec-rojo);
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.bank-combobox.is-open .bank-combobox-toggle {
+  background: var(--fintec-rojo);
+  color: var(--fintec-blanco);
+  transform: rotate(180deg);
+}
+
+.bank-combobox-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(520px, 88vw);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.8);
+  border-radius: 18px;
+  background: var(--fintec-blanco);
+  box-shadow: 0 18px 38px rgba(var(--fintec-gris-oscuro-rgb), 0.2);
+}
+
+.bank-combobox-summary {
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+}
+
+.bank-combobox-summary strong,
+.bank-combobox-summary span {
+  display: block;
+}
+
+.bank-combobox-summary strong {
+  color: var(--fintec-rojo);
+  font-size: 0.84rem;
+}
+
+.bank-combobox-summary span {
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 0.75rem;
+}
+
+.bank-combobox-option {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text-strong);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bank-combobox-option strong {
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.bank-combobox-option span {
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.bank-combobox-option:hover,
+.bank-combobox-option:focus-visible,
+.bank-combobox-option[aria-selected='true'] {
+  outline: none;
+  background: rgba(var(--fintec-celeste-rgb), 0.22);
+  color: var(--fintec-rojo);
+}
+
+.bank-combobox-empty {
+  margin-top: 4px;
+  padding: 18px 12px;
+  border-radius: 13px;
+  background: rgba(var(--fintec-celeste-rgb), 0.1);
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.payment-entry-submit {
+  margin-top: 22px;
+  min-height: 54px;
+}
+
+.discount-action-button {
+  border: 1px solid rgba(var(--fintec-rojo-rgb), 0.22);
+  background: rgba(var(--fintec-celeste-rgb), 0.2);
+}
+
+.discount-action-button:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.discount-balance-preview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.discount-balance-preview > div {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.24);
+}
+
+.discount-balance-preview span {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.discount-balance-preview strong {
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.payment-discount-success {
+  margin: 0 0 14px;
+}
+
+.discount-warning {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(205, 136, 18, 0.12);
+  color: #7a520d;
+  font-size: 0.86rem;
+  line-height: 1.4;
 }
 
 .admin-subsection-header {
@@ -1797,6 +3461,44 @@ textarea {
   color: var(--text-strong);
 }
 
+.enrollment-table {
+  min-width: 820px;
+}
+
+.grade-transfer-table {
+  min-width: 900px;
+}
+
+.attendance-admin-filter {
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: end;
+}
+
+.attendance-admin-filter .field {
+  margin-bottom: 0;
+}
+
+.attendance-admin-table {
+  min-width: 860px;
+}
+
+.grade-input {
+  width: 104px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.2);
+  border-radius: 12px;
+  background: var(--fintec-blanco);
+  color: var(--text-strong);
+  font: inherit;
+  font-weight: 700;
+}
+
+.grade-input:focus-visible {
+  border-color: var(--fintec-celeste);
+  outline: 3px solid rgba(var(--fintec-celeste-rgb), 0.28);
+}
+
 .course-cut-table td strong,
 .course-cut-table td span {
   display: block;
@@ -1836,6 +3538,284 @@ textarea {
 .cut-status-badge.is-closed {
   background: rgba(var(--fintec-gris-oscuro-rgb), 0.12);
   color: var(--text-soft);
+}
+
+.table-actions-stack {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.schedule-teams-modal {
+  width: min(1080px, 96vw);
+}
+
+.schedule-teams-body {
+  display: grid;
+  gap: 18px;
+}
+
+.schedule-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.schedule-summary-grid div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.12);
+}
+
+.schedule-summary-grid span,
+.schedule-summary-grid strong {
+  display: block;
+}
+
+.schedule-summary-grid span {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.schedule-summary-grid strong {
+  margin-top: 6px;
+  color: var(--fintec-rojo);
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.schedule-form,
+.schedule-teams-form,
+.schedule-list-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 18px;
+  background: var(--fintec-blanco);
+}
+
+.schedule-form-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.schedule-form-grid .field {
+  margin-bottom: 0;
+}
+
+.schedule-calendar-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 18px;
+  background: rgba(var(--fintec-celeste-rgb), 0.08);
+}
+
+.schedule-calendar-header,
+.schedule-selected-dates {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.schedule-calendar-header h4 {
+  margin: 4px 0 0;
+  color: var(--fintec-rojo);
+  font-size: 1.08rem;
+}
+
+.schedule-calendar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.schedule-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.schedule-calendar-weekday {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.schedule-calendar-day {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(var(--fintec-gris-rgb), 0.72);
+  border-radius: 12px;
+  background: var(--fintec-blanco);
+  color: var(--text-strong);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.schedule-calendar-day.is-muted {
+  color: rgba(var(--fintec-gris-oscuro-rgb), 0.42);
+  background: rgba(var(--fintec-gris-rgb), 0.12);
+}
+
+.schedule-calendar-day.is-selected {
+  border-color: var(--fintec-rojo);
+  background: var(--fintec-rojo);
+  color: var(--fintec-blanco);
+}
+
+.schedule-calendar-day:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.schedule-selected-dates strong,
+.schedule-selected-dates span {
+  display: block;
+}
+
+.schedule-selected-dates strong {
+  color: var(--fintec-rojo);
+}
+
+.schedule-selected-dates span {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.schedule-date-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.schedule-date-chip {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(var(--fintec-rojo-rgb), 0.1);
+  color: var(--fintec-rojo);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.schedule-date-chip.is-count {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(var(--fintec-gris-oscuro-rgb), 0.12);
+  color: var(--text-soft);
+  cursor: default;
+}
+
+.admin-schedule-panel .schedule-calendar-panel {
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+}
+
+.admin-schedule-panel .schedule-calendar-header {
+  gap: 8px;
+}
+
+.admin-schedule-panel .schedule-calendar-header h4 {
+  margin-top: 2px;
+  font-size: 0.95rem;
+}
+
+.admin-schedule-panel .schedule-calendar-actions {
+  gap: 6px;
+}
+
+.admin-schedule-panel .schedule-calendar-actions .compact-button {
+  min-height: 30px;
+  padding: 6px 8px;
+  font-size: 0.76rem;
+}
+
+.admin-schedule-panel .schedule-calendar-grid {
+  grid-template-columns: repeat(7, 28px);
+  justify-content: center;
+  gap: 4px;
+}
+
+.admin-schedule-panel .schedule-calendar-weekday {
+  font-size: 0.68rem;
+}
+
+.admin-schedule-panel .schedule-calendar-day {
+  width: 28px;
+  height: 28px;
+  aspect-ratio: auto;
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+
+.admin-schedule-panel .schedule-selected-dates {
+  gap: 8px;
+}
+
+.admin-schedule-panel .schedule-selected-dates strong {
+  font-size: 0.86rem;
+}
+
+.admin-schedule-panel .schedule-selected-dates span {
+  display: none;
+}
+
+.admin-schedule-panel .schedule-date-chip-list {
+  gap: 6px;
+}
+
+.admin-schedule-panel .schedule-date-chip {
+  padding: 6px 9px;
+  font-size: 0.76rem;
+}
+
+.schedule-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.schedule-checkbox input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--fintec-rojo);
+}
+
+.schedule-table {
+  min-width: 780px;
+}
+
+.schedule-table td strong,
+.schedule-table td span {
+  display: block;
+}
+
+.schedule-table td span {
+  color: var(--text-soft);
+  font-size: 0.84rem;
 }
 
 .form-success {
@@ -1888,6 +3868,8 @@ textarea {
   .login-layout,
   .dashboard-shell,
   .dashboard-module-grid,
+  .attendance-picker-grid,
+  .attendance-modal-controls,
   .admin-payments,
   .payment-module-grid,
   .bulk-upload-panel,
@@ -1899,6 +3881,10 @@ textarea {
 
   .visual-panel {
     min-height: 34rem;
+  }
+
+  .dashboard-module-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .visual-copy h1,
@@ -1928,6 +3914,34 @@ textarea {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .schedule-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-schedule-panel,
+  .admin-schedule-selector-card,
+  .admin-schedule-editor-card .schedule-form,
+  .certificate-logo-row,
+  .certificate-template-options {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-schedule-editor-card .schedule-calendar-panel,
+  .admin-schedule-editor-card .student-selection-actions {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .admin-schedule-panel .schedule-calendar-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .admin-schedule-panel .schedule-calendar-day {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+  }
+
   .registration-course-grid,
   .registration-data-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1935,6 +3949,28 @@ textarea {
 
   .registration-address-field {
     grid-column: span 2;
+  }
+
+  .payment-operation-student {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .payment-operation-row,
+  .transaction-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .payment-operation-course,
+  .payment-operation-row .inline-actions {
+    grid-column: 1 / -1;
+  }
+
+  .payment-generation-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .payment-generation-balance {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1961,12 +3997,21 @@ textarea {
     padding: 16px;
   }
 
+  .dashboard-brand-heading {
+    gap: 14px;
+  }
+
+  .dashboard-title {
+    font-size: 2.55rem;
+  }
+
   .registration-grid-4,
   .registration-course-grid,
   .registration-data-grid,
   .lookup-grid,
   .catalog-filter-grid,
   .pensum-filter-grid,
+  .schedule-summary-grid,
   .bulk-summary-grid,
   .lookup-summary-grid,
   .lookup-data-grid,
@@ -1978,7 +4023,8 @@ textarea {
     border-radius: 22px;
   }
 
-  .dashboard-nav a {
+  .dashboard-nav a,
+  .dashboard-nav-menu summary {
     flex: 1 1 180px;
     justify-content: center;
   }
@@ -1992,6 +4038,42 @@ textarea {
 }
 
 @media (max-width: 720px) {
+  .payment-entry-context {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .discount-balance-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-detail-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .payment-workspace-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-operation-menu {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-generation-steps,
+  .payment-generation-balance,
+  .enhanced-payment-generation-form {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-generation-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .payment-generation-actions .ghost-button,
+  .payment-generation-actions .submit-button {
+    width: 100%;
+  }
+
   .visual-backdrop,
   .auth-panel,
   .auth-card,
@@ -2021,6 +4103,16 @@ textarea {
     text-align: center;
   }
 
+  .dashboard-brand-copy {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .dashboard-brand-copy .eyebrow {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
   .dashboard-logo {
     width: 118px;
   }
@@ -2043,6 +4135,9 @@ textarea {
   .admin-form-grid,
   .course-subject-list,
   .rate-mode-grid,
+  .dashboard-module-grid,
+  .teacher-summary-grid,
+  .student-certificate-preview-meta,
   .catalog-filter-grid,
   .pensum-filter-grid,
   .registration-grid,
@@ -2052,6 +4147,10 @@ textarea {
   .registration-data-grid,
   .details-list.compact {
     grid-template-columns: 1fr;
+  }
+
+  .table-actions-stack {
+    width: 100%;
   }
 
   .registration-address-field {
@@ -2077,6 +4176,22 @@ textarea {
     display: grid;
     grid-template-columns: 1fr;
     border-radius: 20px;
+  }
+
+  .dashboard-nav-menu,
+  .dashboard-nav-menu summary {
+    width: 100%;
+  }
+
+  .dashboard-nav-menu summary {
+    justify-content: center;
+  }
+
+  .dashboard-nav-dropdown {
+    position: static;
+    min-width: 0;
+    margin-top: 8px;
+    box-shadow: none;
   }
 
   .dashboard-nav a,
@@ -2105,6 +4220,22 @@ textarea {
     justify-content: stretch;
   }
 
+  .schedule-calendar-header,
+  .schedule-selected-dates {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .schedule-calendar-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-calendar-day {
+    border-radius: 10px;
+    font-size: 0.86rem;
+  }
+
   .compact-filter {
     width: 100%;
   }
@@ -2117,10 +4248,27 @@ textarea {
   .career-modal,
   .pensum-modal,
   .payment-modal,
-  .registration-result-modal {
+  .registration-result-modal,
+  .student-certificate-preview-modal {
     width: 100%;
     max-height: calc(100vh - 20px);
     border-radius: 20px;
+  }
+
+  .student-certificate-preview-modal {
+    height: calc(100vh - 20px);
+    padding: 12px;
+  }
+
+  .registered-user-modal.student-certificate-preview-modal {
+    width: 100%;
+    height: calc(100vh - 20px);
+    padding: 10px;
+    border-radius: 16px;
+  }
+
+  .student-certificate-preview-modal .career-modal-header p {
+    max-width: 100%;
   }
 
   .registration-result-header,
@@ -2150,6 +4298,14 @@ textarea {
 }
 
 @media (max-width: 560px) {
+  .payment-entry-context {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-entry-modal .career-modal-body {
+    padding: 18px;
+  }
+
   .auth-panel,
   .auth-card,
   .dashboard-sidebar,
@@ -2181,6 +4337,10 @@ textarea {
 
   .dashboard-layout {
     padding: 12px;
+  }
+
+  .module-card.dashboard-module-card {
+    padding: 16px;
   }
 
   .dashboard-title,
@@ -2232,6 +4392,18 @@ textarea {
     gap: 10px;
   }
 
+  .dashboard-brand-copy {
+    display: grid;
+    min-height: 0;
+    justify-items: center;
+    gap: 4px;
+  }
+
+  .dashboard-brand-copy .eyebrow {
+    position: static;
+    transform: none;
+  }
+
   .dashboard-logo {
     width: 108px;
   }
@@ -2248,7 +4420,8 @@ textarea {
     gap: 8px;
   }
 
-  .dashboard-nav a {
+  .dashboard-nav a,
+  .dashboard-nav-menu summary {
     min-height: 40px;
     padding: 9px 12px;
   }

@@ -25,7 +25,11 @@ def load_env_file(env_path: Path) -> None:
         if not key:
             continue
 
-        os.environ[key] = parse_env_value(value)
+        # Las variables definidas por el proceso tienen prioridad sobre el
+        # archivo local. Esto permite que el servidor de desarrollo desactive
+        # HTTPS solo en localhost y que el despliegue inyecte secretos sin que
+        # .env los sobrescriba.
+        os.environ.setdefault(key, parse_env_value(value))
 
 
 def get_bool_env(key: str, default: bool = False) -> bool:
@@ -85,17 +89,28 @@ load_env_file(PROJECT_ROOT / '.env')
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY')
+SECRET_KEY = get_required_env('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = get_bool_env('DEBUG', True)
+DEBUG = get_bool_env('DEBUG', False)
 
 ALLOWED_HOSTS = get_list_env('DJANGO_ALLOWED_HOSTS')
 CSRF_TRUSTED_ORIGINS = get_list_env('DJANGO_CSRF_TRUSTED_ORIGINS')
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = get_bool_env('DJANGO_SECURE_SSL_REDIRECT', False)
+SECURE_SSL_REDIRECT = get_bool_env('DJANGO_SECURE_SSL_REDIRECT', not DEBUG)
 SESSION_COOKIE_SECURE = get_bool_env('DJANGO_SESSION_COOKIE_SECURE', not DEBUG)
 CSRF_COOKIE_SECURE = get_bool_env('DJANGO_CSRF_COOKIE_SECURE', not DEBUG)
+SECURE_HSTS_SECONDS = int(os.getenv('DJANGO_SECURE_HSTS_SECONDS') or ('0' if DEBUG else '31536000'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = get_bool_env('DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS', not DEBUG)
+SECURE_HSTS_PRELOAD = get_bool_env('DJANGO_SECURE_HSTS_PRELOAD', False)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Strict'
+CSRF_COOKIE_SAMESITE = 'Strict'
+X_FRAME_OPTIONS = 'DENY'
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv('DJANGO_MAX_REQUEST_BODY_BYTES') or str(10 * 1024 * 1024))
+FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv('DJANGO_MAX_FILE_UPLOAD_BYTES') or str(6 * 1024 * 1024))
 
 
 # Application definition
@@ -107,6 +122,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'dashboard_auth',
 ]
 
 MIDDLEWARE = [
