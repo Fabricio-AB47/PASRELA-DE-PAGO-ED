@@ -26,6 +26,7 @@ from .inscription_catalogs import (
 )
 from .course_cuts import CourseCutError, assign_matricula_to_open_cut, ensure_open_cut_for_enrollment
 from .continuing_education import (
+    connection_for_query,
     complement_database_name,
     configure_cut_in_complement,
     ensure_student_course_charge,
@@ -2135,7 +2136,7 @@ def _validate_voucher_content(content: bytes, extension: str) -> None:
 
 
 def _fetch_payment_rows(query: str, params: list[Any]) -> list[dict[str, Any]]:
-    with connection.cursor() as cursor:
+    with connection_for_query(query, params).cursor() as cursor:
         cursor.execute(query, params)
         columns = [column[0] for column in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]

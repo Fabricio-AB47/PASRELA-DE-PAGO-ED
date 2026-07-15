@@ -7,10 +7,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.core.cache import cache
-from django.db import connection
+from django.db import DEFAULT_DB_ALIAS, connections
 
 
 DEFAULT_COMPLEMENT_DB_NAME = 'INTECEDUCONTINUA'
+COMPLEMENT_DATABASE_ALIAS = 'continuing_education'
 IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
@@ -29,6 +30,31 @@ def complement_database_name() -> str:
         or os.getenv('CONTINUING_EDUCATION_DB_NAME')
         or DEFAULT_COMPLEMENT_DB_NAME
     )
+
+
+def complement_database_alias() -> str:
+    """Return the dedicated alias when DB_*1 is configured, else legacy default."""
+    return (
+        COMPLEMENT_DATABASE_ALIAS
+        if COMPLEMENT_DATABASE_ALIAS in connections.databases
+        else DEFAULT_DB_ALIAS
+    )
+
+
+def complement_connection():
+    return connections[complement_database_alias()]
+
+
+def connection_for_query(
+    query: str,
+    params: list[Any] | tuple[Any, ...] | None = None,
+):
+    """Route explicitly-qualified INTECEDUCONTINUA SQL to DB_*1."""
+    database_token = f'[{complement_database_name()}]'.lower()
+    query_context = f'{query or ""} {params or ""}'.lower()
+    if database_token in query_context:
+        return complement_connection()
+    return connections[DEFAULT_DB_ALIAS]
 
 
 def complement_status() -> dict[str, Any]:
@@ -916,7 +942,7 @@ def _qualified(schema: str, object_name: str) -> str:
 
 
 def _database_exists(db_name: str) -> bool:
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         cursor.execute('SELECT DB_ID(%s)', [db_name])
         row = cursor.fetchone()
     return bool(row and row[0])
@@ -924,7 +950,7 @@ def _database_exists(db_name: str) -> bool:
 
 def _object_exists(db_name: str, schema: str, object_name: str, object_type: str) -> bool:
     object_path = f'{db_name}.{schema}.{object_name}'
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         cursor.execute('SELECT OBJECT_ID(%s, %s)', [object_path, object_type])
         row = cursor.fetchone()
     return bool(row and row[0])
@@ -976,7 +1002,7 @@ def _fetch_one(query: str, params: list[Any] | tuple[Any, ...] | None = None) ->
 
 
 def _fetch_all(query: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         cursor.execute(query, params or [])
         if cursor.description is None:
             return []

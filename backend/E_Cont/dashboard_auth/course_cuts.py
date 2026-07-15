@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from django.db import connection, transaction
 
 from .continuing_education import (
+    connection_for_query,
     complement_database_name,
     complement_version,
     configure_cut_in_complement,
@@ -1660,7 +1661,7 @@ def _fetch_one(query: str, params: list[Any]) -> dict[str, Any] | None:
 
 
 def _fetch_all(query: str, params: list[Any]) -> list[dict[str, Any]]:
-    with connection.cursor() as cursor:
+    with connection_for_query(query, params).cursor() as cursor:
         cursor.execute(query, params)
         if cursor.description is None:
             return []

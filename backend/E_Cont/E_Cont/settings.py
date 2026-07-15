@@ -51,28 +51,35 @@ def get_required_env(key: str) -> str:
     return value
 
 
-def get_sql_server_database_config() -> dict:
-    engine_name = os.getenv('DB_ENGINE', '').strip().lower()
+def get_sql_server_database_config(suffix: str = '') -> dict:
+    engine_key = f'DB_ENGINE{suffix}'
+    engine_name = os.getenv(engine_key, '').strip().lower()
+    # Compatibilidad con el nombre que ya existe en producción.
+    if suffix == '1' and not engine_name:
+        engine_name = os.getenv('DB_ENGIN1', '').strip().lower()
     valid_engines = {'mssql', 'sqlserver', 'sql_server', 'sql-server'}
     if engine_name not in valid_engines:
         raise ImproperlyConfigured(
-            "This project only supports SQL Server. Set DB_ENGINE=mssql in .env."
+            f"This project only supports SQL Server. Set {engine_key}=mssql in .env."
         )
 
     config = {
         'ENGINE': 'mssql',
-        'NAME': get_required_env('DB_NAME'),
-        'USER': get_required_env('DB_USER'),
-        'PASSWORD': get_required_env('DB_PASSWORD'),
-        'HOST': get_required_env('DB_HOST'),
-        'PORT': get_required_env('DB_PORT'),
+        'NAME': get_required_env(f'DB_NAME{suffix}'),
+        'USER': get_required_env(f'DB_USER{suffix}'),
+        'PASSWORD': get_required_env(f'DB_PASSWORD{suffix}'),
+        'HOST': get_required_env(f'DB_HOST{suffix}'),
+        'PORT': get_required_env(f'DB_PORT{suffix}'),
         'OPTIONS': {
-            'driver': os.getenv('DB_ODBC_DRIVER', 'ODBC Driver 18 for SQL Server').strip(),
+            'driver': os.getenv(
+                f'DB_ODBC_DRIVER{suffix}',
+                'ODBC Driver 18 for SQL Server',
+            ).strip(),
             'host_is_server': True,
         },
     }
 
-    extra_params = os.getenv('DB_ODBC_EXTRA_PARAMS', '').strip()
+    extra_params = os.getenv(f'DB_ODBC_EXTRA_PARAMS{suffix}', '').strip()
     if extra_params:
         config['OPTIONS']['extra_params'] = extra_params
 
@@ -161,6 +168,13 @@ WSGI_APPLICATION = 'E_Cont.wsgi.application'
 DATABASES = {
     'default': get_sql_server_database_config()
 }
+
+# La base de educación continua puede vivir en otra instancia SQL Server.
+# Si DB_NAME1 está definido, las operaciones del módulo usan este alias;
+# sin esas variables se conserva el modo legado de base cruzada en el servidor
+# principal.
+if os.getenv('DB_NAME1', '').strip():
+    DATABASES['continuing_education'] = get_sql_server_database_config('1')
 
 
 # Password validation

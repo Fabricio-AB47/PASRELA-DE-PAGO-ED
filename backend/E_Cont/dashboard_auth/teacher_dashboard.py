@@ -6,6 +6,7 @@ from typing import Any
 from django.db import connection, transaction
 
 from .continuing_education import (
+    connection_for_query,
     ContinuingEducationError,
     complement_database_name,
     fetch_attendance_roster_from_complement,
@@ -989,7 +990,7 @@ def _fetch_one(query: str, params: list[Any] | tuple[Any, ...] | None = None) ->
 
 
 def _fetch_all(query: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
-    with connection.cursor() as cursor:
+    with connection_for_query(query, params).cursor() as cursor:
         cursor.execute(query, params or [])
         columns = [column[0] for column in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]

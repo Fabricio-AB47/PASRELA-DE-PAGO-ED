@@ -3,10 +3,13 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from django.db import connection
-
 from .academic_rules import is_passing_grade
-from .continuing_education import complement_database_name, complement_version, is_complement_available
+from .continuing_education import (
+    complement_connection,
+    complement_database_name,
+    complement_version,
+    is_complement_available,
+)
 from .inscription_certificate import (
     build_inscription_certificate_preview_image,
     create_stored_certificate_record,
@@ -781,7 +784,7 @@ def _session_identifiers(session_user: dict[str, Any]) -> list[str]:
 
 
 def _fetch_all(query: str, params: list[Any]) -> list[dict[str, Any]]:
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         cursor.execute(query, params)
         if cursor.description is None:
             return []

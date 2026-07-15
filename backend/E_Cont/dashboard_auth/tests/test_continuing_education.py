@@ -1,7 +1,32 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from dashboard_auth.continuing_education import ensure_student_course_charge
+from dashboard_auth.continuing_education import connection_for_query, ensure_student_course_charge
+
+
+class ComplementConnectionRoutingTests(TestCase):
+    @patch('dashboard_auth.continuing_education.complement_connection')
+    def test_routes_qualified_complement_query_to_db1_alias(self, complement_connection):
+        marker = object()
+        complement_connection.return_value = marker
+
+        selected = connection_for_query(
+            'SELECT 1 FROM [INTECEDUCONTINUA].[edu].[CorteEstudiante]'
+        )
+
+        self.assertIs(selected, marker)
+
+    @patch('dashboard_auth.continuing_education.complement_connection')
+    def test_routes_object_name_passed_as_parameter_to_db1_alias(self, complement_connection):
+        marker = object()
+        complement_connection.return_value = marker
+
+        selected = connection_for_query(
+            'SELECT OBJECT_ID(%s, %s)',
+            ['[INTECEDUCONTINUA].[edu].[CorteEstudiante]', 'U'],
+        )
+
+        self.assertIs(selected, marker)
 
 
 class StudentCourseChargeTests(TestCase):

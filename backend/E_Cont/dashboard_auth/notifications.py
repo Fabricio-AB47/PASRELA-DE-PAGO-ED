@@ -4,9 +4,7 @@ import json
 import logging
 from typing import Any
 
-from django.db import connection
-
-from .continuing_education import complement_database_name
+from .continuing_education import complement_connection, complement_database_name
 
 
 class NotificationStorageError(Exception):
@@ -33,7 +31,7 @@ def create_notification(
     clean_event_key = _trim(event_key, 180)
     if not clean_event_key:
         return False
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         cursor.execute(
             f"""
             DECLARE @Created bit = 0;
@@ -77,7 +75,7 @@ def list_notifications(user: dict[str, Any], *, limit: Any = 30) -> dict[str, An
     notification_table, reading_table = _ensure_notification_schema()
     identity = _notification_identity(user)
     safe_limit = max(1, min(_safe_int(limit, 30), 100))
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         cursor.execute(
             f"""
             SELECT TOP ({safe_limit})
@@ -135,7 +133,7 @@ def mark_notifications_read(user: dict[str, Any], notification_ids: list[Any] | 
     notification_table, reading_table = _ensure_notification_schema()
     identity = _notification_identity(user)
     clean_ids = [int(value) for value in (notification_ids or []) if str(value).strip().isdigit()]
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         if clean_ids:
             placeholders = ','.join(['%s'] * len(clean_ids))
             cursor.execute(
@@ -181,7 +179,7 @@ def mark_notifications_read(user: dict[str, Any], notification_ids: list[Any] | 
 
 def notification_storage_status() -> dict[str, Any]:
     notification_table, reading_table = _ensure_notification_schema()
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         cursor.execute(
             f"""
             SELECT
@@ -222,7 +220,7 @@ def _ensure_notification_schema() -> tuple[str, str]:
     if _schema_ready_for == database:
         return notification_table, reading_table
 
-    with connection.cursor() as cursor:
+    with complement_connection().cursor() as cursor:
         cursor.execute('SELECT DB_ID(%s)', [database])
         row = cursor.fetchone()
         if not row or row[0] is None:
