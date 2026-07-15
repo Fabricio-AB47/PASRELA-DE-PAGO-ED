@@ -3454,13 +3454,38 @@ def _resolve_or_create_datos_estud(
     movil_corto = _trim_to_max(telefono, 15)
     direccion_corta = _trim_to_max(direccion, 150)
     with connection.cursor() as cursor:
+        lock_resource = 'PASARELA_CEDULA_' + re.sub(r'\D+', '', cedula)
+        cursor.execute(
+            """
+            DECLARE @lock_result int;
+            EXEC @lock_result = sys.sp_getapplock
+                @Resource = %s,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 10000;
+            SELECT @lock_result;
+            """,
+            [lock_resource],
+        )
+        lock_row = cursor.fetchone()
+        if not lock_row or int(lock_row[0]) < 0:
+            raise PaymentGatewayError(
+                'No fue posible reservar la cédula para el registro. Intenta nuevamente.'
+            )
+
         cursor.execute(
             """
             SELECT TOP (1) CAST(codigo_estud AS varchar(50))
             FROM dbo.DATOS_ESTUD
-            WHERE LTRIM(RTRIM(Cedula_Est)) = %s
+            WHERE TRY_CONVERT(
+                      decimal(20, 0),
+                      REPLACE(REPLACE(REPLACE(REPLACE(
+                          LTRIM(RTRIM(ISNULL(Cedula_Est, ''))), '-', ''
+                      ), ' ', ''), '.', ''), ',', '')
+                  ) = TRY_CONVERT(decimal(20, 0), %s)
+               OR TRY_CONVERT(decimal(20, 0), Cedula) = TRY_CONVERT(decimal(20, 0), %s)
             """,
-            [cedula],
+            [cedula, cedula],
         )
         row = cursor.fetchone()
         if row and row[0]:
@@ -4555,6 +4580,12 @@ def _resolve_graph_sender_identity() -> str:
 
 
 def _get_graph_access_token(tenant_id: str, client_id: str, client_secret: str) -> str:
+    cache_identity = sha256(f'{tenant_id}|{client_id}'.encode('utf-8')).hexdigest()
+    cache_key = f'microsoft-graph:mail-token:{cache_identity}'
+    cached_token = cache.get(cache_key)
+    if cached_token:
+        return str(cached_token)
+
     token_url = f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token'
     scope = _first_non_empty(
         os.getenv('MS_GRAPH_SCOPE'),
@@ -4594,6 +4625,8 @@ def _get_graph_access_token(tenant_id: str, client_id: str, client_secret: str) 
     token = str(payload.get('access_token') or '').strip()
     if not token:
         raise PaymentGatewayError('Graph no devolvió access_token para envío de correo.')
+    expires_in = _safe_int(payload.get('expires_in'), default=3600)
+    cache.set(cache_key, token, timeout=max(60, expires_in - 300))
     return token
 
 

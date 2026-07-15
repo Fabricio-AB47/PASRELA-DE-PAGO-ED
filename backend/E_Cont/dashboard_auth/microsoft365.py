@@ -6,11 +6,13 @@ import re
 import time
 import unicodedata
 from base64 import urlsafe_b64decode
+from hashlib import sha256
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from django.core.cache import cache
 from django.db import connection
 from django.utils import timezone
 
@@ -414,6 +416,14 @@ def _graph_config() -> dict[str, str]:
 
 
 def _get_access_token(config: dict[str, str]) -> str:
+    cache_identity = sha256(
+        f"{config['tenant_id']}|{config['client_id']}|{config['scope']}".encode('utf-8')
+    ).hexdigest()
+    cache_key = f'microsoft-graph:directory-token:{cache_identity}'
+    cached_token = cache.get(cache_key)
+    if cached_token:
+        return str(cached_token)
+
     token_url = f"https://login.microsoftonline.com/{quote(config['tenant_id'], safe='')}/oauth2/v2.0/token"
     form_body = urlencode(
         {
@@ -450,6 +460,11 @@ def _get_access_token(config: dict[str, str]) -> str:
     token = str(payload.get('access_token') or '').strip()
     if not token:
         raise Microsoft365GraphError('Graph no devolvió access_token.')
+    try:
+        expires_in = int(payload.get('expires_in') or 3600)
+    except (TypeError, ValueError):
+        expires_in = 3600
+    cache.set(cache_key, token, timeout=max(60, expires_in - 300))
     return token
 
 

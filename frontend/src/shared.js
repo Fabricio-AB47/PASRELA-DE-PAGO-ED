@@ -32,6 +32,7 @@ export async function readResponsePayload(response) {
   } catch {
     return {
       ok: false,
+      invalid_response: true,
       message: `El servidor devolvió una respuesta inválida (${response.status}).`,
     }
   }

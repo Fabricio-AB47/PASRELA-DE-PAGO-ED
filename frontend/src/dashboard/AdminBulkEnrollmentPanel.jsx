@@ -224,6 +224,11 @@ export default function AdminBulkEnrollmentPanel() {
         }),
       })
       const payload = await readResponsePayload(response)
+      if (payload?.invalid_response) {
+        throw new Error(
+          'El servidor interrumpió la carga antes de devolver el resumen. Verifica los estudiantes registrados antes de volver a intentarlo.',
+        )
+      }
       if (!payload || !response.ok || !payload.ok) {
         throw new Error(payload?.message ?? `No fue posible procesar la selección (${response.status}).`)
       }
@@ -327,6 +332,11 @@ export default function AdminBulkEnrollmentPanel() {
         }),
       })
       const payload = await readResponsePayload(response)
+      if (payload?.invalid_response) {
+        throw new Error(
+          'El servidor interrumpió la carga antes de devolver el resumen. Verifica los estudiantes registrados antes de volver a intentarlo.',
+        )
+      }
       if (!payload || !response.ok || !payload.ok) {
         throw new Error(payload?.message ?? `No fue posible procesar la carga (${response.status}).`)
       }

@@ -83,7 +83,6 @@ def _registered_response(
 
 
 def _find_datos_estud(cedula: str) -> dict[str, Any] | None:
-    cedula_without_zeroes = str(int(cedula)) if cedula.isdigit() else cedula
     query = """
         SELECT TOP (1)
             CAST(codigo_estud AS varchar(50)) AS codigo_estud,
@@ -93,11 +92,16 @@ def _find_datos_estud(cedula: str) -> dict[str, Any] | None:
             LTRIM(RTRIM(ISNULL(correo, ''))) AS email,
             LTRIM(RTRIM(ISNULL(telefono, ''))) AS telefono
         FROM dbo.DATOS_ESTUD
-        WHERE REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(Cedula_Est, ''))), '-', ''), ' ', '') = %s
-           OR LTRIM(RTRIM(ISNULL(CAST(Cedula AS varchar(20)), ''))) IN (%s, %s)
+        WHERE TRY_CONVERT(
+                  decimal(20, 0),
+                  REPLACE(REPLACE(REPLACE(REPLACE(
+                      LTRIM(RTRIM(ISNULL(Cedula_Est, ''))), '-', ''
+                  ), ' ', ''), '.', ''), ',', '')
+              ) = TRY_CONVERT(decimal(20, 0), %s)
+           OR TRY_CONVERT(decimal(20, 0), Cedula) = TRY_CONVERT(decimal(20, 0), %s)
         ORDER BY codigo_estud DESC
     """
-    return _fetch_one(query, [cedula, cedula, cedula_without_zeroes])
+    return _fetch_one(query, [cedula, cedula])
 
 
 def _fetch_one(query: str, params: list[Any]) -> dict[str, Any] | None:
