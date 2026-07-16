@@ -36,6 +36,7 @@ from .views import (
     admin_payment_invoice_view,
     admin_payments_reconcile_view,
     admin_payment_discount_view,
+    admin_payment_discount_correction_view,
     admin_payment_receipt_generate_view,
     admin_pensum_entry_view,
     admin_pensum_status_view,
@@ -133,6 +134,7 @@ urlpatterns = [
     path('admin/payments/register/', admin_payment_register_view, name='admin-payment-register'),
     path('admin/payments/invoice/', admin_payment_invoice_view, name='admin-payment-invoice'),
     path('admin/payments/discount/', admin_payment_discount_view, name='admin-payment-discount'),
+    path('admin/payments/discount/correct/', admin_payment_discount_correction_view, name='admin-payment-discount-correct'),
     path('admin/payments/receipt/', admin_payment_receipt_generate_view, name='admin-payment-receipt-generate'),
     path('admin/payment-cancel/', admin_payment_cancel_view, name='admin-payment-cancel'),
 ]

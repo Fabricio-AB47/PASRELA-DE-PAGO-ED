@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { readResponsePayload } from '../shared.js'
+import { getStoredSession, readResponsePayload } from '../shared.js'
 import { adminFetch } from './api.js'
 import { ECUADOR_FINANCIAL_INSTITUTIONS } from './ecuadorFinancialInstitutions.js'
 
@@ -29,6 +29,20 @@ function isAccountPaid(account) {
 
 function accountBalanceStatus(account) {
   return isAccountPaid(account) ? 'PAGADO' : 'PENDIENTE'
+}
+
+function discountTypeFromMovement(payment) {
+  const detail = String(payment?.detalle || '').toUpperCase()
+  if (detail.startsWith('BECA ')) return 'BECA'
+  const match = detail.match(/^DESCUENTO\s+([A-Z_]+)\s+/)
+  return match?.[1] || 'OTRO'
+}
+
+function discountPercentageFromMovement(payment, courseValue) {
+  const observationMatch = String(payment?.observacion || '').match(/PORCENTAJE=([\d.,]+)%/i)
+  if (observationMatch?.[1]) return observationMatch[1].replace(',', '.')
+  const value = Number(payment?.valor_registrado || 0)
+  return courseValue > 0 ? String(Math.min(100, Number(((value / courseValue) * 100).toFixed(2)))) : ''
 }
 
 function fileAsDataUrl(file) {
@@ -81,6 +95,7 @@ function studentFieldSize(key, value) {
 }
 
 export default function AdminPaymentsPanel() {
+  const isAdministrator = String(getStoredSession()?.user?.role?.name || '').trim().toUpperCase() === 'ADMINISTRADOR'
   const [paymentsResult, setPaymentsResult] = useState(null)
   const [paymentsQuery, setPaymentsQuery] = useState('')
   const [paymentStatus, setPaymentStatus] = useState('all')
@@ -107,10 +122,16 @@ export default function AdminPaymentsPanel() {
   const [generatingReceiptId, setGeneratingReceiptId] = useState('')
   const [copiedPaymentLinkId, setCopiedPaymentLinkId] = useState('')
   const [discountEntryUser, setDiscountEntryUser] = useState(null)
-  const [discountEntryForm, setDiscountEntryForm] = useState({ tipo_descuento: 'BECA', valor: '', motivo: '', observacion: '' })
+  const [discountEntryForm, setDiscountEntryForm] = useState({ tipo_descuento: 'BECA', porcentaje: '', motivo: '', observacion: '' })
   const [discountEntryError, setDiscountEntryError] = useState('')
   const [discountSuccess, setDiscountSuccess] = useState('')
   const [isSavingDiscount, setIsSavingDiscount] = useState(false)
+  const [discountCorrectionPayment, setDiscountCorrectionPayment] = useState(null)
+  const [discountCorrectionForm, setDiscountCorrectionForm] = useState({
+    tipo_descuento: 'OTRO', porcentaje: '', motivo: '', motivo_correccion: '', observacion: '',
+  })
+  const [discountCorrectionError, setDiscountCorrectionError] = useState('')
+  const [isSavingDiscountCorrection, setIsSavingDiscountCorrection] = useState(false)
   const [paymentEntryForm, setPaymentEntryForm] = useState({
     valor: '',
     forma_pago: 'VOUCHER',
@@ -121,6 +142,29 @@ export default function AdminPaymentsPanel() {
     observacion: '',
     voucher: null,
   })
+  const discountPercentage = Number(discountEntryForm.porcentaje || 0)
+  const discountCourseValue = Number(discountEntryUser?.total_value || 0)
+  const discountPendingBalance = Number(discountEntryUser?.pending_balance || 0)
+  const calculatedDiscountValue = (
+    discountPercentage >= 1 && discountPercentage <= 100
+      ? Math.min(discountPendingBalance, (discountCourseValue * discountPercentage) / 100)
+      : 0
+  )
+  const correctionPercentage = Number(discountCorrectionForm.porcentaje || 0)
+  const correctionCourseValue = Number(selectedPaymentUser?.summary?.total_value || 0)
+  const otherDiscountValue = Math.max(
+    0,
+    Number(selectedPaymentUser?.summary?.discount_value || 0)
+      - Number(discountCorrectionPayment?.valor_registrado || 0),
+  )
+  const correctedDiscountValue = (
+    correctionPercentage > 0 && correctionPercentage <= 100
+      ? Math.min(
+        (correctionCourseValue * correctionPercentage) / 100,
+        Math.max(0, correctionCourseValue - otherDiscountValue),
+      )
+      : 0
+  )
 
   const loadRegisteredPayments = useCallback(async ({ page = 1, query = '', status = 'all' } = {}) => {
     setIsLoadingPayments(true)
@@ -227,17 +271,29 @@ export default function AdminPaymentsPanel() {
     setDiscountEntryUser(user)
     setDiscountEntryError('')
     setDiscountSuccess('')
-    setDiscountEntryForm({ tipo_descuento: 'BECA', valor: '', motivo: '', observacion: '' })
+    setDiscountEntryForm({ tipo_descuento: 'BECA', porcentaje: '', motivo: '', observacion: '' })
     setActivePaymentModal('register-discount')
   }
 
   function handleDiscountEntryChange(event) {
     const { name, value } = event.target
+    if (name === 'porcentaje') {
+      const numericValue = Number(value)
+      const boundedValue = value === '' || !Number.isFinite(numericValue)
+        ? ''
+        : String(Math.min(100, Math.max(0, numericValue)))
+      setDiscountEntryForm((current) => ({ ...current, porcentaje: boundedValue }))
+      return
+    }
     setDiscountEntryForm((current) => ({ ...current, [name]: value }))
   }
 
   async function handleDiscountEntrySubmit(event) {
     event.preventDefault()
+    if (discountPercentage <= 0 || discountPercentage > 100) {
+      setDiscountEntryError('Ingresa un porcentaje mayor que 0 y máximo de 100 %.')
+      return
+    }
     setIsSavingDiscount(true)
     setDiscountEntryError('')
     try {
@@ -256,8 +312,9 @@ export default function AdminPaymentsPanel() {
         throw new Error(payload?.message ?? `No fue posible registrar el descuento (${response.status}).`)
       }
       const discountLabel = discountEntryForm.tipo_descuento.replaceAll('_', ' ').toLowerCase()
+      const appliedValue = payload.result?.value ?? calculatedDiscountValue
       setDiscountSuccess(
-        `Descuento por ${discountLabel} de ${formatMoney(discountEntryForm.valor)} aplicado a ${discountEntryUser.nombre}.`,
+        `${discountEntryForm.tipo_descuento === 'BECA' ? 'Beca' : `Descuento por ${discountLabel}`} del ${discountEntryForm.porcentaje} % (${formatMoney(appliedValue)}) aplicado a ${discountEntryUser.nombre}.`,
       )
       setActivePaymentModal(null)
       await loadRegisteredPayments({
@@ -316,6 +373,75 @@ export default function AdminPaymentsPanel() {
       setPaymentEntryError(error.message)
     } finally {
       setIsSavingPayment(false)
+    }
+  }
+
+  function openDiscountCorrection(payment) {
+    const courseValue = Number(selectedPaymentUser?.summary?.total_value || 0)
+    setDiscountCorrectionPayment(payment)
+    setDiscountCorrectionError('')
+    setDiscountCorrectionForm({
+      tipo_descuento: discountTypeFromMovement(payment),
+      porcentaje: discountPercentageFromMovement(payment, courseValue),
+      motivo: '',
+      motivo_correccion: '',
+      observacion: '',
+    })
+    setActivePaymentModal('correct-discount')
+  }
+
+  function handleDiscountCorrectionChange(event) {
+    const { name, value } = event.target
+    if (name === 'porcentaje') {
+      const numericValue = Number(value)
+      const boundedValue = value === '' || !Number.isFinite(numericValue)
+        ? ''
+        : String(Math.min(100, Math.max(0, numericValue)))
+      setDiscountCorrectionForm((current) => ({ ...current, porcentaje: boundedValue }))
+      return
+    }
+    setDiscountCorrectionForm((current) => ({ ...current, [name]: value }))
+  }
+
+  async function handleDiscountCorrectionSubmit(event) {
+    event.preventDefault()
+    const percentage = Number(discountCorrectionForm.porcentaje || 0)
+    if (percentage <= 0 || percentage > 100) {
+      setDiscountCorrectionError('Ingresa un porcentaje mayor que 0 y máximo de 100 %.')
+      return
+    }
+    setIsSavingDiscountCorrection(true)
+    setDiscountCorrectionError('')
+    try {
+      const response = await adminFetch('/api/auth/admin/payments/discount/correct/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...discountCorrectionForm,
+          movimiento_id: discountCorrectionPayment.num,
+        }),
+      })
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok) {
+        throw new Error(payload?.message ?? `No fue posible corregir el descuento (${response.status}).`)
+      }
+      const student = selectedPaymentUser?.student
+      setDiscountSuccess(payload.message || 'Descuento o beca corregido.')
+      setDiscountCorrectionPayment(null)
+      if (student) {
+        await openPaymentDetail(student)
+      } else {
+        setActivePaymentModal(null)
+      }
+      await loadRegisteredPayments({
+        page: paymentsResult?.pagination?.page || 1,
+        query: paymentsQuery,
+        status: paymentStatus,
+      })
+    } catch (error) {
+      setDiscountCorrectionError(error.message)
+    } finally {
+      setIsSavingDiscountCorrection(false)
     }
   }
 
@@ -739,7 +865,7 @@ export default function AdminPaymentsPanel() {
             <strong>{formatMoney(paymentsResult.metrics.registered_value)}</strong>
           </div>
           <div>
-            <span>Descuentos aplicados</span>
+            <span>Descuentos y becas</span>
             <strong>{formatMoney(paymentsResult.metrics.discount_value)}</strong>
           </div>
         </section>
@@ -763,7 +889,7 @@ export default function AdminPaymentsPanel() {
                 <th>Facturación</th>
                 <th>Valor curso</th>
                 <th>Pagado</th>
-                <th>Descuento</th>
+                <th>Descuentos / becas</th>
                 <th>Último movimiento</th>
                 <th>Saldo</th>
                 <th>Acciones</th>
@@ -823,8 +949,17 @@ export default function AdminPaymentsPanel() {
                           disabled={Number(user.pending_balance || 0) <= 0}
                           onClick={() => openDiscountEntry(user)}
                         >
-                          {Number(user.pending_balance || 0) > 0 ? 'Aplicar descuento' : 'Sin saldo para descuento'}
+                          {Number(user.pending_balance || 0) > 0 ? 'Aplicar descuento o beca' : 'Sin saldo para beneficio'}
                         </button>
+                        {isAdministrator && Number(user.discount_value || 0) > 0 ? (
+                          <button
+                            type="button"
+                            className="ghost-button compact-button discount-action-button"
+                            onClick={() => openPaymentDetail(user)}
+                          >
+                            Corregir descuento o beca
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -1124,31 +1259,70 @@ export default function AdminPaymentsPanel() {
         <div className="modal-backdrop" role="presentation">
           <section className="career-modal payment-modal payment-entry-modal discount-entry-modal" role="dialog" aria-modal="true" aria-labelledby="register-discount-title">
             <div className="career-modal-header">
-              <div><h4 id="register-discount-title">Aplicar descuento al curso</h4><p>{discountEntryUser.nombre}</p></div>
+              <div><h4 id="register-discount-title">Aplicar descuento o beca al curso</h4><p>{discountEntryUser.nombre}</p></div>
               <button type="button" className="ghost-button compact-button" onClick={() => setActivePaymentModal(null)}>Cerrar</button>
             </div>
             <div className="career-modal-body">
               <div className="payment-entry-context">
                 <div><span>Curso</span><strong>{discountEntryUser.course_name || '-'}</strong></div>
                 <div><span>Corte</span><strong>{discountEntryUser.cut_name || '-'}</strong></div>
-                <div><span>Descuento actual</span><strong>{formatMoney(discountEntryUser.discount_value)}</strong></div>
+                <div><span>Descuentos y becas</span><strong>{formatMoney(discountEntryUser.discount_value)}</strong></div>
                 <div><span>Saldo pendiente</span><strong>{formatMoney(discountEntryUser.pending_balance)}</strong></div>
               </div>
               <div className="discount-balance-preview" aria-live="polite">
-                <div><span>Descuento a aplicar</span><strong>- {formatMoney(discountEntryForm.valor)}</strong></div>
-                <div><span>Nuevo descuento acumulado</span><strong>{formatMoney(Number(discountEntryUser.discount_value || 0) + Number(discountEntryForm.valor || 0))}</strong></div>
-                <div><span>Nuevo saldo pendiente</span><strong>{formatMoney(Math.max(0, Number(discountEntryUser.pending_balance || 0) - Number(discountEntryForm.valor || 0)))}</strong></div>
+                <div><span>Porcentaje a aplicar</span><strong>{discountPercentage || 0} %</strong></div>
+                <div><span>Valor calculado</span><strong>- {formatMoney(calculatedDiscountValue)}</strong></div>
+                <div><span>Nuevo saldo pendiente</span><strong>{formatMoney(Math.max(0, discountPendingBalance - calculatedDiscountValue))}</strong></div>
               </div>
               <form className="auth-form payment-entry-form" onSubmit={handleDiscountEntrySubmit}>
                 <div className="lookup-grid payment-entry-grid">
-                  <label className="field"><span>Tipo de descuento *</span><select name="tipo_descuento" value={discountEntryForm.tipo_descuento} onChange={handleDiscountEntryChange}><option value="BECA">Beca</option><option value="CONVENIO">Convenio</option><option value="PRONTO_PAGO">Pronto pago</option><option value="PROMOCIONAL">Promocional</option><option value="INSTITUCIONAL">Institucional</option><option value="OTRO">Otro</option></select></label>
-                  <label className="field"><span>Valor del descuento *</span><input name="valor" type="number" min="0.01" max={discountEntryUser.pending_balance} step="0.01" required value={discountEntryForm.valor} onChange={handleDiscountEntryChange} placeholder="0,00" /></label>
+                  <label className="field"><span>Tipo de beneficio *</span><select name="tipo_descuento" value={discountEntryForm.tipo_descuento} onChange={handleDiscountEntryChange}><option value="BECA">Beca</option><option value="CONVENIO">Convenio</option><option value="PRONTO_PAGO">Pronto pago</option><option value="PROMOCIONAL">Promocional</option><option value="INSTITUCIONAL">Institucional</option><option value="DESCUENTO_REFERIDO">Descuento referido</option><option value="OTRO">Otro</option></select></label>
+                  <label className="field"><span>Porcentaje del descuento o beca *</span><input name="porcentaje" type="number" min="0" max="100" step="0.01" required value={discountEntryForm.porcentaje} onChange={handleDiscountEntryChange} placeholder="0 a 100" /><small className="field-hint">Rango permitido: 0 a 100 %. Para aplicar el beneficio debe ser mayor que 0. Se calcula sobre {formatMoney(discountCourseValue)}.</small></label>
                   <label className="field full-span"><span>Motivo *</span><input name="motivo" maxLength="200" required value={discountEntryForm.motivo} onChange={handleDiscountEntryChange} placeholder="Ejemplo: convenio institucional autorizado" /></label>
                   <label className="field full-span payment-observation-field"><span>Observaciones</span><textarea name="observacion" maxLength="500" rows="4" value={discountEntryForm.observacion} onChange={handleDiscountEntryChange} placeholder="Agrega detalles, autorización o condiciones aplicadas..." /><small className="field-hint">{discountEntryForm.observacion.length}/500 caracteres</small></label>
                 </div>
                 {discountEntryError ? <p className="form-error">{discountEntryError}</p> : null}
-                <div className="discount-warning">El descuento reducirá el saldo pendiente, pero no se contabilizará como dinero pagado.</div>
-                <button type="submit" className="submit-button payment-entry-submit" disabled={isSavingDiscount}>{isSavingDiscount ? 'Aplicando...' : 'Guardar descuento'}</button>
+                <div className="discount-warning">El descuento o beca reducirá el saldo pendiente, pero no se contabilizará como dinero pagado. Si el cálculo supera el saldo, se aplicará únicamente el valor pendiente.</div>
+                <button type="submit" className="submit-button payment-entry-submit" disabled={isSavingDiscount}>{isSavingDiscount ? 'Aplicando...' : discountEntryForm.tipo_descuento === 'BECA' ? 'Guardar beca' : 'Guardar descuento'}</button>
+              </form>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {activePaymentModal === 'correct-discount' && discountCorrectionPayment && selectedPaymentUser ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="career-modal payment-modal payment-entry-modal discount-entry-modal" role="dialog" aria-modal="true" aria-labelledby="correct-discount-title">
+            <div className="career-modal-header">
+              <div>
+                <h4 id="correct-discount-title">Corregir descuento o beca</h4>
+                <p>{selectedPaymentUser.student?.nombre || 'Estudiante'} · Movimiento {discountCorrectionPayment.num}</p>
+              </div>
+              <button type="button" className="ghost-button compact-button" onClick={() => setActivePaymentModal('detail')}>Cerrar</button>
+            </div>
+            <div className="career-modal-body">
+              <div className="payment-entry-context">
+                <div><span>Beneficio actual</span><strong>{discountCorrectionPayment.detalle || '-'}</strong></div>
+                <div><span>Valor actual</span><strong>{formatMoney(discountCorrectionPayment.valor_registrado)}</strong></div>
+                <div><span>Valor del curso</span><strong>{formatMoney(selectedPaymentUser.summary?.total_value)}</strong></div>
+                <div><span>Estado de cuenta</span><strong>{selectedPaymentUser.summary?.payment_status || '-'}</strong></div>
+              </div>
+              <div className="discount-balance-preview" aria-live="polite">
+                <div><span>Nuevo porcentaje</span><strong>{correctionPercentage || 0} %</strong></div>
+                <div><span>Nuevo valor calculado</span><strong>{formatMoney(correctedDiscountValue)}</strong></div>
+                <div><span>Diferencia</span><strong>{formatMoney(correctedDiscountValue - Number(discountCorrectionPayment.valor_registrado || 0))}</strong></div>
+              </div>
+              <form className="auth-form payment-entry-form" onSubmit={handleDiscountCorrectionSubmit}>
+                <div className="lookup-grid payment-entry-grid">
+                  <label className="field"><span>Tipo de beneficio corregido *</span><select name="tipo_descuento" value={discountCorrectionForm.tipo_descuento} onChange={handleDiscountCorrectionChange}><option value="BECA">Beca</option><option value="CONVENIO">Convenio</option><option value="PRONTO_PAGO">Pronto pago</option><option value="PROMOCIONAL">Promocional</option><option value="INSTITUCIONAL">Institucional</option><option value="DESCUENTO_REFERIDO">Descuento referido</option><option value="OTRO">Otro</option></select></label>
+                  <label className="field"><span>Nuevo porcentaje *</span><input name="porcentaje" type="number" min="0" max="100" step="0.01" required value={discountCorrectionForm.porcentaje} onChange={handleDiscountCorrectionChange} placeholder="0 a 100" /><small className="field-hint">Puede corregirse aunque la cuenta esté pagada.</small></label>
+                  <label className="field full-span"><span>Motivo del beneficio *</span><input name="motivo" maxLength="200" required value={discountCorrectionForm.motivo} onChange={handleDiscountCorrectionChange} placeholder="Motivo que quedará en el nuevo movimiento" /></label>
+                  <label className="field full-span"><span>Motivo de la corrección *</span><textarea name="motivo_correccion" maxLength="300" rows="3" required value={discountCorrectionForm.motivo_correccion} onChange={handleDiscountCorrectionChange} placeholder="Explica por qué se corrige el movimiento anterior" /></label>
+                  <label className="field full-span"><span>Observaciones</span><textarea name="observacion" maxLength="300" rows="3" value={discountCorrectionForm.observacion} onChange={handleDiscountCorrectionChange} /></label>
+                </div>
+                {discountCorrectionError ? <p className="form-error">{discountCorrectionError}</p> : null}
+                <div className="discount-warning">El movimiento anterior será anulado, no eliminado. El nuevo movimiento quedará relacionado para conservar la trazabilidad financiera.</div>
+                <button type="submit" className="submit-button payment-entry-submit" disabled={isSavingDiscountCorrection}>{isSavingDiscountCorrection ? 'Corrigiendo...' : 'Guardar corrección'}</button>
               </form>
             </div>
           </section>
@@ -1172,7 +1346,7 @@ export default function AdminPaymentsPanel() {
                 <div className="payment-detail-summary">
                   <div><span>Valor total</span><strong>{formatMoney(selectedPaymentUser.summary.total_value)}</strong></div>
                   <div><span>Valor cancelado</span><strong>{formatMoney(selectedPaymentUser.summary.registered_value)}</strong></div>
-                  <div><span>Descuentos</span><strong>{formatMoney(selectedPaymentUser.summary.discount_value)}</strong></div>
+                  <div><span>Descuentos y becas</span><strong>{formatMoney(selectedPaymentUser.summary.discount_value)}</strong></div>
                   <div><span>Valor pendiente</span><strong>{formatMoney(selectedPaymentUser.summary.pending_balance)}</strong></div>
                   <div className={`payment-detail-status ${selectedPaymentUser.summary.payment_status === 'PAGADO' ? 'is-paid' : 'is-pending'}`}>
                     <span>Estado</span><strong>{selectedPaymentUser.summary.payment_status || 'PENDIENTE'}</strong>
@@ -1184,12 +1358,12 @@ export default function AdminPaymentsPanel() {
                 <table className="admin-table payment-detail-table">
                   <thead>
                     <tr>
-                      <th>Fecha</th><th>Detalle</th><th>Período</th><th>Cargo</th><th>Valor cancelado</th><th>Estado</th><th>Banco / referencia / comprobante</th><th>Facturación</th>
+                      <th>Fecha</th><th>Detalle</th><th>Período</th><th>Cargo</th><th>Valor cancelado</th><th>Estado</th><th>Banco / referencia / comprobante</th><th>Facturación</th>{isAdministrator ? <th>Administración</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {isLoadingDetail ? (
-                      <tr><td colSpan="8">Cargando movimientos...</td></tr>
+                      <tr><td colSpan={isAdministrator ? 9 : 8}>Cargando movimientos...</td></tr>
                     ) : selectedPaymentUser?.payments?.length ? (
                       selectedPaymentUser.payments.map((payment) => (
                         <tr key={`${payment.codigo_periodo}-${payment.num}`}>
@@ -1229,10 +1403,19 @@ export default function AdminPaymentsPanel() {
                               </>
                             )}
                           </td>
+                          {isAdministrator ? (
+                            <td>
+                              {Number(payment.descuento_corregible || 0) === 1 ? (
+                                <button type="button" className="ghost-button compact-button" onClick={() => openDiscountCorrection(payment)}>
+                                  Corregir
+                                </button>
+                              ) : <span>No aplica</span>}
+                            </td>
+                          ) : null}
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan="8">El usuario no tiene movimientos registrados.</td></tr>
+                      <tr><td colSpan={isAdministrator ? 9 : 8}>El usuario no tiene movimientos registrados.</td></tr>
                     )}
                   </tbody>
                 </table>

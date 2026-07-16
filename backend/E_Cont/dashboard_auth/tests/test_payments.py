@@ -1,9 +1,12 @@
 from base64 import b64encode
+from decimal import Decimal
 from unittest import TestCase
 from unittest.mock import patch
 
 from dashboard_auth.payments import (
+    CONTINUING_EDUCATION_DISCOUNT_TYPES,
     EXCEL_ENROLLMENT_NET_AMOUNT,
+    _calculate_percentage_discount,
     _generated_payment_link_metrics,
     _fetch_payment_rows,
     _ensure_all_digital_payment_receipt,
@@ -15,6 +18,7 @@ from dashboard_auth.payments import (
     PaymentGatewayError,
     admin_cancel_payment,
     admin_get_payment_info,
+    correct_continuing_education_discount,
     register_continuing_education_payment,
     reconcile_pending_all_digital_payments,
 )
@@ -243,6 +247,91 @@ class ContinuingEducationManualPaymentTests(TestCase):
 
         self.assertEqual(upload_document.call_args.kwargs['document_folder'], 'FACTURAS')
         self.assertEqual(result['web_url'], 'https://example.test/factura')
+
+
+class ContinuingEducationDiscountTests(TestCase):
+    def test_accepts_referred_discount_type(self):
+        self.assertIn('DESCUENTO_REFERIDO', CONTINUING_EDUCATION_DISCOUNT_TYPES)
+
+    def test_calculates_discount_percentage_from_course_value(self):
+        value = _calculate_percentage_discount(
+            percentage=Decimal('25'),
+            course_value=Decimal('400'),
+            pending_balance=Decimal('400'),
+        )
+
+        self.assertEqual(value, Decimal('100.00'))
+
+    def test_caps_full_scholarship_at_pending_balance(self):
+        value = _calculate_percentage_discount(
+            percentage=Decimal('100'),
+            course_value=Decimal('500'),
+            pending_balance=Decimal('300'),
+        )
+
+        self.assertEqual(value, Decimal('300.00'))
+
+    def test_rejects_negative_percentage(self):
+        with self.assertRaisesRegex(PaymentGatewayError, 'no puede ser menor que 0 %'):
+            _calculate_percentage_discount(
+                percentage=Decimal('-1'),
+                course_value=Decimal('500'),
+                pending_balance=Decimal('500'),
+            )
+
+    def test_rejects_zero_when_applying_benefit(self):
+        with self.assertRaisesRegex(PaymentGatewayError, 'debe ser mayor que 0 %'):
+            _calculate_percentage_discount(
+                percentage=Decimal('0'),
+                course_value=Decimal('500'),
+                pending_balance=Decimal('500'),
+            )
+
+    def test_rejects_percentage_over_one_hundred(self):
+        with self.assertRaisesRegex(PaymentGatewayError, 'no puede superar el 100 %'):
+            _calculate_percentage_discount(
+                percentage=Decimal('101'),
+                course_value=Decimal('500'),
+                pending_balance=Decimal('500'),
+            )
+
+    @patch('dashboard_auth.payments.create_notification_safely')
+    @patch('dashboard_auth.payments.cache.delete')
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    @patch('dashboard_auth.payments._ensure_continuing_education_payments_available')
+    def test_corrects_discount_even_when_account_payment_status_is_not_consulted(
+        self, _ensure_available, fetch_rows, _cache_delete, _notify
+    ):
+        fetch_rows.side_effect = [
+            [{
+                'MovimientoId': 10,
+                'CuentaId': 5,
+                'ValorOriginal': Decimal('100.00'),
+                'ValorCurso': Decimal('400.00'),
+                'OtrosDescuentos': Decimal('0.00'),
+                'ObservacionMatricula': '',
+            }],
+            [{
+                'movimiento_id': '11',
+                'movimiento_relacionado_id': '10',
+                'valor': Decimal('200.00'),
+            }],
+        ]
+
+        result = correct_continuing_education_discount(
+            {
+                'movimiento_id': '10',
+                'tipo_descuento': 'BECA',
+                'porcentaje': '50',
+                'motivo': 'Beca autorizada',
+                'motivo_correccion': 'Porcentaje registrado incorrectamente',
+            },
+            user_login='admin',
+        )
+
+        self.assertEqual(result['value'], '200.00')
+        self.assertEqual(result['replacement']['movimiento_relacionado_id'], '10')
+        self.assertIn("EstadoMovimiento = 'ANULADO'", fetch_rows.call_args_list[1].args[0])
 
 
 class ExcelEnrollmentValueTests(TestCase):

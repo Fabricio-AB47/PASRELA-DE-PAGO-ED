@@ -83,6 +83,7 @@ from .payments import (
     list_financial_payment_operations,
     reconcile_pending_all_digital_payments,
     search_payment_links_for_operations,
+    correct_continuing_education_discount,
     register_continuing_education_payment,
     register_continuing_education_discount,
     upload_continuing_education_invoice,
@@ -2177,7 +2178,41 @@ def admin_payment_discount_view(request):
     except Exception:
         logger.exception('Unexpected error registering continuing education discount.')
         return JsonResponse({'ok': False, 'message': 'No fue posible registrar el descuento.'}, status=500)
-    return JsonResponse({'ok': True, 'message': 'Descuento registrado en INTECEDUCONTINUA.', 'result': result}, status=201)
+    benefit_name = 'Beca' if result.get('discount_type') == 'BECA' else 'Descuento'
+    return JsonResponse(
+        {'ok': True, 'message': f'{benefit_name} registrada en INTECEDUCONTINUA.', 'result': result},
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_payment_discount_correction_view(request):
+    role = (getattr(request, 'dashboard_user', {}) or {}).get('role') or {}
+    if str(role.get('name') or '').strip().upper() != 'ADMINISTRADOR':
+        return JsonResponse(
+            {'ok': False, 'message': 'Solo el administrador puede corregir descuentos o becas.'},
+            status=403,
+        )
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = correct_continuing_education_discount(
+            payload,
+            user_login=_dashboard_user_login(request),
+        )
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error correcting continuing education discount.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible corregir el descuento o beca.'}, status=500)
+    return JsonResponse(
+        {'ok': True, 'message': 'Descuento o beca corregido en INTECEDUCONTINUA.', 'result': result},
+        status=201,
+    )
 
 
 @csrf_exempt

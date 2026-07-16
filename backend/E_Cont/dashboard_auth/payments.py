@@ -6,7 +6,7 @@ import os
 import re
 import secrets
 from base64 import b64decode, b64encode, urlsafe_b64decode
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime
 from html import escape
 from hashlib import sha256
@@ -66,6 +66,15 @@ GRAPH_MAIL_CC_ENV_KEYS = (
 )
 GRAPH_MAIL_SEND_ROLE = 'Mail.Send'
 EXCEL_ENROLLMENT_NET_AMOUNT = Decimal('400.00')
+CONTINUING_EDUCATION_DISCOUNT_TYPES = {
+    'BECA',
+    'CONVENIO',
+    'PRONTO_PAGO',
+    'PROMOCIONAL',
+    'INSTITUCIONAL',
+    'DESCUENTO_REFERIDO',
+    'OTRO',
+}
 PAID_PROVIDER_STATUSES = {'PAGADA', 'PAGADO', 'APROBADA', 'APROBADO', 'COMPLETADA', 'COMPLETADO'}
 TERMINAL_PROVIDER_STATUSES = PAID_PROVIDER_STATUSES | {
     'ANULADA', 'ANULADO', 'ELIMINADA', 'ELIMINADO', 'ERROR', 'RECHAZADA', 'RECHAZADO',
@@ -1586,6 +1595,15 @@ def get_registered_user_payment_detail(codigo_estud: Any, *, cuenta_id: Any = ''
                 LTRIM(RTRIM(M.FormaPago)) AS forma_pago,
                 LTRIM(RTRIM(M.TipoMovimiento)) AS tipo_movimiento,
                 LTRIM(RTRIM(M.EstadoMovimiento)) AS estado_movimiento,
+                LTRIM(RTRIM(M.Observacion)) AS observacion,
+                CONVERT(varchar(50), M.MovimientoRelacionadoId) AS movimiento_relacionado_id,
+                CASE
+                    WHEN M.EstadoMovimiento = 'ACTIVO'
+                     AND M.TipoMovimiento = 'HABER'
+                     AND UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO'
+                     AND UPPER(LTRIM(RTRIM(ISNULL(M.Concepto, '')))) NOT LIKE 'AJUSTE VALOR NETO CURSO - EXCEL%%'
+                    THEN 1 ELSE 0
+                END AS descuento_corregible,
                 CASE
                     WHEN M.TipoMovimiento <> 'HABER' OR UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO' THEN 'NO_APLICA'
                     WHEN F.FacturaMovimientoId IS NULL OR F.EstadoFactura <> 'SUBIDA' THEN 'PENDIENTE'
@@ -1988,14 +2006,12 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
     codigo_estud = _clean_text(payload.get('codigo_estud'))
     corte_id = _clean_text(payload.get('corte_id'))
     estudiante_corte_id = _clean_text(payload.get('estudiante_corte_id'))
-    value = _to_decimal(payload.get('valor'))
+    percentage = _to_decimal(payload.get('porcentaje') or payload.get('percentage'))
     if not codigo_estud.isdigit() or not corte_id.isdigit() or not estudiante_corte_id.isdigit():
         raise PaymentGatewayError('La matrícula seleccionada no es válida.')
-    if value <= 0:
-        raise PaymentGatewayError('El descuento debe ser mayor a cero.')
+    _validate_discount_percentage(percentage)
     discount_type = _trim_to_max(payload.get('tipo_descuento') or 'OTRO', 50).upper()
-    allowed_types = {'BECA', 'CONVENIO', 'PRONTO_PAGO', 'PROMOCIONAL', 'INSTITUCIONAL', 'OTRO'}
-    if discount_type not in allowed_types:
+    if discount_type not in CONTINUING_EDUCATION_DISCOUNT_TYPES:
         raise PaymentGatewayError('El tipo de descuento no es válido.')
     reason = _trim_to_max(payload.get('motivo'), 200)
     if not reason:
@@ -2005,7 +2021,8 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
         """
         SELECT TOP (1) E.CorteEstudianteId, E.CorteId, E.CodigoEstud,
             LTRIM(RTRIM(E.ApellidosNombre)) AS NombreEstudiante,
-            COALESCE(NULLIF(LTRIM(RTRIM(D.correointec)), ''), NULLIF(LTRIM(RTRIM(D.correo)), '')) AS UsuarioLogin
+            COALESCE(NULLIF(LTRIM(RTRIM(D.correointec)), ''), NULLIF(LTRIM(RTRIM(D.correo)), '')) AS UsuarioLogin,
+            LTRIM(RTRIM(ISNULL(E.Observacion, ''))) AS ObservacionMatricula
         FROM dbo.CORTE_CURSO_ESTUDIANTE AS E
         LEFT JOIN dbo.DATOS_ESTUD AS D ON D.codigo_estud = E.CodigoEstud
         WHERE E.CorteEstudianteId = %s AND E.CorteId = %s AND E.CodigoEstud = %s AND E.EstadoRegistro = 'A'
@@ -2035,6 +2052,7 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
         SELECT TOP (1)
             CE.EstudianteCorteId,
             C.CuentaId,
+            ISNULL(SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'DEBE' THEN M.Valor ELSE 0 END), 0) AS ValorCurso,
             ISNULL(SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'DEBE' THEN M.Valor ELSE 0 END), 0)
               - ISNULL(SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' THEN M.Valor ELSE 0 END), 0) AS SaldoPendiente
         FROM {complement_enrollments} AS CE
@@ -2051,8 +2069,22 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
     pending_balance = _to_decimal(account.get('SaldoPendiente'))
     if pending_balance <= 0:
         raise PaymentGatewayError('La cuenta no tiene saldo pendiente para aplicar un descuento.')
-    if value > pending_balance:
-        raise PaymentGatewayError(f'El descuento no puede superar el saldo pendiente de ${pending_balance:.2f}.')
+    course_value = _to_decimal(account.get('ValorCurso'))
+    if _clean_text(enrollment.get('ObservacionMatricula')).lower().startswith('matrícula masiva'):
+        course_value = EXCEL_ENROLLMENT_NET_AMOUNT
+    value = _calculate_percentage_discount(
+        percentage=percentage,
+        course_value=course_value,
+        pending_balance=pending_balance,
+    )
+    benefit_label = 'BECA' if discount_type == 'BECA' else f'DESCUENTO {discount_type}'
+    percentage_label = _format_percentage(percentage)
+    calculation_note = (
+        f'PORCENTAJE={percentage_label}%; BASE_CURSO={course_value:.2f}; '
+        f'VALOR_APLICADO={value:.2f}'
+    )
+    user_observation = _clean_text(payload.get('observacion'))
+    stored_observation = f'{calculation_note}. {user_observation}' if user_observation else calculation_note
 
     procedure = _continuing_education_object('fin', 'usp_RegistrarMovimientoCuenta')
     movement_rows = _fetch_payment_rows(
@@ -2068,31 +2100,201 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
         """,
         [
             account.get('CuentaId'),
-            _trim_to_max(f'DESCUENTO {discount_type}: {reason}', 200),
+            _trim_to_max(f'{benefit_label} {percentage_label}%: {reason}', 200),
             value,
             _trim_to_max(user_login or 'SISTEMA', 50),
-            _trim_to_max(payload.get('observacion'), 500),
+            _trim_to_max(stored_observation, 500),
         ],
     )
     cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
     create_notification_safely(
         event_key=f"discount:{account.get('CuentaId')}:{movement_rows[0].get('MovimientoId') if movement_rows else reason}",
         notification_type='DISCOUNT_APPLIED',
-        title='Descuento aplicado',
-        message=f'Se aplicó un descuento de ${value:.2f} a tu cuenta de Educación Continua.',
+        title='Beca aplicada' if discount_type == 'BECA' else 'Descuento aplicado',
+        message=(
+            f'Se aplicó {"una beca" if discount_type == "BECA" else "un descuento"} '
+            f'del {percentage_label} % (${value:.2f}) a tu cuenta de Educación Continua.'
+        ),
         recipient_category='student',
         recipient_login=_clean_text(enrollment.get('UsuarioLogin')),
         route='#dashboard',
-        data={'codigo_estud': codigo_estud, 'corte_id': corte_id, 'discount_type': discount_type, 'value': str(value)},
+        data={
+            'codigo_estud': codigo_estud,
+            'corte_id': corte_id,
+            'discount_type': discount_type,
+            'percentage': str(percentage),
+            'course_value': str(course_value),
+            'value': str(value),
+        },
     )
     return {
         'ok': True,
         'database': complement_database_name(),
         'discount': movement_rows[0] if movement_rows else {},
         'discount_type': discount_type,
+        'percentage': str(percentage),
+        'course_value': str(course_value),
         'value': str(value),
         'pending_balance': str(max(Decimal('0.00'), pending_balance - value)),
     }
+
+
+def correct_continuing_education_discount(payload: dict[str, Any], *, user_login: str) -> dict[str, Any]:
+    _ensure_continuing_education_payments_available()
+    movement_id = _clean_text(payload.get('movimiento_id') or payload.get('movement_id'))
+    if not movement_id.isdigit():
+        raise PaymentGatewayError('Debes seleccionar un descuento o beca válido para corregir.')
+    percentage = _to_decimal(payload.get('porcentaje') or payload.get('percentage'))
+    _validate_discount_percentage(percentage)
+    discount_type = _trim_to_max(payload.get('tipo_descuento') or 'OTRO', 50).upper()
+    if discount_type not in CONTINUING_EDUCATION_DISCOUNT_TYPES:
+        raise PaymentGatewayError('El tipo de descuento no es válido.')
+    correction_reason = _trim_to_max(payload.get('motivo_correccion'), 300)
+    if not correction_reason:
+        raise PaymentGatewayError('Debes indicar el motivo de la corrección.')
+    benefit_reason = _trim_to_max(payload.get('motivo') or correction_reason, 200)
+
+    movements_table = _continuing_education_object('fin', 'MovimientoCuenta')
+    accounts_table = _continuing_education_object('fin', 'CuentaEstudiante')
+    enrollments_table = _continuing_education_object('edu', 'CorteEstudiante')
+    original_rows = _fetch_payment_rows(
+        f"""
+        SELECT TOP (1)
+            M.MovimientoId, M.CuentaId, M.Valor AS ValorOriginal,
+            C.CorteId, CONVERT(varchar(50), C.CodigoEstud) AS CodigoEstud,
+            LTRIM(RTRIM(ISNULL(CE.Observacion, ''))) AS ObservacionMatricula,
+            ISNULL(SUM(CASE
+                WHEN A.EstadoMovimiento = 'ACTIVO' AND A.TipoMovimiento = 'DEBE'
+                THEN A.Valor ELSE 0 END), 0) AS ValorCurso,
+            ISNULL(SUM(CASE
+                WHEN A.EstadoMovimiento = 'ACTIVO'
+                 AND A.TipoMovimiento = 'HABER'
+                 AND UPPER(ISNULL(A.FormaPago, '')) = 'DESCUENTO'
+                 AND A.MovimientoId <> M.MovimientoId
+                 AND UPPER(LTRIM(RTRIM(ISNULL(A.Concepto, '')))) NOT LIKE 'AJUSTE VALOR NETO CURSO - EXCEL%%'
+                THEN A.Valor ELSE 0 END), 0) AS OtrosDescuentos
+        FROM {movements_table} AS M
+        INNER JOIN {accounts_table} AS C ON C.CuentaId = M.CuentaId
+        INNER JOIN {enrollments_table} AS CE ON CE.EstudianteCorteId = C.EstudianteCorteId
+        LEFT JOIN {movements_table} AS A ON A.CuentaId = C.CuentaId
+        WHERE M.MovimientoId = %s
+          AND M.EstadoMovimiento = 'ACTIVO'
+          AND M.TipoMovimiento = 'HABER'
+          AND UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO'
+          AND UPPER(LTRIM(RTRIM(ISNULL(M.Concepto, '')))) NOT LIKE 'AJUSTE VALOR NETO CURSO - EXCEL%%'
+        GROUP BY M.MovimientoId, M.CuentaId, M.Valor, C.CorteId, C.CodigoEstud, CE.Observacion
+        """,
+        [movement_id],
+    )
+    if not original_rows:
+        raise PaymentGatewayError('El descuento seleccionado no está activo o no puede corregirse.')
+    original = original_rows[0]
+    course_value = _to_decimal(original.get('ValorCurso'))
+    if _clean_text(original.get('ObservacionMatricula')).lower().startswith('matrícula masiva'):
+        course_value = EXCEL_ENROLLMENT_NET_AMOUNT
+    other_discounts = _to_decimal(original.get('OtrosDescuentos'))
+    maximum_value = max(Decimal('0.00'), course_value - other_discounts)
+    new_value = min(
+        (course_value * percentage / Decimal('100')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
+        maximum_value,
+    )
+    if new_value <= 0:
+        raise PaymentGatewayError('Los demás beneficios ya cubren el valor completo del curso.')
+
+    percentage_label = _format_percentage(percentage)
+    benefit_label = 'BECA' if discount_type == 'BECA' else f'DESCUENTO {discount_type}'
+    observation = _trim_to_max(
+        (
+            f'CORRECCIÓN MOVIMIENTO {movement_id}; PORCENTAJE={percentage_label}%; '
+            f'BASE_CURSO={course_value:.2f}; VALOR_APLICADO={new_value:.2f}. '
+            f'{_clean_text(payload.get("observacion"))}'
+        ),
+        500,
+    )
+    correction_rows = _fetch_payment_rows(
+        f"""
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+        UPDATE {movements_table}
+        SET EstadoMovimiento = 'ANULADO', UsuarioAnulacion = %s,
+            FechaAnulacion = sysdatetime(), MotivoAnulacion = %s
+        WHERE MovimientoId = %s AND EstadoMovimiento = 'ACTIVO'
+          AND TipoMovimiento = 'HABER' AND UPPER(ISNULL(FormaPago, '')) = 'DESCUENTO';
+        IF @@ROWCOUNT = 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+            THROW 53160, 'El descuento ya fue corregido o anulado.', 1;
+        END;
+        INSERT INTO {movements_table} (
+            CuentaId, TipoMovimiento, Concepto, Valor, FormaPago,
+            MovimientoRelacionadoId, EstadoMovimiento, UsuarioRegistro, Observacion
+        )
+        VALUES (%s, 'HABER', %s, %s, 'DESCUENTO', %s, 'ACTIVO', %s, %s);
+        DECLARE @NuevoMovimientoId int = SCOPE_IDENTITY();
+        COMMIT TRANSACTION;
+        SELECT CONVERT(varchar(50), MovimientoId) AS movimiento_id,
+            CONVERT(varchar(50), MovimientoRelacionadoId) AS movimiento_relacionado_id,
+            Concepto AS detalle, Valor AS valor, FormaPago AS forma_pago,
+            EstadoMovimiento AS estado_movimiento
+        FROM {movements_table} WHERE MovimientoId = @NuevoMovimientoId;
+        """,
+        [
+            _trim_to_max(user_login or 'SISTEMA', 50), correction_reason, movement_id,
+            original.get('CuentaId'),
+            _trim_to_max(f'{benefit_label} {percentage_label}%: {benefit_reason}', 200),
+            new_value, movement_id, _trim_to_max(user_login or 'SISTEMA', 50), observation,
+        ],
+    )
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+    replacement = correction_rows[0] if correction_rows else {}
+    create_notification_safely(
+        event_key=f'discount-corrected:{movement_id}:{replacement.get("movimiento_id")}',
+        notification_type='DISCOUNT_CORRECTED',
+        title='Descuento o beca corregido',
+        message=f'El beneficio fue corregido al {percentage_label} % (${new_value:.2f}).',
+        recipient_category='staff', recipient_role='ADMINISTRADOR', route='#payments',
+        data={
+            'original_movement_id': movement_id,
+            'replacement_movement_id': replacement.get('movimiento_id'),
+            'percentage': str(percentage), 'value': str(new_value),
+        },
+    )
+    return {
+        'ok': True, 'database': complement_database_name(),
+        'original_movement_id': movement_id, 'replacement': replacement,
+        'discount_type': discount_type, 'percentage': str(percentage),
+        'course_value': str(course_value), 'value': str(new_value),
+    }
+
+
+def _calculate_percentage_discount(
+    *,
+    percentage: Decimal,
+    course_value: Decimal,
+    pending_balance: Decimal,
+) -> Decimal:
+    _validate_discount_percentage(percentage)
+    if course_value <= 0:
+        raise PaymentGatewayError('No se encontró un valor de curso válido para calcular el descuento o beca.')
+    if pending_balance <= 0:
+        raise PaymentGatewayError('La cuenta no tiene saldo pendiente para aplicar un descuento o beca.')
+    calculated_value = (
+        course_value * percentage / Decimal('100')
+    ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return min(calculated_value, pending_balance.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
+def _validate_discount_percentage(percentage: Decimal) -> None:
+    if percentage < Decimal('0'):
+        raise PaymentGatewayError('El porcentaje del descuento o beca no puede ser menor que 0 %.')
+    if percentage == Decimal('0'):
+        raise PaymentGatewayError('El porcentaje debe ser mayor que 0 % para aplicar el descuento o beca.')
+    if percentage > Decimal('100'):
+        raise PaymentGatewayError('El porcentaje del descuento o beca no puede superar el 100 %.')
+
+
+def _format_percentage(value: Decimal) -> str:
+    return format(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), 'f').rstrip('0').rstrip('.')
 
 
 def upload_continuing_education_invoice(payload: dict[str, Any], *, user_login: str) -> dict[str, Any]:
