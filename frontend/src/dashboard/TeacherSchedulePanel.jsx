@@ -296,7 +296,7 @@ export default function TeacherSchedulePanel() {
             </div>
           </form>
         ) : (
-          <p className="teacher-panel-empty">No hay cortes asignados para cargar horario.</p>
+          <p className="teacher-panel-empty">No hay cohortes asignadas para cargar horario.</p>
         )}
       </article>
 

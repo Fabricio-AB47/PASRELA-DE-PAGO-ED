@@ -18,17 +18,17 @@ export const DASHBOARD_ROUTES = [
     id: 'course-cuts',
     hash: '#course-cuts',
     aliases: ['#admin-course-cuts'],
-    label: 'Cortes',
-    title: 'Cortes de inscripción',
-    description: 'Abre y cierra cortes para organizar matrículas, certificados y cargas Excel.',
+    label: 'Cohortes',
+    title: 'Cohortes de inscripción',
+    description: 'Abre, corrige y cierra cohortes para organizar matrículas, certificados y cargas Excel.',
   },
   {
     id: 'course-students',
     hash: '#course-students',
     aliases: ['#admin-course-students'],
-    label: 'Estudiantes corte',
-    title: 'Estudiantes de corte',
-    description: 'Consulta estudiantes por corte y sincronízalos con educación continua.',
+    label: 'Estudiantes cohorte',
+    title: 'Estudiantes de cohorte',
+    description: 'Consulta estudiantes por cohorte y sincronízalos con educación continua.',
   },
   {
     id: 'enrolled-students',
@@ -36,7 +36,15 @@ export const DASHBOARD_ROUTES = [
     aliases: ['#admin-enrolled-students', '#matriculados'],
     label: 'Matriculados',
     title: 'Estudiantes matriculados',
-    description: 'Consulta los estudiantes matriculados en educación continua por corte.',
+    description: 'Consulta los estudiantes matriculados en educación continua por cohorte.',
+  },
+  {
+    id: 'student-updates',
+    hash: '#student-updates',
+    aliases: ['#admin-student-updates', '#actualizar-estudiantes'],
+    label: 'Actualizar estudiantes',
+    title: 'Actualizar estudiantes matriculados',
+    description: 'Actualiza información principal y de contacto de estudiantes ya matriculados.',
   },
   {
     id: 'attendance',
@@ -44,7 +52,7 @@ export const DASHBOARD_ROUTES = [
     aliases: ['#admin-attendance', '#asistencia'],
     label: 'Asistencia',
     title: 'Asistencia',
-    description: 'Registra asistencia de estudiantes matriculados en educación continua por corte.',
+    description: 'Registra asistencia de estudiantes matriculados en educación continua por cohorte.',
   },
   {
     id: 'admin-schedule',
@@ -52,7 +60,7 @@ export const DASHBOARD_ROUTES = [
     aliases: ['#admin-horario', '#horario-admin', '#schedule-admin'],
     label: 'Horario',
     title: 'Horario',
-    description: 'Crea horarios por corte y genera sesiones de clase.',
+    description: 'Crea horarios por cohorte y genera sesiones de clase.',
   },
   {
     id: 'admin-teams',
@@ -76,7 +84,7 @@ export const DASHBOARD_ROUTES = [
     aliases: ['#admin-certificados', '#plantilla-certificado', '#certificado'],
     label: 'Certificado',
     title: 'Certificado',
-    description: 'Genera certificados por corte y administra la plantilla institucional.',
+    description: 'Genera certificados por cohorte y administra la plantilla institucional.',
   },
   {
     id: 'payments',
@@ -141,7 +149,7 @@ export const DASHBOARD_ROUTES = [
     aliases: ['#horario-docente'],
     label: 'Horario',
     title: 'Horario docente',
-    description: 'Carga horarios por corte para reflejarlos a estudiantes.',
+    description: 'Carga horarios por cohorte para reflejarlos a estudiantes.',
   },
   {
     id: 'student-schedule',
@@ -165,6 +173,13 @@ const TEACHER_ADMIN_ROUTE_IDS = new Set(['teacher-entry', 'teacher-enrollment'])
 const TEACHER_PANEL_ROUTE_IDS = new Set(['teacher-attendance', 'teacher-grades', 'teacher-schedule'])
 const STUDENT_PANEL_ROUTE_IDS = new Set(['student-schedule', 'student-grades'])
 const FINANCIAL_ROUTE_IDS = new Set(['home', 'enrolled-students', 'payments', 'payment-operations'])
+const STUDENT_UPDATE_ROLE_NAMES = new Set([
+  'ADMINISTRADOR',
+  'ACADEMICO',
+  'ACADÉMICO',
+  'SECRETARIA',
+  'SECRETARÍA',
+])
 
 export function normalizedRoleName(user) {
   return String(user?.role?.name || '').trim().toUpperCase()
@@ -177,6 +192,8 @@ export function visibleRoutesForUser(user) {
     }
     return DASHBOARD_ROUTES.filter(
       (route) => !TEACHER_PANEL_ROUTE_IDS.has(route.id) && !STUDENT_PANEL_ROUTE_IDS.has(route.id),
+    ).filter(
+      (route) => route.id !== 'student-updates' || STUDENT_UPDATE_ROLE_NAMES.has(normalizedRoleName(user)),
     )
   }
   if (user?.category === 'teacher') {

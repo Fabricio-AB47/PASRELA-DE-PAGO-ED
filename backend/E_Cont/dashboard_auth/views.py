@@ -43,6 +43,7 @@ from .course_cuts import (
     save_grade_transfer,
     sync_course_cut_students,
     sync_course_cut_teams,
+    update_course_cut,
 )
 from .continuing_education import complement_status
 from .inscription_catalogs import (
@@ -105,6 +106,11 @@ from .student_registration import (
     ensure_user_is_not_registered,
 )
 from .student_records import StudentLookupError, lookup_student_inscription
+from .student_updates import (
+    StudentUpdateError,
+    list_students_for_update,
+    update_enrolled_student,
+)
 from .student_dashboard import (
     StudentDashboardError,
     build_student_certificate,
@@ -932,12 +938,12 @@ def admin_course_cuts_view(_request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno cargando las cortes.',
+                'message': 'Ocurrió un error interno cargando las cohortes.',
             },
             status=500,
         )
 
-    return JsonResponse({'ok': True, 'message': 'Cortes cargadas.', 'cuts': cuts})
+    return JsonResponse({'ok': True, 'message': 'Cohortes cargadas.', 'cuts': cuts})
 
 
 @csrf_exempt
@@ -961,12 +967,41 @@ def admin_course_cut_create_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno creando la corte.',
+                'message': 'Ocurrió un error interno creando la cohorte.',
             },
             status=500,
         )
 
-    return JsonResponse({'ok': True, 'message': 'Corte creada.', 'cut': result}, status=201)
+    return JsonResponse({'ok': True, 'message': 'Cohorte creada.', 'cut': result}, status=201)
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_course_cut_update_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'},
+            status=400,
+        )
+
+    try:
+        result = update_course_cut(payload, user_login=_dashboard_user_login(request))
+    except CourseCutError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while updating course cut.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno actualizando la cohorte.',
+            },
+            status=500,
+        )
+
+    return JsonResponse({'ok': True, 'message': 'Cohorte actualizada.', 'cut': result})
 
 
 @csrf_exempt
@@ -990,12 +1025,12 @@ def admin_course_cut_close_view(request):
         return JsonResponse(
             {
                 'ok': False,
-                'message': 'Ocurrió un error interno cerrando la corte.',
+                'message': 'Ocurrió un error interno cerrando la cohorte.',
             },
             status=500,
         )
 
-    return JsonResponse({'ok': True, 'message': 'Corte cerrada.', 'cut': result})
+    return JsonResponse({'ok': True, 'message': 'Cohorte cerrada.', 'cut': result})
 
 
 @require_GET
@@ -1186,6 +1221,64 @@ def admin_enrolled_students_view(request):
             'result': result,
         }
     )
+
+
+@require_GET
+@require_admin_session
+@never_cache
+def admin_student_updates_view(request):
+    try:
+        result = list_students_for_update(
+            request.GET.get('corte_id') or request.GET.get('CorteId'),
+            search=request.GET.get('q') or request.GET.get('search') or '',
+            limit=request.GET.get('limit') or 300,
+        )
+    except StudentUpdateError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while loading students for update.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno cargando estudiantes para actualización.',
+            },
+            status=500,
+        )
+    return JsonResponse(
+        {
+            'ok': True,
+            'message': 'Estudiantes disponibles para actualización.',
+            'result': result,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_student_update_save_view(request):
+    try:
+        payload = json.loads(request.body or b'{}')
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return JsonResponse({'ok': False, 'message': 'Envía un JSON válido.'}, status=400)
+
+    try:
+        result = update_enrolled_student(
+            payload,
+            user_login=_dashboard_user_login(request),
+        )
+    except StudentUpdateError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while updating enrolled student.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'Ocurrió un error interno actualizando la información del estudiante.',
+            },
+            status=500,
+        )
+    return JsonResponse({'ok': True, **result})
 
 
 @require_GET

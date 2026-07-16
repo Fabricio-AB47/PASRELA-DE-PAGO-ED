@@ -11,7 +11,7 @@ const TEMPLATE_TYPE_OPTIONS = [
 ]
 
 function cutLabel(cut) {
-  const name = cut.nombre_corte || `Corte ${cut.numero_corte || cut.corte_id}`
+  const name = cut.nombre_corte || `Cohorte ${cut.numero_corte || cut.corte_id}`
   const subject = cut.materias_label || cut.materia_pensum || cut.curso_educontinua || ''
   return subject ? `${name} - ${subject}` : name
 }
@@ -165,7 +165,7 @@ export default function AdminCertificateTemplatePanel() {
       const response = await adminFetch('/api/auth/admin/course-cuts/')
       const payload = await readResponsePayload(response)
       if (!payload || !response.ok || !payload.ok) {
-        throw new Error(payload?.message ?? `No fue posible cargar cortes (${response.status}).`)
+        throw new Error(payload?.message ?? `No fue posible cargar cohortes (${response.status}).`)
       }
       const loadedCuts = payload.cuts || []
       const initialCutId = loadedCuts[0]?.corte_id || ''
@@ -247,7 +247,7 @@ export default function AdminCertificateTemplatePanel() {
 
   async function handleGenerateCertificates() {
     if (!selectedCutId || !selectedStudentIds.length) {
-      setError('Selecciona una corte y al menos un estudiante aprobado.')
+      setError('Selecciona una cohorte y al menos un estudiante aprobado.')
       return
     }
 
@@ -481,8 +481,8 @@ export default function AdminCertificateTemplatePanel() {
       <article className="module-card teacher-panel-card">
         <div className="module-card-header">
           <div>
-            <h4>Certificado por corte</h4>
-            <p>Genera y adjunta el certificado al estudiante matriculado en la corte seleccionada.</p>
+            <h4>Certificado por cohorte</h4>
+            <p>Genera y adjunta el certificado al estudiante matriculado en la cohorte seleccionada.</p>
           </div>
           <button
             type="button"
@@ -496,9 +496,9 @@ export default function AdminCertificateTemplatePanel() {
 
         <form className="admin-form-grid" onSubmit={handleStudentSearch}>
           <label className="field">
-            <span>Corte</span>
+            <span>Cohorte</span>
             <select value={selectedCutId} onChange={handleCutChange} disabled={isLoadingCuts}>
-              <option value="">Selecciona una corte</option>
+              <option value="">Selecciona una cohorte</option>
               {cuts.map((cut) => (
                 <option key={cut.corte_id} value={cut.corte_id}>
                   {cutLabel(cut)}
@@ -613,7 +613,7 @@ export default function AdminCertificateTemplatePanel() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="7">No hay estudiantes matriculados para la corte seleccionada.</td>
+                  <td colSpan="7">No hay estudiantes matriculados para la cohorte seleccionada.</td>
                 </tr>
               )}
             </tbody>
@@ -672,7 +672,7 @@ export default function AdminCertificateTemplatePanel() {
         </div>
 
         {cutLogoOptions.length ? (
-          <section className="certificate-cut-logo-list" aria-label="Logos asignados a la corte">
+          <section className="certificate-cut-logo-list" aria-label="Logos asignados a la cohorte">
             {cutLogoOptions.map((logo) => (
               <label key={logo.id} className="check-row certificate-cut-logo-option">
                 <input

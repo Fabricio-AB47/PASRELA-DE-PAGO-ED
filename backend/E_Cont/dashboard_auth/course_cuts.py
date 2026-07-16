@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -55,31 +56,34 @@ def list_course_cuts() -> list[dict[str, Any]]:
     _ensure_course_cut_schema()
     query = """
         SELECT TOP (300)
-            CorteId,
-            TipoOferta,
-            NumeroCorte,
-            NombreCorte,
-            FechaInicio,
-            FechaFin,
-            EstadoCorte,
-            Cod_AnioBasica,
-            Carrera,
-            CodigoPeriodo,
-            Periodo,
-            CodigoMateria,
-            MateriaPensum,
-            CodCurso,
-            CursoEduContinua,
-            CupoEsperado,
-            TotalEstudiantes,
-            TotalInscritos,
-            TotalCursando,
-            TotalRetirados,
-            TotalAprobados,
-            TotalReprobados,
-            TotalFinalizados
-        FROM dbo.VW_CORTE_RESUMEN
-        ORDER BY FechaInicio DESC, NumeroCorte DESC, CorteId DESC
+            R.CorteId,
+            R.TipoOferta,
+            R.NumeroCorte,
+            R.NombreCorte,
+            R.FechaInicio,
+            R.FechaFin,
+            R.EstadoCorte,
+            R.Cod_AnioBasica,
+            R.Carrera,
+            R.CodigoPeriodo,
+            R.Periodo,
+            R.CodigoMateria,
+            R.MateriaPensum,
+            R.CodCurso,
+            R.CursoEduContinua,
+            R.CupoEsperado,
+            R.TotalEstudiantes,
+            R.TotalInscritos,
+            R.TotalCursando,
+            R.TotalRetirados,
+            R.TotalAprobados,
+            R.TotalReprobados,
+            R.TotalFinalizados,
+            CC.Horas,
+            CC.Observacion
+        FROM dbo.VW_CORTE_RESUMEN R
+        INNER JOIN dbo.CORTE_CURSO CC ON CC.CorteId = R.CorteId
+        ORDER BY R.FechaInicio DESC, R.NumeroCorte DESC, R.CorteId DESC
     """
     return [_normalize_cut_summary(row) for row in _fetch_all(query, [])]
 
@@ -92,9 +96,9 @@ def create_course_cut(payload: dict[str, Any], *, user_login: str = '') -> dict[
 
     fecha_inicio = _clean_text(payload.get('fecha_inicio'))
     if not fecha_inicio:
-        raise CourseCutError('Debes ingresar la fecha de inicio de la corte.')
+        raise CourseCutError('Debes ingresar la fecha de inicio de la cohorte.')
     if not _coerce_date(fecha_inicio):
-        raise CourseCutError('La fecha de inicio de la corte no es válida.')
+        raise CourseCutError('La fecha de inicio de la cohorte no es válida.')
 
     fecha_fin = _clean_text(payload.get('fecha_fin')) or None
     if fecha_fin:
@@ -145,7 +149,7 @@ def create_course_cut(payload: dict[str, Any], *, user_login: str = '') -> dict[
     numero_corte = _safe_int(payload.get('numero_corte'), default=0)
     if numero_corte <= 0:
         numero_corte = _next_batch_cut_number(cod_anio_basica, codigo_periodo, subject_codes)
-    nombre_corte = _clean_text(payload.get('nombre_corte')) or f'Corte {numero_corte}'
+    nombre_corte = _clean_text(payload.get('nombre_corte')) or f'Cohorte {numero_corte}'
 
     created_cuts: list[dict[str, Any]] = []
     with transaction.atomic():
@@ -171,7 +175,7 @@ def create_course_cut(payload: dict[str, Any], *, user_login: str = '') -> dict[
                 created_cuts.append(cut)
 
     if not created_cuts:
-        raise CourseCutError('No fue posible crear la corte.')
+        raise CourseCutError('No fue posible crear la cohorte.')
 
     for cut in created_cuts:
         cut['continuing_education'] = _sync_cut_to_complement(cut, user_login=user_login)
@@ -206,6 +210,104 @@ def close_course_cut(payload: dict[str, Any], *, user_login: str = '') -> dict[s
 
     closed = _fetch_cut_by_id(corte_id)
     return closed or {'corte_id': str(corte_id), 'estado_corte': 'CERRADO'}
+
+
+def update_course_cut(payload: dict[str, Any], *, user_login: str = '') -> dict[str, Any]:
+    _ensure_course_cut_schema()
+    corte_id = _safe_int(payload.get('corte_id') or payload.get('CorteId'), default=0)
+    if corte_id <= 0:
+        raise CourseCutError('Selecciona la cohorte que deseas actualizar.')
+
+    current = _fetch_cut_by_id(corte_id)
+    if not current:
+        raise CourseCutError('No se encontró la cohorte seleccionada.')
+
+    numero_corte = _safe_int(
+        payload.get('numero_corte') if 'numero_corte' in payload else current.get('numero_corte'),
+        default=0,
+    )
+    if numero_corte <= 0:
+        raise CourseCutError('El número de cohorte debe ser mayor a cero.')
+
+    nombre_corte = _trim_to_max(
+        payload.get('nombre_corte') if 'nombre_corte' in payload else current.get('nombre_corte'),
+        150,
+    )
+    if not nombre_corte:
+        raise CourseCutError('El nombre de la cohorte es obligatorio.')
+
+    fecha_inicio_text = _clean_text(
+        payload.get('fecha_inicio') if 'fecha_inicio' in payload else current.get('fecha_inicio_iso')
+    )
+    fecha_inicio = _coerce_date(fecha_inicio_text)
+    if not fecha_inicio:
+        raise CourseCutError('La fecha de inicio de la cohorte no es válida.')
+
+    fecha_fin_text = _clean_text(
+        payload.get('fecha_fin') if 'fecha_fin' in payload else current.get('fecha_fin_iso')
+    )
+    fecha_fin = _coerce_date(fecha_fin_text) if fecha_fin_text else None
+    if fecha_fin_text and not fecha_fin:
+        raise CourseCutError('La fecha final de inscripción no es válida.')
+    if fecha_fin and fecha_fin < fecha_inicio:
+        raise CourseCutError('La fecha final no puede ser anterior al inicio de la cohorte.')
+
+    cupo_esperado = _int_or_none(
+        payload.get('cupo_esperado') if 'cupo_esperado' in payload else current.get('cupo_esperado')
+    )
+    if cupo_esperado is not None and cupo_esperado < 0:
+        raise CourseCutError('El cupo esperado no puede ser negativo.')
+    total_estudiantes = _safe_int(current.get('total_estudiantes'), default=0)
+    if cupo_esperado is not None and cupo_esperado < total_estudiantes:
+        raise CourseCutError(
+            f'El cupo no puede ser menor a los {total_estudiantes} estudiantes ya registrados.'
+        )
+
+    horas = _int_or_none(
+        payload.get('horas') if 'horas' in payload else current.get('horas')
+    )
+    if horas is not None and horas < 0:
+        raise CourseCutError('Las horas no pueden ser negativas.')
+    observacion = _trim_to_max(
+        payload.get('observacion') if 'observacion' in payload else current.get('observacion'),
+        500,
+    ) or None
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE dbo.CORTE_CURSO
+            SET NumeroCorte = %s,
+                NombreCorte = %s,
+                FechaInicio = %s,
+                FechaFin = %s,
+                CupoEsperado = %s,
+                Horas = %s,
+                Observacion = %s,
+                UsuarioModifica = %s,
+                FechaModifica = SYSDATETIME()
+            WHERE CorteId = %s
+            """,
+            [
+                numero_corte,
+                nombre_corte,
+                fecha_inicio,
+                fecha_fin,
+                cupo_esperado,
+                horas,
+                observacion,
+                _trim_to_max(user_login, 50) or 'SISTEMA',
+                corte_id,
+            ],
+        )
+        if cursor.rowcount == 0:
+            raise CourseCutError('No fue posible actualizar la cohorte.')
+
+    updated = _fetch_cut_by_id(corte_id)
+    if not updated:
+        raise CourseCutError('La cohorte fue actualizada, pero no pudo volver a consultarse.')
+    updated['continuing_education'] = _sync_cut_to_complement(updated, user_login=user_login)
+    return updated
 
 
 def assign_matricula_to_open_cut(
@@ -340,7 +442,7 @@ def sync_course_cut_students(payload: dict[str, Any], *, user_login: str = '') -
 
     if not _course_cut_complement_status()['available']:
         raise CourseCutError(
-            'La base complementaria INTECEDUCONTINUA no está disponible o no tiene el parche v4 aplicado.'
+            'La base complementaria INTECEDUCONTINUA no está disponible o no tiene el módulo v5 completo.'
         )
 
     cut = _fetch_cut_by_id(corte_id)
@@ -1054,7 +1156,7 @@ def _create_educontinua_cut(
     numero_corte = _safe_int(payload.get('numero_corte'), default=0)
     if numero_corte <= 0:
         numero_corte = _next_educontinua_cut_number(cod_curso)
-    nombre_corte = _clean_text(payload.get('nombre_corte')) or f'Corte {numero_corte}'
+    nombre_corte = _clean_text(payload.get('nombre_corte')) or f'Cohorte {numero_corte}'
 
     corte_id = _insert_course_cut(
         tipo_oferta='EDUCONTINUA',
@@ -1515,31 +1617,34 @@ def _fetch_cut_by_id(corte_id: Any) -> dict[str, Any] | None:
     row = _fetch_one(
         """
         SELECT TOP (1)
-            CorteId,
-            TipoOferta,
-            NumeroCorte,
-            NombreCorte,
-            FechaInicio,
-            FechaFin,
-            EstadoCorte,
-            Cod_AnioBasica,
-            Carrera,
-            CodigoPeriodo,
-            Periodo,
-            CodigoMateria,
-            MateriaPensum,
-            CodCurso,
-            CursoEduContinua,
-            CupoEsperado,
-            TotalEstudiantes,
-            TotalInscritos,
-            TotalCursando,
-            TotalRetirados,
-            TotalAprobados,
-            TotalReprobados,
-            TotalFinalizados
-        FROM dbo.VW_CORTE_RESUMEN
-        WHERE CorteId = %s
+            R.CorteId,
+            R.TipoOferta,
+            R.NumeroCorte,
+            R.NombreCorte,
+            R.FechaInicio,
+            R.FechaFin,
+            R.EstadoCorte,
+            R.Cod_AnioBasica,
+            R.Carrera,
+            R.CodigoPeriodo,
+            R.Periodo,
+            R.CodigoMateria,
+            R.MateriaPensum,
+            R.CodCurso,
+            R.CursoEduContinua,
+            R.CupoEsperado,
+            R.TotalEstudiantes,
+            R.TotalInscritos,
+            R.TotalCursando,
+            R.TotalRetirados,
+            R.TotalAprobados,
+            R.TotalReprobados,
+            R.TotalFinalizados,
+            CC.Horas,
+            CC.Observacion
+        FROM dbo.VW_CORTE_RESUMEN R
+        INNER JOIN dbo.CORTE_CURSO CC ON CC.CorteId = R.CorteId
+        WHERE R.CorteId = %s
         """,
         [corte_id],
     )
@@ -1562,6 +1667,8 @@ def _normalize_cut_summary(row: dict[str, Any]) -> dict[str, Any]:
             'total_aprobados': _safe_int(row.get('TotalAprobados'), default=0),
             'total_reprobados': _safe_int(row.get('TotalReprobados'), default=0),
             'total_finalizados': _safe_int(row.get('TotalFinalizados'), default=0),
+            'horas': str(row.get('Horas') or '').strip(),
+            'observacion': str(row.get('Observacion') or '').strip(),
         }
     )
     normalized['materias_label'] = normalized['materia_pensum']
@@ -1579,11 +1686,12 @@ def _normalize_cut(row: dict[str, Any]) -> dict[str, Any]:
     estado_corte = str(row.get('EstadoCorte') or '').strip()
     fecha_fin_vencida = _is_registration_deadline_expired(fecha_fin)
     ingresos_disponibles = estado_corte == 'ABIERTO' and not fecha_fin_vencida
+    nombre_corte = _cohort_display_name(row.get('NombreCorte'))
     return {
         'corte_id': str(row.get('CorteId') or '').strip(),
         'tipo_oferta': str(row.get('TipoOferta') or '').strip(),
         'numero_corte': str(row.get('NumeroCorte') or '').strip(),
-        'nombre_corte': str(row.get('NombreCorte') or '').strip(),
+        'nombre_corte': nombre_corte,
         'fecha_inicio': _format_date_label(fecha_inicio),
         'fecha_inicio_iso': _date_iso(fecha_inicio),
         'fecha_inicio_raw': fecha_inicio,
@@ -1603,6 +1711,20 @@ def _normalize_cut(row: dict[str, Any]) -> dict[str, Any]:
         'materias_label': materia_pensum,
         'cod_curso': str(row.get('CodCurso') or '').strip(),
     }
+
+
+def _cohort_display_name(value: Any) -> str:
+    name = str(value or '').strip()
+    def replace(match: re.Match[str]) -> str:
+        original = match.group(0)
+        replacement = 'cohortes' if original.lower().endswith('s') else 'cohorte'
+        if original.isupper():
+            return replacement.upper()
+        if original[:1].isupper():
+            return replacement.capitalize()
+        return replacement
+
+    return re.sub(r'\bcortes?\b', replace, name, flags=re.IGNORECASE)
 
 
 def _subject_codes_from_payload(payload: dict[str, Any]) -> list[str]:

@@ -80,7 +80,7 @@ export default function AdminTeamsEnrollmentPanel() {
         const response = await adminFetch('/api/auth/admin/course-cuts/')
         const payload = await readResponsePayload(response)
         if (!payload || !response.ok || !payload.ok) {
-          throw new Error(payload?.message ?? `No fue posible cargar cortes (${response.status}).`)
+          throw new Error(payload?.message ?? `No fue posible cargar cohortes (${response.status}).`)
         }
 
         if (!isMounted) {
@@ -152,7 +152,7 @@ export default function AdminTeamsEnrollmentPanel() {
   async function handleSubmit(event) {
     event.preventDefault()
     if (!selectedCut?.corte_id) {
-      setError('Selecciona una corte para matricular por Teams.')
+      setError('Selecciona una cohorte para matricular por Teams.')
       return
     }
     if (!selectedTeacherId) {
@@ -212,7 +212,7 @@ export default function AdminTeamsEnrollmentPanel() {
       <article className="module-card dashboard-module-card">
         <div>
           <h3>Cargando Teams</h3>
-          <p>Estamos consultando las cortes disponibles.</p>
+          <p>Estamos consultando las cohortes disponibles.</p>
         </div>
       </article>
     )
@@ -248,7 +248,7 @@ export default function AdminTeamsEnrollmentPanel() {
       <article className="module-card teacher-panel-card">
         <div className="admin-form-grid schedule-form-grid">
           <label className="field full-span">
-            <span>Corte</span>
+            <span>Cohorte</span>
             <select value={selectedCutId} onChange={handleCutChange} disabled={!cuts.length || isScheduleLoading}>
               {cuts.length ? (
                 cuts.map((cut) => (
@@ -257,7 +257,7 @@ export default function AdminTeamsEnrollmentPanel() {
                   </option>
                 ))
               ) : (
-                <option value="">No hay cortes registradas</option>
+                <option value="">No hay cohortes registradas</option>
               )}
             </select>
           </label>
@@ -305,7 +305,7 @@ export default function AdminTeamsEnrollmentPanel() {
           </label>
         </div>
 
-        {noTeacher ? <p className="form-error">Primero matricula el docente correspondiente para esta corte.</p> : null}
+        {noTeacher ? <p className="form-error">Primero matricula el docente correspondiente para esta cohorte.</p> : null}
         {noSchedule ? <p className="form-error">Primero crea el horario y sus sesiones antes de matricular por Teams.</p> : null}
         {teamsUnavailable ? <p className="form-error">{scheduleData?.teams?.message}</p> : null}
       </article>
@@ -431,7 +431,7 @@ function resolveSelectedScheduleId(scheduleData, currentScheduleId = '') {
 
 function cutLabel(cut) {
   const subject = cut.materias_label || cut.materia_pensum || cut.curso_educontinua || cut.cod_curso || 'Sin materia'
-  const period = cut.periodo || cut.codigo_periodo || cut.nombre_corte || `Corte ${cut.numero_corte || cut.corte_id}`
+  const period = cut.periodo || cut.codigo_periodo || cut.nombre_corte || `Cohorte ${cut.numero_corte || cut.corte_id}`
   const status = cut.estado_inscripcion || cut.estado_corte || ''
   return `${subject} - ${period}${status ? ` - ${status}` : ''}`
 }

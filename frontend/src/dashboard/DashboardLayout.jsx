@@ -7,6 +7,7 @@ import AdminCertificateTemplatePanel from './AdminCertificateTemplatePanel.jsx'
 import AdminCourseCutsPanel from './AdminCourseCutsPanel.jsx'
 import AdminCourseStudentsPanel from './AdminCourseStudentsPanel.jsx'
 import AdminEnrolledStudentsPanel from './AdminEnrolledStudentsPanel.jsx'
+import AdminStudentUpdatesPanel from './AdminStudentUpdatesPanel.jsx'
 import AdminGradeTransferPanel from './AdminGradeTransferPanel.jsx'
 import AdminPaymentsPanel from './AdminPaymentsPanel.jsx'
 import AdminPaymentOperationsPanel from './AdminPaymentOperationsPanel.jsx'
@@ -157,6 +158,7 @@ export default function DashboardLayout({ session, onSessionChange }) {
           {effectiveRouteId === 'course-cuts' && user.category === 'staff' ? <AdminCourseCutsPanel /> : null}
           {effectiveRouteId === 'course-students' && user.category === 'staff' ? <AdminCourseStudentsPanel /> : null}
           {effectiveRouteId === 'enrolled-students' && user.category === 'staff' ? <AdminEnrolledStudentsPanel /> : null}
+          {effectiveRouteId === 'student-updates' && user.category === 'staff' ? <AdminStudentUpdatesPanel /> : null}
           {effectiveRouteId === 'attendance' && user.category === 'staff' ? <AdminAttendancePanel /> : null}
           {effectiveRouteId === 'admin-schedule' && user.category === 'staff' ? <AdminSchedulePanel /> : null}
           {effectiveRouteId === 'admin-teams' && user.category === 'staff' ? <AdminTeamsEnrollmentPanel /> : null}

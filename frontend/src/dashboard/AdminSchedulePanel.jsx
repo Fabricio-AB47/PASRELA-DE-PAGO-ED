@@ -55,7 +55,7 @@ export default function AdminSchedulePanel() {
         const response = await adminFetch('/api/auth/admin/course-cuts/')
         const payload = await readResponsePayload(response)
         if (!payload || !response.ok || !payload.ok) {
-          throw new Error(payload?.message ?? `No fue posible cargar cortes (${response.status}).`)
+          throw new Error(payload?.message ?? `No fue posible cargar cohortes (${response.status}).`)
         }
 
         if (!isMounted) {
@@ -192,7 +192,7 @@ export default function AdminSchedulePanel() {
   async function handleScheduleSubmit(event) {
     event.preventDefault()
     if (!selectedCut?.corte_id) {
-      setError('Selecciona una corte para guardar el horario.')
+      setError('Selecciona una cohorte para guardar el horario.')
       return
     }
     if (!form.fechas_clase?.length) {
@@ -245,7 +245,7 @@ export default function AdminSchedulePanel() {
       <article className="module-card dashboard-module-card">
         <div>
           <h3>Cargando horarios</h3>
-          <p>Estamos consultando las cortes disponibles.</p>
+          <p>Estamos consultando las cohortes disponibles.</p>
         </div>
       </article>
     )
@@ -263,7 +263,7 @@ export default function AdminSchedulePanel() {
       <div className="admin-section-heading">
         <div>
           <h3 id="admin-schedule-title">Horario</h3>
-          <p>Crea horarios por corte y genera las sesiones vinculadas.</p>
+          <p>Crea horarios por cohorte y genera las sesiones vinculadas.</p>
         </div>
       </div>
 
@@ -272,7 +272,7 @@ export default function AdminSchedulePanel() {
 
       <article className="module-card teacher-panel-card admin-schedule-selector-card">
         <label className="field">
-          <span>Corte</span>
+          <span>Cohorte</span>
           <select value={selectedCutId} onChange={handleCutChange} disabled={!cuts.length || isScheduleLoading}>
             {cuts.length ? (
               cuts.map((cut) => (
@@ -281,7 +281,7 @@ export default function AdminSchedulePanel() {
                 </option>
               ))
             ) : (
-              <option value="">No hay cortes registradas</option>
+              <option value="">No hay cohortes registradas</option>
             )}
           </select>
         </label>
@@ -333,7 +333,7 @@ export default function AdminSchedulePanel() {
         ) : null}
         {teacherUnavailable ? (
           <p className="teacher-panel-empty admin-schedule-teacher-warning">
-            Primero matricula el docente correspondiente para esta corte.
+            Primero matricula el docente correspondiente para esta cohorte.
           </p>
         ) : null}
       </article>
@@ -407,7 +407,7 @@ export default function AdminSchedulePanel() {
                 <div className="schedule-selected-dates">
                   <div>
                     <strong>{formatNumber(form.fechas_clase?.length)} día(s) seleccionados</strong>
-                    <span>{selectedCut ? cutLabel(selectedCut) : 'Selecciona una corte'}</span>
+                    <span>{selectedCut ? cutLabel(selectedCut) : 'Selecciona una cohorte'}</span>
                   </div>
                   {selectedDates.length ? (
                     <button type="button" className="ghost-button compact-button" onClick={clearSelectedDates}>
@@ -514,7 +514,7 @@ export default function AdminSchedulePanel() {
             <div className="admin-subsection-header">
               <div>
                 <h4>Horarios creados</h4>
-                <p>{scheduleData?.schedules?.length || 0} registro(s) activos para la corte seleccionada.</p>
+                <p>{scheduleData?.schedules?.length || 0} registro(s) activos para la cohorte seleccionada.</p>
               </div>
               <button
                 type="button"
@@ -568,7 +568,7 @@ export default function AdminSchedulePanel() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="6">No hay horarios creados para esta corte.</td>
+                      <td colSpan="6">No hay horarios creados para esta cohorte.</td>
                     </tr>
                   )}
                 </tbody>
@@ -621,8 +621,8 @@ export default function AdminSchedulePanel() {
       ) : (
         <article className="module-card dashboard-module-card">
           <div>
-            <h3>Sin cortes disponibles</h3>
-            <p>Crea una corte antes de cargar horarios.</p>
+            <h3>Sin cohortes disponibles</h3>
+            <p>Crea una cohorte antes de cargar horarios.</p>
           </div>
         </article>
       )}
@@ -651,7 +651,7 @@ function buildScheduleForm(cut, scheduleData) {
 
 function cutLabel(cut) {
   const subject = cut.materias_label || cut.materia_pensum || cut.curso_educontinua || cut.cod_curso || 'Sin materia'
-  const period = cut.periodo || cut.codigo_periodo || cut.nombre_corte || `Corte ${cut.numero_corte || cut.corte_id}`
+  const period = cut.periodo || cut.codigo_periodo || cut.nombre_corte || `Cohorte ${cut.numero_corte || cut.corte_id}`
   const status = cut.estado_inscripcion || cut.estado_corte || ''
   return `${subject} - ${period}${status ? ` - ${status}` : ''}`
 }

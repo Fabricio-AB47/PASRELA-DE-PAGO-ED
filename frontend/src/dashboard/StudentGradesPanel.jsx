@@ -213,7 +213,7 @@ export default function StudentGradesPanel() {
               <thead>
                 <tr>
                   <th>Materia</th>
-                  <th>Corte</th>
+                  <th>Cohorte</th>
                   <th>Docente</th>
                   <th>Nota final</th>
                   <th>Asistencia</th>

@@ -5,7 +5,7 @@ import { adminFetch } from './api.js'
 const numberFormatter = new Intl.NumberFormat('es-EC')
 
 function cutLabel(cut) {
-  const name = cut.nombre_corte || `Corte ${cut.numero_corte || cut.corte_id}`
+  const name = cut.nombre_corte || `Cohorte ${cut.numero_corte || cut.corte_id}`
   const subject = cut.materias_label || cut.materia_pensum || cut.curso_educontinua || ''
   return subject ? `${name} - ${subject}` : name
 }
@@ -71,7 +71,7 @@ export default function AdminCourseStudentsPanel() {
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok) {
-          throw new Error(payload?.message ?? `No fue posible cargar cortes (${response.status}).`)
+          throw new Error(payload?.message ?? `No fue posible cargar cohortes (${response.status}).`)
         }
 
         if (!isMounted) {
@@ -144,7 +144,7 @@ export default function AdminCourseStudentsPanel() {
 
   async function syncStudents(studentIds) {
     if (!selectedCutId) {
-      setError('Selecciona una corte antes de sincronizar.')
+      setError('Selecciona una cohorte antes de sincronizar.')
       return
     }
     if (!studentIds.length) {
@@ -193,7 +193,7 @@ export default function AdminCourseStudentsPanel() {
     <section id="admin-course-students" className="admin-course-cuts">
       <div className="admin-section-heading">
         <div>
-          <h3>Estudiantes de corte</h3>
+          <h3>Estudiantes de cohorte</h3>
           <p>Consulta los estudiantes oficiales de INTECBDD y matricúlalos en la base complementaria de educación continua.</p>
         </div>
       </div>
@@ -201,7 +201,7 @@ export default function AdminCourseStudentsPanel() {
       <article className="module-card course-cut-card">
         <div className="module-card-header">
           <div>
-            <h4>Seleccionar corte</h4>
+            <h4>Seleccionar cohorte</h4>
             <p>La sincronización mantiene INTECBDD como fuente oficial y registra el control complementario por CorteId.</p>
           </div>
           <button
@@ -216,9 +216,9 @@ export default function AdminCourseStudentsPanel() {
 
         <div className="admin-form-grid">
           <label className="field full-span">
-            <span>Corte</span>
+            <span>Cohorte</span>
             <select value={selectedCutId} onChange={handleCutChange} disabled={isLoadingCuts}>
-              <option value="">Selecciona una corte</option>
+              <option value="">Selecciona una cohorte</option>
               {cuts.map((cut) => (
                 <option key={cut.corte_id} value={cut.corte_id}>
                   {cutLabel(cut)}
@@ -236,7 +236,7 @@ export default function AdminCourseStudentsPanel() {
       </article>
 
       {cutStudents ? (
-        <section className="bulk-summary-grid" aria-label="Resumen de estudiantes de corte">
+        <section className="bulk-summary-grid" aria-label="Resumen de estudiantes de cohorte">
           <div>
             <span>Total</span>
             <strong>{formatNumber(metrics.total)}</strong>
@@ -340,7 +340,7 @@ export default function AdminCourseStudentsPanel() {
                 })
               ) : (
                 <tr>
-                  <td colSpan="7">No hay estudiantes registrados en la corte seleccionada.</td>
+                  <td colSpan="7">No hay estudiantes registrados en la cohorte seleccionada.</td>
                 </tr>
               )}
             </tbody>

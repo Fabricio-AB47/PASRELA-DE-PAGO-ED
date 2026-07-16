@@ -11,7 +11,7 @@ const ATTENDANCE_OPTIONS = [
 ]
 
 function cutLabel(cut) {
-  const name = cut.nombre_corte || `Corte ${cut.numero_corte || cut.corte_id}`
+  const name = cut.nombre_corte || `Cohorte ${cut.numero_corte || cut.corte_id}`
   const subject = cut.materias_label || cut.materia_pensum || cut.curso_educontinua || ''
   return subject ? `${name} - ${subject}` : name
 }
@@ -92,7 +92,7 @@ export default function AdminAttendancePanel() {
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok) {
-          throw new Error(payload?.message ?? `No fue posible cargar cortes (${response.status}).`)
+          throw new Error(payload?.message ?? `No fue posible cargar cohortes (${response.status}).`)
         }
 
         if (!isMounted) {
@@ -162,7 +162,7 @@ export default function AdminAttendancePanel() {
 
   async function saveAttendance() {
     if (!selectedCutId) {
-      setError('Selecciona una corte antes de guardar asistencia.')
+      setError('Selecciona una cohorte antes de guardar asistencia.')
       return
     }
     if (!students.length) {
@@ -213,7 +213,7 @@ export default function AdminAttendancePanel() {
       <div className="admin-section-heading">
         <div>
           <h3>Asistencia</h3>
-          <p>Registra la asistencia de estudiantes matriculados en la base complementaria por corte.</p>
+          <p>Registra la asistencia de estudiantes matriculados en la base complementaria por cohorte.</p>
         </div>
       </div>
 
@@ -235,9 +235,9 @@ export default function AdminAttendancePanel() {
 
         <form className="admin-form-grid attendance-admin-filter" onSubmit={handleFilterSubmit}>
           <label className="field">
-            <span>Corte</span>
+            <span>Cohorte</span>
             <select value={selectedCutId} onChange={handleCutChange} disabled={isLoadingCuts}>
-              <option value="">Selecciona una corte</option>
+              <option value="">Selecciona una cohorte</option>
               {cuts.map((cut) => (
                 <option key={cut.corte_id} value={cut.corte_id}>
                   {cutLabel(cut)}
@@ -373,7 +373,7 @@ export default function AdminAttendancePanel() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="6">No hay estudiantes matriculados para la corte seleccionada.</td>
+                  <td colSpan="6">No hay estudiantes matriculados para la cohorte seleccionada.</td>
                 </tr>
               )}
             </tbody>

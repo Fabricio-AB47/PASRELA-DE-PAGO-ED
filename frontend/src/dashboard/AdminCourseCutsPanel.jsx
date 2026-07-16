@@ -46,6 +46,17 @@ const emptyScheduleForm = {
   web_url: '',
 }
 
+const emptyEditForm = {
+  corte_id: '',
+  numero_corte: '',
+  nombre_corte: '',
+  fecha_inicio: '',
+  fecha_fin: '',
+  cupo_esperado: '',
+  horas: '',
+  observacion: '',
+}
+
 const removeNumbersFromLabel = (value) =>
   String(value || '')
     .replace(/[0-9]+/g, ' ')
@@ -139,7 +150,7 @@ function selectedCutLabel(cut) {
   if (!cut) {
     return ''
   }
-  return `${cutSubjectLabel(cut)} - ${cut.nombre_corte || `Corte ${cut.numero_corte || cut.corte_id}`}`
+  return `${cutSubjectLabel(cut)} - ${cut.nombre_corte || `Cohorte ${cut.numero_corte || cut.corte_id}`}`
 }
 
 export default function AdminCourseCutsPanel() {
@@ -163,6 +174,10 @@ export default function AdminCourseCutsPanel() {
   const [isTeamsSaving, setIsTeamsSaving] = useState(false)
   const [scheduleMessage, setScheduleMessage] = useState('')
   const [scheduleError, setScheduleError] = useState('')
+  const [editModal, setEditModal] = useState({ isOpen: false, cut: null })
+  const [editForm, setEditForm] = useState(emptyEditForm)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editError, setEditError] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -182,7 +197,7 @@ export default function AdminCourseCutsPanel() {
           throw new Error(catalogPayload?.message ?? `No fue posible cargar catálogos (${catalogResponse.status}).`)
         }
         if (!cutPayload || !cutResponse.ok || !cutPayload.ok) {
-          throw new Error(cutPayload?.message ?? `No fue posible cargar cortes (${cutResponse.status}).`)
+          throw new Error(cutPayload?.message ?? `No fue posible cargar cohortes (${cutResponse.status}).`)
         }
 
         if (!isMounted) {
@@ -273,7 +288,7 @@ export default function AdminCourseCutsPanel() {
     const response = await adminFetch('/api/auth/admin/course-cuts/')
     const payload = await readResponsePayload(response)
     if (!payload || !response.ok || !payload.ok) {
-      throw new Error(payload?.message ?? `No fue posible cargar cortes (${response.status}).`)
+      throw new Error(payload?.message ?? `No fue posible cargar cohortes (${response.status}).`)
     }
     setCuts(payload.cuts || [])
   }
@@ -305,11 +320,11 @@ export default function AdminCourseCutsPanel() {
       })
       const payload = await readResponsePayload(response)
       if (!payload || !response.ok || !payload.ok) {
-        throw new Error(payload?.message ?? `No fue posible crear la corte (${response.status}).`)
+        throw new Error(payload?.message ?? `No fue posible crear la cohorte (${response.status}).`)
       }
 
       await reloadCuts()
-      setMessage(payload.message || 'Corte creada.')
+      setMessage(payload.message || 'Cohorte creada.')
       setForm((current) => ({
         ...emptyForm,
         cod_anio_basica: current.cod_anio_basica,
@@ -343,15 +358,67 @@ export default function AdminCourseCutsPanel() {
       })
       const payload = await readResponsePayload(response)
       if (!payload || !response.ok || !payload.ok) {
-        throw new Error(payload?.message ?? `No fue posible cerrar la corte (${response.status}).`)
+        throw new Error(payload?.message ?? `No fue posible cerrar la cohorte (${response.status}).`)
       }
 
       await reloadCuts()
-      setMessage(payload.message || 'Corte cerrada.')
+      setMessage(payload.message || 'Cohorte cerrada.')
     } catch (closeError) {
       setError(closeError.message)
     } finally {
       setClosingCutId('')
+    }
+  }
+
+  function openEditModal(cut) {
+    setEditModal({ isOpen: true, cut })
+    setEditForm({
+      corte_id: cut.corte_id || '',
+      numero_corte: cut.numero_corte || '',
+      nombre_corte: cut.nombre_corte || '',
+      fecha_inicio: cut.fecha_inicio_iso || '',
+      fecha_fin: cut.fecha_fin_iso || '',
+      cupo_esperado: cut.cupo_esperado || '',
+      horas: cut.horas || '',
+      observacion: cut.observacion || '',
+    })
+    setEditError('')
+  }
+
+  function closeEditModal() {
+    setEditModal({ isOpen: false, cut: null })
+    setEditForm(emptyEditForm)
+    setEditError('')
+  }
+
+  function handleEditChange(event) {
+    const { name, value } = event.target
+    setEditForm((current) => ({ ...current, [name]: value }))
+  }
+
+  async function handleEditSubmit(event) {
+    event.preventDefault()
+    setIsEditing(true)
+    setEditError('')
+    setMessage('')
+    setError('')
+    try {
+      const response = await adminFetch('/api/auth/admin/course-cuts/update/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      })
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok) {
+        throw new Error(payload?.message ?? `No fue posible actualizar la cohorte (${response.status}).`)
+      }
+      await reloadCuts()
+      setMessage(payload.message || 'Cohorte actualizada.')
+      closeEditModal()
+    } catch (updateError) {
+      setEditError(updateError.message)
+    } finally {
+      setIsEditing(false)
     }
   }
 
@@ -528,16 +595,16 @@ export default function AdminCourseCutsPanel() {
     <section id="admin-course-cuts" className="admin-course-cuts">
       <div className="admin-section-heading">
         <div>
-          <h3>Cortes de inscripción</h3>
-          <p>Abre y cierra las cortes que reciben matrículas desde el formulario público y la carga Excel.</p>
+          <h3>Cohortes de inscripción</h3>
+          <p>Abre, corrige y cierra las cohortes que reciben matrículas desde el formulario público y la carga Excel.</p>
         </div>
       </div>
 
       <article className="module-card course-cut-card">
         <div className="module-card-header">
           <div>
-            <h4>Nueva corte</h4>
-            <p>La corte abierta recibe inscripciones hasta la fecha final configurada.</p>
+            <h4>Nueva cohorte</h4>
+            <p>La cohorte abierta recibe inscripciones hasta la fecha final configurada.</p>
           </div>
         </div>
 
@@ -604,16 +671,16 @@ export default function AdminCourseCutsPanel() {
             </fieldset>
 
             <div className="bulk-status-note">
-              <strong>{selectedOpenCut ? `Corte activa: ${selectedOpenCut.nombre_corte}` : 'Sin corte activa'}</strong>
+              <strong>{selectedOpenCut ? `Cohorte activa: ${selectedOpenCut.nombre_corte}` : 'Sin cohorte activa'}</strong>
               <span>
                 {selectedOpenCut
                   ? selectedOpenCutStatus
-                  : 'Crea una corte para habilitar inscripción pública y Excel.'}
+                  : 'Crea una cohorte para habilitar inscripción pública y Excel.'}
               </span>
             </div>
 
             <label className="field">
-              <span>Número de corte</span>
+              <span>Número de cohorte</span>
               <input
                 name="numero_corte"
                 type="number"
@@ -625,13 +692,13 @@ export default function AdminCourseCutsPanel() {
             </label>
 
             <label className="field">
-              <span>Nombre de corte</span>
+              <span>Nombre de cohorte</span>
               <input
                 name="nombre_corte"
                 type="text"
                 value={form.nombre_corte}
                 onChange={handleChange}
-                placeholder="Corte 1"
+                placeholder="Cohorte 1"
               />
             </label>
 
@@ -693,7 +760,7 @@ export default function AdminCourseCutsPanel() {
 
             <div className="bulk-status-note">
               <strong>Materias seleccionadas</strong>
-              <span>{selectedSubjectCodes.length ? `${selectedSubjectCodes.length} materia(s) para esta corte.` : 'Selecciona al menos una materia.'}</span>
+              <span>{selectedSubjectCodes.length ? `${selectedSubjectCodes.length} materia(s) para esta cohorte.` : 'Selecciona al menos una materia.'}</span>
             </div>
           </div>
 
@@ -705,7 +772,7 @@ export default function AdminCourseCutsPanel() {
             className="submit-button"
             disabled={isSaving || isLoading || Boolean(selectedOpenCut) || !selectedSubjectCodes.length}
           >
-            {isSaving ? 'Creando corte...' : 'Crear corte'}
+            {isSaving ? 'Creando cohorte...' : 'Crear cohorte'}
           </button>
         </form>
       </article>
@@ -713,8 +780,8 @@ export default function AdminCourseCutsPanel() {
       <article className="module-card course-cut-card">
         <div className="module-card-header">
           <div>
-            <h4>Cortes registradas</h4>
-            <p>Cierra una corte para impedir nuevas matrículas dentro de ese grupo.</p>
+            <h4>Cohortes registradas</h4>
+            <p>Edita información registrada o cierra una cohorte para impedir nuevas matrículas.</p>
           </div>
           <button type="button" className="ghost-button compact-button" onClick={handleReloadCuts} disabled={isLoading}>
             Actualizar
@@ -725,7 +792,7 @@ export default function AdminCourseCutsPanel() {
           <table className="admin-table course-cut-table">
             <thead>
               <tr>
-                <th>Corte</th>
+                <th>Cohorte</th>
                 <th>Oferta</th>
                 <th>Materias</th>
                 <th>Inicio</th>
@@ -740,7 +807,7 @@ export default function AdminCourseCutsPanel() {
                 cuts.map((cut) => (
                   <tr key={cut.corte_id}>
                     <td>
-                      <strong>{cut.nombre_corte || `Corte ${cut.numero_corte || '-'}`}</strong>
+                      <strong>{cut.nombre_corte || `Cohorte ${cut.numero_corte || '-'}`}</strong>
                       <span>{cut.numero_corte ? `No. ${cut.numero_corte}` : '-'}</span>
                     </td>
                     <td>{cutTargetLabel(cut)}</td>
@@ -755,6 +822,13 @@ export default function AdminCourseCutsPanel() {
                     <td>{cut.total_estudiantes ?? 0}</td>
                     <td>
                       <div className="table-actions-stack">
+                        <button
+                          type="button"
+                          className="ghost-button compact-button table-action-button"
+                          onClick={() => openEditModal(cut)}
+                        >
+                          Editar cohorte
+                        </button>
                         <button
                           type="button"
                           className="ghost-button compact-button table-action-button"
@@ -778,13 +852,78 @@ export default function AdminCourseCutsPanel() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="8">No hay cortes registradas.</td>
+                  <td colSpan="8">No hay cohortes registradas.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       </article>
+
+      {editModal.isOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="career-modal cohort-edit-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cohort-edit-modal-title"
+          >
+            <div className="career-modal-header">
+              <div>
+                <h4 id="cohort-edit-modal-title">Editar cohorte</h4>
+                <p>{cutSubjectLabel(editModal.cut)} · ID {editModal.cut?.corte_id}</p>
+              </div>
+              <button type="button" className="ghost-button compact-button" onClick={closeEditModal}>
+                Cerrar
+              </button>
+            </div>
+            <form className="career-modal-body auth-form compact-form" onSubmit={handleEditSubmit}>
+              <p className="status-message">
+                La oferta, carrera, período y materia permanecen bloqueados para proteger matrículas, pagos y notas.
+              </p>
+              <div className="admin-form-grid">
+                <label className="field">
+                  <span>Número de cohorte *</span>
+                  <input name="numero_corte" type="number" min="1" value={editForm.numero_corte} onChange={handleEditChange} required />
+                </label>
+                <label className="field">
+                  <span>Nombre de cohorte *</span>
+                  <input name="nombre_corte" value={editForm.nombre_corte} onChange={handleEditChange} maxLength="150" required />
+                </label>
+                <label className="field">
+                  <span>Fecha de inicio *</span>
+                  <input name="fecha_inicio" type="date" value={editForm.fecha_inicio} onChange={handleEditChange} required />
+                </label>
+                <label className="field">
+                  <span>Fecha final de inscripción</span>
+                  <input name="fecha_fin" type="date" value={editForm.fecha_fin} onChange={handleEditChange} />
+                </label>
+                <label className="field">
+                  <span>Cupo esperado</span>
+                  <input name="cupo_esperado" type="number" min={editModal.cut?.total_estudiantes || 0} value={editForm.cupo_esperado} onChange={handleEditChange} />
+                </label>
+                <label className="field">
+                  <span>Horas</span>
+                  <input name="horas" type="number" min="0" value={editForm.horas} onChange={handleEditChange} />
+                </label>
+                <label className="field full-span">
+                  <span>Observación</span>
+                  <textarea name="observacion" value={editForm.observacion} onChange={handleEditChange} maxLength="500" rows="4" />
+                </label>
+              </div>
+              {editError ? <p className="form-error">{editError}</p> : null}
+              <div className="student-selection-actions">
+                <button type="button" className="ghost-button compact-button" onClick={closeEditModal} disabled={isEditing}>
+                  Cancelar
+                </button>
+                <button type="submit" className="submit-button compact-button" disabled={isEditing}>
+                  {isEditing ? 'Guardando...' : 'Guardar corrección'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
 
       {scheduleModal.isOpen ? (
         <div className="modal-backdrop" role="presentation">
@@ -963,7 +1102,7 @@ export default function AdminCourseCutsPanel() {
                 <div className="admin-subsection-header">
                   <div>
                     <h4>Horarios creados</h4>
-                    <p>{scheduleData?.schedules?.length || 0} registro(s) activos para esta corte.</p>
+                    <p>{scheduleData?.schedules?.length || 0} registro(s) activos para esta cohorte.</p>
                   </div>
                   <button
                     type="button"
@@ -1012,7 +1151,7 @@ export default function AdminCourseCutsPanel() {
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="6">No hay horarios creados para esta corte.</td>
+                          <td colSpan="6">No hay horarios creados para esta cohorte.</td>
                         </tr>
                       )}
                     </tbody>

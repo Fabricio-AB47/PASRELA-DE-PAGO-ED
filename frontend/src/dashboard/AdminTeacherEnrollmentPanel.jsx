@@ -82,7 +82,7 @@ function formatNumber(value) {
 }
 
 function cutLabel(cut) {
-  const name = cut.nombre_corte || `Corte ${cut.numero_corte || cut.corte_id}`
+  const name = cut.nombre_corte || `Cohorte ${cut.numero_corte || cut.corte_id}`
   const subject = cut.materias_label || cut.materia_pensum || cut.curso_educontinua || ''
   return subject ? `${name} - ${subject}` : name
 }
@@ -239,7 +239,7 @@ export default function AdminTeacherEnrollmentPanel() {
         const response = await adminFetch('/api/auth/admin/course-cuts/')
         const payload = await readResponsePayload(response)
         if (!payload || !response.ok || !payload.ok) {
-          throw new Error(payload?.message ?? `No fue posible cargar cortes (${response.status}).`)
+          throw new Error(payload?.message ?? `No fue posible cargar cohortes (${response.status}).`)
         }
 
         if (isMounted) {
@@ -352,7 +352,7 @@ export default function AdminTeacherEnrollmentPanel() {
       return
     }
     if (!selectedCut?.corte_id) {
-      setError('Selecciona la corte donde están los estudiantes antes de matricular al docente.')
+      setError('Selecciona la cohorte donde están los estudiantes antes de matricular al docente.')
       setIsSubmitting(false)
       return
     }
@@ -580,7 +580,7 @@ export default function AdminTeacherEnrollmentPanel() {
 
         <div className="registration-grid registration-course-grid">
           <label className="field">
-            <span>Corte *</span>
+            <span>Cohorte *</span>
             <select
               name="corte_id"
               value={selectedCutId}
@@ -588,7 +588,7 @@ export default function AdminTeacherEnrollmentPanel() {
               disabled={isLoadingCuts || !courseCuts.length}
               required
             >
-              <option value="">Selecciona corte</option>
+              <option value="">Selecciona cohorte</option>
               {courseCuts.map((cut) => (
                 <option key={cut.corte_id} value={cut.corte_id}>
                   {cutLabel(cut)}
@@ -609,7 +609,7 @@ export default function AdminTeacherEnrollmentPanel() {
           </label>
 
           <label className="field">
-            <span>Período o corte</span>
+            <span>Período o cohorte</span>
             <input value={selectedPeriodName || 'Sin período'} readOnly />
           </label>
         </div>
@@ -656,7 +656,7 @@ export default function AdminTeacherEnrollmentPanel() {
 
         {selectedCut ? (
           <p className="payment-result-note">
-            Se asignará la corte {cutLabel(selectedCut)}
+            Se asignará la cohorte {cutLabel(selectedCut)}
             {selectedTeacher ? ` a ${selectedTeacher.nombre}.` : '.'}
           </p>
         ) : null}
@@ -668,14 +668,14 @@ export default function AdminTeacherEnrollmentPanel() {
               <p>
                 {selectedCut
                   ? `${cutLabel(selectedCut)} · Paralelo ${form.paralelo || '-'} · ${selectedCut.estado_corte || 'Sin estado'}`
-                  : 'Selecciona una materia con corte registrada para ver los estudiantes.'}
+                  : 'Selecciona una materia con cohorte registrada para ver los estudiantes.'}
               </p>
             </div>
-            <strong>{selectedCut ? `${formatNumber(visibleAssignedStudents.length)} estudiante(s)` : 'Sin corte'}</strong>
+            <strong>{selectedCut ? `${formatNumber(visibleAssignedStudents.length)} estudiante(s)` : 'Sin cohorte'}</strong>
           </div>
 
           {isLoadingCuts || (selectedCut && isLoadingStudents) ? (
-            <p className="student-selection-empty">Cargando estudiantes de la corte...</p>
+            <p className="student-selection-empty">Cargando estudiantes de la cohorte...</p>
           ) : currentStudentsError ? (
             <p className="form-error">{currentStudentsError}</p>
           ) : selectedCut ? (
@@ -720,7 +720,7 @@ export default function AdminTeacherEnrollmentPanel() {
             </div>
           ) : (
             <p className="student-selection-empty">
-              No se encontró una corte registrada para la carrera, materia y período seleccionados.
+              No se encontró una cohorte registrada para la carrera, materia y período seleccionados.
             </p>
           )}
         </section>

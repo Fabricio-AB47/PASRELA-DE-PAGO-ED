@@ -5,7 +5,7 @@ import { adminFetch } from './api.js'
 const numberFormatter = new Intl.NumberFormat('es-EC')
 
 function cutLabel(cut) {
-  const name = cut.nombre_corte || `Corte ${cut.numero_corte || cut.corte_id}`
+  const name = cut.nombre_corte || `Cohorte ${cut.numero_corte || cut.corte_id}`
   const subject = cut.materias_label || cut.materia_pensum || cut.curso_educontinua || ''
   return subject ? `${name} - ${subject}` : name
 }
@@ -81,7 +81,7 @@ export default function AdminEnrolledStudentsPanel() {
         const payload = await readResponsePayload(response)
 
         if (!payload || !response.ok || !payload.ok) {
-          throw new Error(payload?.message ?? `No fue posible cargar cortes (${response.status}).`)
+          throw new Error(payload?.message ?? `No fue posible cargar cohortes (${response.status}).`)
         }
 
         if (!isMounted) {
@@ -137,14 +137,14 @@ export default function AdminEnrolledStudentsPanel() {
       <div className="admin-section-heading">
         <div>
           <h3>Estudiantes matriculados</h3>
-          <p>Consulta los estudiantes activos que ya constan en la matrícula complementaria de la corte.</p>
+          <p>Consulta los estudiantes activos que ya constan en la matrícula complementaria de la cohorte.</p>
         </div>
       </div>
 
       <article className="module-card course-cut-card">
         <div className="module-card-header">
           <div>
-            <h4>Filtro de corte</h4>
+            <h4>Filtro de cohorte</h4>
             <p>La consulta toma los registros desde INTECEDUCONTINUA vinculados por CorteId.</p>
           </div>
           <button
@@ -159,9 +159,9 @@ export default function AdminEnrolledStudentsPanel() {
 
         <form className="admin-form-grid" onSubmit={handleSearch}>
           <label className="field">
-            <span>Corte</span>
+            <span>Cohorte</span>
             <select value={selectedCutId} onChange={handleCutChange} disabled={isLoadingCuts}>
-              <option value="">Selecciona una corte</option>
+              <option value="">Selecciona una cohorte</option>
               {cuts.map((cut) => (
                 <option key={cut.corte_id} value={cut.corte_id}>
                   {cutLabel(cut)}
@@ -262,7 +262,7 @@ export default function AdminEnrolledStudentsPanel() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="7">No hay estudiantes matriculados para la corte seleccionada.</td>
+                  <td colSpan="7">No hay estudiantes matriculados para la cohorte seleccionada.</td>
                 </tr>
               )}
             </tbody>

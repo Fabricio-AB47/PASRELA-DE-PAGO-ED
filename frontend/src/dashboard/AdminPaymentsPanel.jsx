@@ -1079,7 +1079,7 @@ export default function AdminPaymentsPanel() {
                     ))}
                   </dl>
                   <div className="admin-table-wrap">
-                    <table className="admin-table"><thead><tr><th>Corte</th><th>Curso</th><th>Estado</th><th>Inicio</th></tr></thead>
+                    <table className="admin-table"><thead><tr><th>Cohorte</th><th>Curso</th><th>Estado</th><th>Inicio</th></tr></thead>
                       <tbody>{studentProfile.enrollments?.length ? studentProfile.enrollments.map((item) => (
                         <tr key={item.estudiante_corte_id}><td>{item.corte}</td><td>{item.curso}</td><td>{item.estado}</td><td>{item.fecha_inicio}</td></tr>
                       )) : <tr><td colSpan="4">No registra matrículas académicas asociadas.</td></tr>}</tbody>
@@ -1105,7 +1105,7 @@ export default function AdminPaymentsPanel() {
             <div className="career-modal-body">
               <div className="payment-entry-context">
                 <div><span>Curso</span><strong>{paymentEntryUser.course_name || '-'}</strong></div>
-                <div><span>Corte</span><strong>{paymentEntryUser.cut_name || '-'}</strong></div>
+                <div><span>Cohorte</span><strong>{paymentEntryUser.cut_name || '-'}</strong></div>
                 <div><span>Valor del curso</span><strong>{formatMoney(paymentEntryUser.total_value)}</strong></div>
                 <div><span>Saldo pendiente</span><strong>{formatMoney(paymentEntryUser.pending_balance)}</strong></div>
               </div>
@@ -1265,7 +1265,7 @@ export default function AdminPaymentsPanel() {
             <div className="career-modal-body">
               <div className="payment-entry-context">
                 <div><span>Curso</span><strong>{discountEntryUser.course_name || '-'}</strong></div>
-                <div><span>Corte</span><strong>{discountEntryUser.cut_name || '-'}</strong></div>
+                <div><span>Cohorte</span><strong>{discountEntryUser.cut_name || '-'}</strong></div>
                 <div><span>Descuentos y becas</span><strong>{formatMoney(discountEntryUser.discount_value)}</strong></div>
                 <div><span>Saldo pendiente</span><strong>{formatMoney(discountEntryUser.pending_balance)}</strong></div>
               </div>
