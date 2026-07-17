@@ -4455,20 +4455,23 @@ textarea {
 }
 
 .student-update-table th:nth-child(1) {
-  width: 20%;
+  width: 18%;
 }
 
-.student-update-table th:nth-child(2),
+.student-update-table th:nth-child(2) {
+  width: 8%;
+}
+
 .student-update-table th:nth-child(3) {
   width: 9%;
 }
 
 .student-update-table th:nth-child(4) {
-  width: 19%;
+  width: 18%;
 }
 
 .student-update-table th:nth-child(5) {
-  width: 11%;
+  width: 10%;
 }
 
 .student-update-table th:nth-child(6) {
@@ -4476,7 +4479,7 @@ textarea {
 }
 
 .student-update-table th:nth-child(7) {
-  width: 8%;
+  width: 13%;
 }
 
 .student-update-table td {
@@ -4504,6 +4507,10 @@ textarea {
 
 .student-update-table td:last-child {
   white-space: nowrap;
+}
+
+.student-update-row-actions .ghost-button + .ghost-button {
+  margin-left: 6px;
 }
 
 .student-update-search-status {
@@ -4534,6 +4541,55 @@ textarea {
 
 .student-update-modal-body {
   padding-top: 22px;
+}
+
+.student-view-content {
+  display: grid;
+  gap: 18px;
+}
+
+.student-view-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.student-view-grid > div {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.12);
+  border-radius: 14px;
+  background: rgba(var(--fintec-celeste-rgb), 0.11);
+}
+
+.student-view-grid span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-soft);
+  font-size: 0.73rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.student-view-grid strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.student-view-wide {
+  grid-column: span 2;
+}
+
+.student-view-full {
+  grid-column: 1 / -1;
+}
+
+.student-view-loading {
+  margin: 14px 0 0;
+  color: var(--text-soft);
 }
 
 .student-update-form textarea {
@@ -4568,6 +4624,175 @@ textarea {
   box-shadow: 0 0 0 3px rgba(var(--fintec-rojo-rgb), 0.12);
 }
 
+.student-migration-credentials {
+  padding: 18px;
+  border: 1px solid rgba(var(--fintec-rojo-rgb), 0.22);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(var(--fintec-celeste-rgb), 0.16), rgba(var(--fintec-blanco-rgb), 0.96));
+}
+
+.student-migration-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.student-migration-header h4 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1rem;
+}
+
+.student-migration-header p {
+  margin: 5px 0 0;
+  color: var(--text-soft);
+  font-size: 0.86rem;
+}
+
+.student-migration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.student-migration-grid > div {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.12);
+  border-radius: 14px;
+  background: var(--fintec-blanco);
+}
+
+.student-migration-grid span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.student-migration-grid strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.student-migration-grid button {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(var(--fintec-celeste-rgb), 0.32);
+  color: var(--fintec-rojo);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.student-migration-grid button:hover {
+  background: rgba(var(--fintec-celeste-rgb), 0.52);
+}
+
+.student-migration-wide {
+  grid-column: span 2;
+}
+
+.student-migration-password input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.18);
+  border-radius: 12px;
+  background: rgba(var(--fintec-celeste-rgb), 0.08);
+  color: var(--text-strong);
+  font: inherit;
+}
+
+.student-migration-password > div {
+  display: flex;
+  gap: 8px;
+}
+
+.student-migration-copy-status {
+  margin: 10px 0 0;
+  color: #087443;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.admin-teams-panel .tab-switcher {
+  display: inline-flex;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(var(--fintec-celeste-rgb), 0.32);
+}
+
+.admin-teams-panel .tab-switcher button {
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 18px;
+  background: transparent;
+  color: var(--fintec-rojo);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-teams-panel .tab-switcher button.is-active {
+  background: var(--fintec-blanco);
+  box-shadow: 0 4px 14px rgba(var(--fintec-gris-oscuro-rgb), 0.14);
+}
+
+.admin-teams-panel .compact-meta {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.admin-teams-panel .form-hint {
+  margin: 14px 0 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.admin-teams-panel textarea {
+  min-height: 74px;
+  resize: vertical;
+}
+
+.teams-roster-preview {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.12);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.1);
+}
+
+.teams-roster-preview h4 {
+  margin: 0;
+  color: var(--text-strong);
+}
+
+.teams-roster-preview p {
+  margin: 5px 0 0;
+  color: var(--text-soft);
+  font-size: 0.86rem;
+}
+
+.teams-roster-preview > .data-table-wrap {
+  max-height: 280px;
+  margin-top: 12px;
+  overflow: auto;
+}
+
 @media (max-width: 1100px) {
   .student-update-table {
     min-width: 1050px;
@@ -4579,5 +4804,30 @@ textarea {
     width: calc(100vw - 16px);
     max-height: calc(100vh - 16px);
     border-radius: 16px;
+  }
+
+  .student-migration-header {
+    flex-direction: column;
+  }
+
+  .student-migration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .student-view-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .student-view-wide,
+  .student-view-full {
+    grid-column: auto;
+  }
+
+  .admin-teams-panel .compact-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .student-migration-wide {
+    grid-column: auto;
   }
 }

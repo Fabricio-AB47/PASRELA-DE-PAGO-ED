@@ -6,6 +6,7 @@ from django.test import SimpleTestCase
 from dashboard_auth.student_updates import (
     StudentUpdateError,
     _update_enrollment_references,
+    get_student_migration_credentials,
     list_students_for_update,
     update_enrolled_student,
 )
@@ -98,6 +99,24 @@ class StudentUpdatesTests(SimpleTestCase):
     def test_rejects_student_outside_selected_cut(self, _fetch_student):
         with self.assertRaisesMessage(StudentUpdateError, 'no está matriculado'):
             update_enrolled_student({'corte_id': 99, 'codigo_estud': 1954})
+
+    @patch('dashboard_auth.student_updates._fetch_one')
+    @patch('dashboard_auth.student_updates._fetch_student', return_value=CURRENT_STUDENT)
+    def test_loads_migration_credentials_only_for_enrolled_student(self, _fetch_student, fetch_one):
+        fetch_one.return_value = {
+            'codestud': 1954,
+            'Nombres': 'ESTUDIANTE ORIGINAL',
+            'CorreoPersonal': 'original@example.com',
+            'CorreoIntec': 'original@intec.edu.ec',
+            'Password': 'ClaveTemporal',
+            'Estado': 'ACTIVO',
+        }
+
+        result = get_student_migration_credentials(3, 1954)
+
+        self.assertEqual(result['correo_intec'], 'original@intec.edu.ec')
+        self.assertEqual(result['password'], 'ClaveTemporal')
+        self.assertIn('CorreosEstudIntec', fetch_one.call_args.args[0])
 
     @patch('dashboard_auth.student_updates.connection')
     def test_propagates_identity_to_operational_references(self, db_connection):

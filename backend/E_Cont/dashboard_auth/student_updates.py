@@ -137,6 +137,55 @@ def update_enrolled_student(payload: dict[str, Any], *, user_login: str = '') ->
     }
 
 
+def get_student_migration_credentials(corte_id: Any, codigo_estud: Any) -> dict[str, Any]:
+    normalized_cut_id = _safe_int(corte_id)
+    normalized_student_code = _safe_int(codigo_estud)
+    if normalized_cut_id <= 0 or normalized_student_code <= 0:
+        raise StudentUpdateError('Selecciona una matrícula válida para consultar credenciales.')
+    if not _fetch_student(normalized_cut_id, normalized_student_code):
+        raise StudentUpdateError('El estudiante no está matriculado en la cohorte seleccionada.')
+
+    row = _fetch_one(
+        """
+        SELECT TOP (1)
+            codestud,
+            Nombres,
+            CorreoPersonal,
+            CorreoIntec,
+            Password,
+            fecha,
+            Periodo,
+            CorreoEnviado,
+            Estado,
+            CONVERT(nvarchar(max), Descripcion) AS Descripcion,
+            ultAccesoMoodle,
+            NumMigracion,
+            TipoCursoMigra
+        FROM dbo.CorreosEstudIntec
+        WHERE LTRIM(RTRIM(CAST(codestud AS varchar(50)))) = %s
+        ORDER BY fecha DESC, Periodo DESC
+        """,
+        [str(normalized_student_code)],
+    )
+    if not row:
+        raise StudentUpdateError('El estudiante no tiene una cuenta registrada en CorreosEstudIntec.')
+    return {
+        'codigo_estud': _text(row.get('codestud')),
+        'nombres': _text(row.get('Nombres')),
+        'correo_personal': _text(row.get('CorreoPersonal')),
+        'correo_intec': _text(row.get('CorreoIntec')),
+        'password': str(row.get('Password') or ''),
+        'fecha': _date_text(row.get('fecha')),
+        'periodo': _text(row.get('Periodo')),
+        'correo_enviado': _text(row.get('CorreoEnviado')),
+        'estado': _text(row.get('Estado')),
+        'descripcion': _text(row.get('Descripcion')),
+        'ultimo_acceso_moodle': _date_text(row.get('ultAccesoMoodle')),
+        'numero_migracion': _text(row.get('NumMigracion')),
+        'tipo_curso_migracion': _text(row.get('TipoCursoMigra')),
+    }
+
+
 def _validate_student_payload(payload: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     values = {
         'nombre': _trim(payload.get('nombre', current.get('Nombre')), 70),

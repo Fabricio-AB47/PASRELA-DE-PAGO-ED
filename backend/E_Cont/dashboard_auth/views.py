@@ -108,6 +108,7 @@ from .student_registration import (
 from .student_records import StudentLookupError, lookup_student_inscription
 from .student_updates import (
     StudentUpdateError,
+    get_student_migration_credentials,
     list_students_for_update,
     update_enrolled_student,
 )
@@ -1244,6 +1245,8 @@ def admin_student_updates_view(request):
             },
             status=500,
         )
+    role = request.dashboard_user.get('role') if isinstance(request.dashboard_user.get('role'), dict) else {}
+    result['can_view_credentials'] = str(role.get('name') or '').strip().upper() == 'ADMINISTRADOR'
     return JsonResponse(
         {
             'ok': True,
@@ -1251,6 +1254,41 @@ def admin_student_updates_view(request):
             'result': result,
         }
     )
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+@never_cache
+def admin_student_credentials_view(request):
+    try:
+        payload = json.loads(request.body or b'{}')
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return JsonResponse({'ok': False, 'message': 'Envía un JSON válido.'}, status=400)
+
+    try:
+        credentials = get_student_migration_credentials(
+            payload.get('corte_id') or payload.get('CorteId'),
+            payload.get('codigo_estud') or payload.get('CodigoEstud'),
+        )
+    except StudentUpdateError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while loading student migration credentials.')
+        return JsonResponse(
+            {'ok': False, 'message': 'No fue posible cargar las credenciales de migración.'},
+            status=500,
+        )
+
+    logger.warning(
+        'Credenciales de migración consultadas por %s para CodigoEstud=%s.',
+        _dashboard_user_login(request),
+        credentials.get('codigo_estud'),
+    )
+    response = JsonResponse({'ok': True, 'credentials': credentials})
+    response['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate, private'
+    response['Pragma'] = 'no-cache'
+    return response
 
 
 @csrf_exempt

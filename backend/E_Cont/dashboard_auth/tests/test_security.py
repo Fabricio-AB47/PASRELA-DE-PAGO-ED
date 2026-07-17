@@ -31,3 +31,10 @@ class FinancialDashboardAccessTests(SimpleTestCase):
         request = self.factory.post('/api/auth/admin/payment-cancel/')
         self.assertTrue(_staff_request_is_allowed(request, 'ADMINISTRADOR'))
         self.assertFalse(_staff_request_is_allowed(request, 'ACADEMICO'))
+
+    def test_student_credentials_are_restricted_to_full_administrator(self):
+        request = self.factory.post('/api/auth/admin/student-updates/credentials/')
+        self.assertTrue(_staff_request_is_allowed(request, 'ADMINISTRADOR'))
+        self.assertFalse(_staff_request_is_allowed(request, 'ACADEMICO'))
+        self.assertFalse(_staff_request_is_allowed(request, 'SECRETARIA'))
+        self.assertFalse(_staff_request_is_allowed(request, 'FINANCIERO'))

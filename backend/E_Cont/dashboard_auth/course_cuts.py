@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -857,6 +858,12 @@ def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
     if not cut:
         raise CourseCutError('No se encontró la corte seleccionada.')
 
+    source_students = [
+        _normalize_cut_student(row, {})
+        for row in _fetch_course_cut_student_rows(normalized_corte_id)
+        if _clean_text(row.get('EstadoRegistro')).upper() == 'A'
+    ]
+
     schedule_status = _schedule_complement_status(require_write=False)
     teams_status = _teams_complement_status(require_write=False)
     teachers = _fetch_schedule_teachers(normalized_corte_id)
@@ -865,6 +872,7 @@ def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
             'cut': cut,
             'schedules': [],
             'sessions': [],
+            'source_students': source_students,
             'teachers': teachers,
             'team': None,
             'team_members': [],
@@ -887,15 +895,18 @@ def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
         if teams_status['available']
         else []
     )
+    additional_owners = _fetch_team_additional_owners(normalized_corte_id) if teams_status['available'] else []
 
     return {
         'cut': cut,
         'schedules': schedules,
         'sessions': sessions,
+        'source_students': source_students,
         'teachers': teachers,
         'team': team,
         'team_members': team_members,
         'graph_queue': graph_queue,
+        'additional_owners': additional_owners,
         'metrics': _build_schedule_metrics(schedules, sessions),
         'continuing_education': schedule_status,
         'teams': {
@@ -1064,6 +1075,13 @@ def sync_course_cut_teams(payload: dict[str, Any], *, user_login: str = '') -> d
     )
     _set_cut_uses_teams(corte_id)
 
+    # Teams always uses the complementary enrollment. Synchronize the active
+    # students from the selected course before the membership queue is built.
+    student_sync = sync_course_cut_students(
+        {'corte_id': corte_id},
+        user_login=user_login or 'SISTEMA',
+    )
+
     visibility = _clean_text(
         payload.get('visibility')
         or payload.get('visibilidad')
@@ -1079,6 +1097,27 @@ def sync_course_cut_teams(payload: dict[str, Any], *, user_login: str = '') -> d
         usuario_registro=user_login or 'SISTEMA',
     )
     team_corte_id = _safe_int((team or {}).get('TeamCorteId'), default=0)
+    requested_name = _trim_to_max(
+        payload.get('team_name') or payload.get('display_name') or payload.get('nombre_equipo'),
+        256,
+    )
+    if team_corte_id > 0 and requested_name:
+        team = _update_team_display_name(
+            corte_id=corte_id,
+            team_corte_id=team_corte_id,
+            display_name=requested_name,
+        )
+
+    additional_owners = _normalize_additional_owner_emails(
+        payload.get('additional_owner_emails') or payload.get('administradores_adicionales')
+    )
+    if team_corte_id > 0:
+        _save_team_additional_owners(
+            corte_id=corte_id,
+            team_corte_id=team_corte_id,
+            emails=additional_owners,
+            usuario_registro=user_login or 'SISTEMA',
+        )
 
     team_id = _trim_to_max(payload.get('team_id') or payload.get('TeamId'), 100)
     group_id = _trim_to_max(payload.get('group_id') or payload.get('GroupId'), 100) or None
@@ -1118,6 +1157,8 @@ def sync_course_cut_teams(payload: dict[str, Any], *, user_login: str = '') -> d
         'schedule': selected_schedule,
         'team': _normalize_team_row(current_team),
         'team_members': [_normalize_team_member_row(row) for row in members],
+        'additional_owners': _fetch_team_additional_owners(corte_id),
+        'student_sync': student_sync.get('summary', {}),
         'members_message': members_message,
         'updated': updated,
     }
@@ -2924,6 +2965,140 @@ def _enqueue_team_members(*, corte_id: int, usuario_registro: str) -> list[dict[
             _trim_to_max(usuario_registro, 50),
         ],
     )
+
+
+def _update_team_display_name(*, corte_id: int, team_corte_id: int, display_name: str) -> dict[str, Any] | None:
+    """Keep the local Team definition and its queued Graph payload aligned."""
+    clean_name = _trim_to_max(display_name, 256)
+    if not clean_name:
+        return _fetch_team_corte(corte_id)
+
+    description = _trim_to_max(
+        f'Aula Teams de Educación Continua. CorteId: {corte_id}. Fuente académica: INTECBDD.',
+        1024,
+    )
+    request_json = json.dumps(
+        {
+            "template@odata.bind": "https://graph.microsoft.com/v1.0/teamsTemplates('standard')",
+            'visibility': (_fetch_team_corte(corte_id) or {}).get('Visibility') or 'Private',
+            'displayName': clean_name,
+            'description': description,
+            'firstChannelName': 'General',
+        },
+        ensure_ascii=False,
+    )
+    _fetch_all(
+        f"""
+        UPDATE [{complement_database_name()}].[graph].[TeamCorte]
+        SET [DisplayName] = %s,
+            [Description] = %s,
+            [RequestJson] = %s,
+            [FechaActualizacion] = sysdatetime()
+        WHERE [TeamCorteId] = %s AND [CorteId] = %s;
+
+        UPDATE [{complement_database_name()}].[graph].[OperacionQueue]
+        SET [RequestJson] = %s
+        WHERE [TipoOperacion] = 'CREAR_TEAM'
+          AND [Entidad] = 'graph.TeamCorte'
+          AND [EntidadId] = %s
+          AND [EstadoOperacion] IN ('PENDIENTE', 'PROCESANDO');
+        """,
+        [clean_name, description, request_json, team_corte_id, corte_id, request_json, team_corte_id],
+    )
+    return _fetch_team_corte(corte_id)
+
+
+def _ensure_team_additional_owner_schema() -> bool:
+    """Small additive table; it never changes the source academic database."""
+    if not _teams_complement_status(require_write=False)['available']:
+        return False
+    try:
+        _fetch_all(
+            f"""
+            IF OBJECT_ID(N'[{complement_database_name()}].[graph].[TeamAdministradorAdicional]', N'U') IS NULL
+            BEGIN
+                CREATE TABLE [{complement_database_name()}].[graph].[TeamAdministradorAdicional] (
+                    [TeamAdministradorId] int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                    [TeamCorteId] int NOT NULL,
+                    [CorteId] int NOT NULL,
+                    [Correo] nvarchar(150) NOT NULL,
+                    [EstadoGraph] varchar(30) NOT NULL CONSTRAINT [DF_graph_TeamAdminExtra_Estado] DEFAULT ('PENDIENTE'),
+                    [ErrorGraph] nvarchar(1000) NULL,
+                    [UsuarioRegistro] varchar(50) NULL,
+                    [FechaRegistro] datetime2(0) NOT NULL CONSTRAINT [DF_graph_TeamAdminExtra_Fecha] DEFAULT (sysdatetime()),
+                    [FechaEnvioGraph] datetime2(0) NULL,
+                    CONSTRAINT [UQ_graph_TeamAdminExtra_CorteCorreo] UNIQUE ([CorteId], [Correo])
+                );
+            END
+            """
+        )
+        return True
+    except Exception:
+        # The principal feature remains available when the SQL account lacks DDL permission.
+        return False
+
+
+def _normalize_additional_owner_emails(value: Any) -> list[str]:
+    raw_values = value if isinstance(value, list) else re.split(r'[;,\n]+', _clean_text(value))
+    emails: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        email = _clean_text(raw).lower()
+        if not email:
+            continue
+        if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+            raise CourseCutError(f'El correo de administrador "{email}" no es válido.')
+        if email not in seen:
+            seen.add(email)
+            emails.append(email)
+    return emails[:20]
+
+
+def _save_team_additional_owners(*, corte_id: int, team_corte_id: int, emails: list[str], usuario_registro: str) -> None:
+    if not _ensure_team_additional_owner_schema():
+        if emails:
+            raise CourseCutError(
+                'La base complementaria no permite guardar administradores adicionales de Teams. '
+                'Ejecuta la actualización del módulo de Teams con una cuenta que tenga permiso CREATE TABLE.'
+            )
+        return
+    _fetch_all(
+        f"DELETE FROM [{complement_database_name()}].[graph].[TeamAdministradorAdicional] WHERE [CorteId] = %s",
+        [corte_id],
+    )
+    for email in emails:
+        _fetch_all(
+            f"""
+            INSERT INTO [{complement_database_name()}].[graph].[TeamAdministradorAdicional]
+                ([TeamCorteId], [CorteId], [Correo], [UsuarioRegistro])
+            VALUES (%s, %s, %s, %s)
+            """,
+            [team_corte_id, corte_id, email, _trim_to_max(usuario_registro, 50)],
+        )
+
+
+def _fetch_team_additional_owners(corte_id: int) -> list[dict[str, Any]]:
+    if not _ensure_team_additional_owner_schema():
+        return []
+    rows = _fetch_all(
+        f"""
+        SELECT [TeamAdministradorId], [Correo], [EstadoGraph], [ErrorGraph], [FechaEnvioGraph]
+        FROM [{complement_database_name()}].[graph].[TeamAdministradorAdicional]
+        WHERE [CorteId] = %s
+        ORDER BY [Correo]
+        """,
+        [corte_id],
+    )
+    return [
+        {
+            'id': _clean_text(row.get('TeamAdministradorId')),
+            'email': _clean_text(row.get('Correo')).lower(),
+            'estado_graph': _clean_text(row.get('EstadoGraph')),
+            'error_graph': _clean_text(row.get('ErrorGraph')),
+            'fecha_envio_graph': _date_iso(row.get('FechaEnvioGraph')),
+        }
+        for row in rows
+    ]
 
 
 def _fetch_team_corte(corte_id: int) -> dict[str, Any] | None:
