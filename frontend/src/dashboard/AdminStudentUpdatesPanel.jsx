@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { readResponsePayload } from '../shared.js'
 import { adminFetch } from './api.js'
+import ListExportModal from './ListExportModal.jsx'
+import { downloadPeopleList } from './listExports.js'
 
 const EMPTY_FORM = {
   nombre: '',
@@ -37,6 +39,8 @@ export default function AdminStudentUpdatesPanel() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isExportOpen, setIsExportOpen] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [canViewCredentials, setCanViewCredentials] = useState(false)
   const [credentials, setCredentials] = useState(null)
   const [isLoadingCredentials, setIsLoadingCredentials] = useState(false)
@@ -56,7 +60,7 @@ export default function AdminStudentUpdatesPanel() {
     setError('')
     setMessage('')
     try {
-      const params = new URLSearchParams({ corte_id: corteId })
+      const params = new URLSearchParams({ corte_id: corteId, limit: '500' })
       if (search.trim()) params.set('q', search.trim())
       const response = await adminFetch(`/api/auth/admin/student-updates/?${params.toString()}`)
       const payload = await readResponsePayload(response)
@@ -174,7 +178,10 @@ export default function AdminStudentUpdatesPanel() {
 
   function updateField(event) {
     const { name, value } = event.target
-    setForm((current) => ({ ...current, [name]: value }))
+    setForm((current) => ({
+      ...current,
+      [name]: name === 'nombre' ? value.toLocaleUpperCase('es-EC') : value,
+    }))
   }
 
   async function handleSave(event) {
@@ -217,6 +224,25 @@ export default function AdminStudentUpdatesPanel() {
   function handleSearch(event) {
     event.preventDefault()
     loadStudents(selectedCutId, query)
+  }
+
+  async function handleDownload(format) {
+    setIsExporting(true)
+    setError('')
+    try {
+      await downloadPeopleList({
+        kind: 'students',
+        format,
+        title: `LISTADO DE ESTUDIANTES${selectedCut ? ` - ${cutLabel(selectedCut)}` : ''}`,
+        rows: students,
+      })
+      setIsExportOpen(false)
+    } catch (downloadError) {
+      setError(downloadError.message)
+      setIsExportOpen(false)
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   return (
@@ -288,6 +314,14 @@ export default function AdminStudentUpdatesPanel() {
               {query.trim() ? ` para “${query.trim()}”` : ''}.
             </p>
           </div>
+          <button
+            type="button"
+            className="ghost-button compact-button"
+            onClick={() => setIsExportOpen(true)}
+            disabled={isLoading || !students.length}
+          >
+            Descargar listado
+          </button>
         </div>
         <div className="admin-table-wrap student-update-table-wrap">
           <table className="admin-table student-update-table">
@@ -547,6 +581,14 @@ export default function AdminStudentUpdatesPanel() {
           </section>
         </div>
       ) : null}
+      <ListExportModal
+        isOpen={isExportOpen}
+        title="Descargar listado de estudiantes"
+        recordCount={students.length}
+        isDownloading={isExporting}
+        onClose={() => setIsExportOpen(false)}
+        onDownload={handleDownload}
+      />
     </section>
   )
 }

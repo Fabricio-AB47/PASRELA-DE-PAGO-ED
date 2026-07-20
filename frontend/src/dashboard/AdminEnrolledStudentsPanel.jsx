@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { readResponsePayload } from '../shared.js'
 import { adminFetch } from './api.js'
+import ListExportModal from './ListExportModal.jsx'
+import { downloadPeopleList } from './listExports.js'
 
 const numberFormatter = new Intl.NumberFormat('es-EC')
 
@@ -38,6 +40,8 @@ export default function AdminEnrolledStudentsPanel() {
   const [result, setResult] = useState(null)
   const [isLoadingCuts, setIsLoadingCuts] = useState(true)
   const [isLoadingStudents, setIsLoadingStudents] = useState(false)
+  const [isExportOpen, setIsExportOpen] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [error, setError] = useState('')
 
   const loadStudents = useCallback(async (corteId, searchTerm = '') => {
@@ -49,7 +53,7 @@ export default function AdminEnrolledStudentsPanel() {
     setError('')
 
     try {
-      const params = new URLSearchParams({ corte_id: corteId })
+      const params = new URLSearchParams({ corte_id: corteId, limit: '1000' })
       if (searchTerm.trim()) {
         params.set('q', searchTerm.trim())
       }
@@ -114,6 +118,10 @@ export default function AdminEnrolledStudentsPanel() {
   }, [loadStudents])
 
   const students = useMemo(() => result?.students || [], [result])
+  const selectedCut = useMemo(
+    () => cuts.find((cut) => String(cut.corte_id) === String(selectedCutId)) || null,
+    [cuts, selectedCutId],
+  )
   const metrics = result?.metrics || {}
   const complement = result?.continuing_education
 
@@ -130,6 +138,25 @@ export default function AdminEnrolledStudentsPanel() {
   function handleSearch(event) {
     event.preventDefault()
     loadStudents(selectedCutId, query)
+  }
+
+  async function handleDownload(format) {
+    setIsExporting(true)
+    setError('')
+    try {
+      await downloadPeopleList({
+        kind: 'students',
+        format,
+        title: `LISTADO DE ESTUDIANTES${selectedCut ? ` - ${cutLabel(selectedCut)}` : ''}`,
+        rows: students,
+      })
+      setIsExportOpen(false)
+    } catch (downloadError) {
+      setError(downloadError.message)
+      setIsExportOpen(false)
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   return (
@@ -219,6 +246,14 @@ export default function AdminEnrolledStudentsPanel() {
             <h4>Matriculados</h4>
             <p>Revisa identificación, correo, asistencia y nota registrada por estudiante.</p>
           </div>
+          <button
+            type="button"
+            className="ghost-button compact-button"
+            onClick={() => setIsExportOpen(true)}
+            disabled={isLoadingStudents || !students.length}
+          >
+            Descargar listado
+          </button>
         </div>
 
         {error ? <p className="form-error">{error}</p> : null}
@@ -269,6 +304,14 @@ export default function AdminEnrolledStudentsPanel() {
           </table>
         </div>
       </article>
+      <ListExportModal
+        isOpen={isExportOpen}
+        title="Descargar listado de estudiantes"
+        recordCount={students.length}
+        isDownloading={isExporting}
+        onClose={() => setIsExportOpen(false)}
+        onDownload={handleDownload}
+      />
     </section>
   )
 }

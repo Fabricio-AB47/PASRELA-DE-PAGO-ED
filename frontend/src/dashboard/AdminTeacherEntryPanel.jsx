@@ -35,7 +35,7 @@ export default function AdminTeacherEntryPanel() {
     }
     setForm((current) => ({
       ...current,
-      [name]: value,
+      [name]: name === 'nombre' ? value.toLocaleUpperCase('es-EC') : value,
     }))
   }
 

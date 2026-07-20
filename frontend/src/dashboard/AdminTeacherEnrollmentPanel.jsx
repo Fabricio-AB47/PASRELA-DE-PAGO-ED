@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { readResponsePayload } from '../shared.js'
 import { adminFetch } from './api.js'
+import ListExportModal from './ListExportModal.jsx'
+import { downloadPeopleList } from './listExports.js'
 
 const DEFAULT_PARALLEL = 'A'
 const DEFAULT_JOURNEY_CODE = '1'
@@ -189,6 +191,8 @@ export default function AdminTeacherEnrollmentPanel() {
   const [isLoadingStudents, setIsLoadingStudents] = useState(false)
   const [isLoadingTeachers, setIsLoadingTeachers] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isExportOpen, setIsExportOpen] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [error, setError] = useState('')
   const [studentsError, setStudentsError] = useState(null)
   const [message, setMessage] = useState('')
@@ -311,7 +315,7 @@ export default function AdminTeacherEnrollmentPanel() {
     try {
       const params = new URLSearchParams({
         q: teacherSearch,
-        limit: '100',
+        limit: '300',
       })
       const response = await adminFetch(`/api/auth/admin/teachers/?${params.toString()}`)
       const payload = await readResponsePayload(response)
@@ -322,11 +326,20 @@ export default function AdminTeacherEnrollmentPanel() {
       const loadedTeachers = payload.teachers || []
       setTeacherCandidates(loadedTeachers)
       setMessage(`${loadedTeachers.length} docente(s) encontrado(s).`)
+      return loadedTeachers
     } catch (loadError) {
       setError(loadError.message)
+      return []
     } finally {
       setIsLoadingTeachers(false)
     }
+  }
+
+  async function openTeacherExport() {
+    const availableTeachers = teacherCandidates.length
+      ? teacherCandidates
+      : await loadTeacherCandidates()
+    if (availableTeachers.length) setIsExportOpen(true)
   }
 
   function selectTeacher(teacher) {
@@ -347,6 +360,25 @@ export default function AdminTeacherEnrollmentPanel() {
       ...current,
       codigo_doc: String(nextTeachers[0]?.codigo_doc || ''),
     }))
+  }
+
+  async function handleTeacherDownload(format) {
+    setIsExporting(true)
+    setError('')
+    try {
+      await downloadPeopleList({
+        kind: 'teachers',
+        format,
+        title: 'LISTADO DE DOCENTES',
+        rows: teacherCandidates,
+      })
+      setIsExportOpen(false)
+    } catch (downloadError) {
+      setError(downloadError.message)
+      setIsExportOpen(false)
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   async function handleSubmit(event) {
@@ -501,7 +533,17 @@ export default function AdminTeacherEnrollmentPanel() {
               <h4>Buscar docente</h4>
               <p>Consulta registros existentes en DATOSDOCENTE por nombre o número de cédula.</p>
             </div>
-            <strong>{selectedTeachers.length ? `${selectedTeachers.length} de 3 seleccionados` : 'Sin selección'}</strong>
+            <div className="list-heading-actions">
+              <strong>{selectedTeachers.length ? `${selectedTeachers.length} de 3 seleccionados` : 'Sin selección'}</strong>
+              <button
+                type="button"
+                className="ghost-button compact-button"
+                onClick={openTeacherExport}
+                disabled={isLoadingTeachers}
+              >
+                Descargar listado
+              </button>
+            </div>
           </div>
 
           <div className="student-selection-toolbar">
@@ -767,6 +809,14 @@ export default function AdminTeacherEnrollmentPanel() {
           <pre className="json-result">{JSON.stringify(result, null, 2)}</pre>
         </section>
       ) : null}
+      <ListExportModal
+        isOpen={isExportOpen}
+        title="Descargar listado de docentes"
+        recordCount={teacherCandidates.length}
+        isDownloading={isExporting}
+        onClose={() => setIsExportOpen(false)}
+        onDownload={handleTeacherDownload}
+      />
     </section>
   )
 }

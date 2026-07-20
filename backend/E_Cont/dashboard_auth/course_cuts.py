@@ -4093,6 +4093,8 @@ def _fetch_complement_enrollment_rows(corte_id: int, *, search: Any = '', limit:
                 M.[ApellidosNombre],
                 M.[CorreoIntec],
                 M.[CorreoPersonal],
+                DE.[telefono] AS [Telefono],
+                DE.[movil] AS [Movil],
                 M.[UsuarioLogin],
                 M.[FechaMatricula] AS [FechaInicioEstudiante],
                 M.[EstadoMatricula] AS [EstadoParticipacion],
@@ -4121,6 +4123,8 @@ def _fetch_complement_enrollment_rows(corte_id: int, *, search: Any = '', limit:
               ON CAL.[EstudianteCorteId] = M.[EstudianteCorteId]
             LEFT JOIN [{complement_database_name()}].[edu].[VW_AsistenciaResumen] AR
               ON AR.[EstudianteCorteId] = M.[EstudianteCorteId]
+            LEFT JOIN [{complement_database_name()}].[ref].[DATOS_ESTUD] DE
+              ON LTRIM(RTRIM(CAST(DE.[codigo_estud] AS varchar(30)))) = LTRIM(RTRIM(CAST(M.[CodigoEstud] AS varchar(30))))
             OUTER APPLY (
                 SELECT TOP 1 P0.[EstadoPase], P0.[MensajePase], P0.[FechaPase]
                 FROM [{complement_database_name()}].[edu].[PaseNotaControl] P0
@@ -4218,6 +4222,8 @@ def _normalize_enrolled_student(row: dict[str, Any]) -> dict[str, Any]:
         'nombre': _clean_text(row.get('ApellidosNombre')) or 'Sin nombre',
         'correo_intec': _clean_text(row.get('CorreoIntec')),
         'correo_personal': _clean_text(row.get('CorreoPersonal')),
+        'telefono': _clean_text(row.get('Telefono')),
+        'movil': _clean_text(row.get('Movil')),
         'usuario_login': _clean_text(row.get('UsuarioLogin')),
         'cod_anio_basica': _clean_text(row.get('Cod_AnioBasica')),
         'carrera': _clean_text(row.get('NombreCarrera')),

@@ -16,6 +16,7 @@ MAX_ADMIN_JSON_BODY_BYTES = int(os.getenv('MAX_ADMIN_JSON_BODY_BYTES') or str(8 
 FINANCIAL_ALLOWED_ADMIN_REQUESTS = {
     ('GET', '/admin/course-cuts/'),
     ('GET', '/admin/enrolled-students/'),
+    ('POST', '/admin/list-export/'),
     ('GET', '/admin/payments/'),
     ('POST', '/admin/payments/reconcile/'),
     ('POST', '/admin/payments/register/'),
@@ -46,6 +47,7 @@ ACADEMIC_ALLOWED_ADMIN_REQUESTS = {
     ('POST', '/admin/course-cuts/modules/save/'),
     ('POST', '/admin/course-cuts/teams/sync/'),
     ('GET', '/admin/enrolled-students/'),
+    ('POST', '/admin/list-export/'),
     ('GET', '/admin/student-updates/'),
     ('POST', '/admin/student-updates/save/'),
     ('GET', '/admin/grade-transfer/'),
@@ -77,11 +79,12 @@ EXECUTIVE_READ_ADMIN_REQUESTS = {
     request_key
     for request_key in (FINANCIAL_ALLOWED_ADMIN_REQUESTS | ACADEMIC_ALLOWED_ADMIN_REQUESTS)
     if request_key[0] == 'GET'
-}
+} | {('POST', '/admin/list-export/')}
 STUDENT_SUPPORT_READ_REQUESTS = {
     ('GET', '/admin/course-cuts/'),
     ('GET', '/admin/course-cuts/students/'),
     ('GET', '/admin/enrolled-students/'),
+    ('POST', '/admin/list-export/'),
 }
 ADMISSIONS_ALLOWED_ADMIN_REQUESTS = STUDENT_SUPPORT_READ_REQUESTS | {
     ('GET', '/admin/academic-catalogs/'),

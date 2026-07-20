@@ -35,6 +35,7 @@ function getCurrentRouteId() {
 
 export default function DashboardLayout({ session, onSessionChange }) {
   const [activeRouteId, setActiveRouteId] = useState(getCurrentRouteId)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const { user } = session
   const routeIsAllowed = canAccessDashboardRoute(user, activeRouteId)
   const effectiveRouteId = routeIsAllowed ? activeRouteId : 'home'
@@ -57,9 +58,11 @@ export default function DashboardLayout({ session, onSessionChange }) {
       if (!canAccessDashboardRoute(user, requestedRouteId)) {
         window.history.replaceState(null, '', '#dashboard')
         setActiveRouteId('home')
+        setIsMobileMenuOpen(false)
         return
       }
       setActiveRouteId(requestedRouteId)
+      setIsMobileMenuOpen(false)
     }
 
     window.addEventListener('hashchange', handleHashChange)
@@ -69,6 +72,24 @@ export default function DashboardLayout({ session, onSessionChange }) {
       window.removeEventListener('hashchange', handleHashChange)
     }
   }, [user])
+
+  useEffect(() => {
+    function handleResponsiveMenu(event) {
+      if (event.type === 'keydown' && event.key === 'Escape') {
+        setIsMobileMenuOpen(false)
+      }
+      if (event.type === 'resize' && window.innerWidth > 1120) {
+        setIsMobileMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleResponsiveMenu)
+    window.addEventListener('resize', handleResponsiveMenu)
+    return () => {
+      window.removeEventListener('keydown', handleResponsiveMenu)
+      window.removeEventListener('resize', handleResponsiveMenu)
+    }
+  }, [])
 
   function handleLogout() {
     clearStoredSession()
@@ -96,13 +117,38 @@ export default function DashboardLayout({ session, onSessionChange }) {
         </div>
       </header>
 
-      <nav className="dashboard-nav" aria-label="Navegación del dashboard">
+      <div className="dashboard-mobile-navigation">
+        <button
+          type="button"
+          className={`dashboard-menu-toggle ${isMobileMenuOpen ? 'is-open' : ''}`}
+          aria-expanded={isMobileMenuOpen}
+          aria-controls="dashboard-navigation"
+          onClick={() => setIsMobileMenuOpen((current) => !current)}
+        >
+          <span className="dashboard-menu-icon" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span>
+            <small>Menú</small>
+            <strong>{activeRoute.label}</strong>
+          </span>
+        </button>
+      </div>
+
+      <nav
+        id="dashboard-navigation"
+        className={`dashboard-nav ${isMobileMenuOpen ? 'is-open' : ''}`}
+        aria-label="Navegación del dashboard"
+      >
         {primaryRoutes.map((route) => (
           <a
             key={route.id}
             href={route.hash}
             className={route.id === activeRoute.id || activeRoute.parentId === route.id ? 'is-active' : ''}
             aria-current={route.id === activeRoute.id || activeRoute.parentId === route.id ? 'page' : undefined}
+            onClick={() => setIsMobileMenuOpen(false)}
           >
             {route.label}
           </a>
@@ -119,6 +165,7 @@ export default function DashboardLayout({ session, onSessionChange }) {
                   href={route.hash}
                   className={route.id === activeRoute.id ? 'is-active' : ''}
                   aria-current={route.id === activeRoute.id ? 'page' : undefined}
+                  onClick={() => setIsMobileMenuOpen(false)}
                 >
                   {route.label}
                 </a>

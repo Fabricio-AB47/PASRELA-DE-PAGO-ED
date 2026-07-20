@@ -90,6 +90,7 @@ from .payments import (
     upload_continuing_education_invoice,
 )
 from .notifications import list_notifications, mark_notifications_read, notification_storage_status
+from .list_exports import ListExportError, build_people_list_export
 from .security import (
     clear_request_rate_limit,
     create_session_token,
@@ -145,6 +146,27 @@ from .teacher_enrollment import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_people_list_export_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+        content, content_type, filename = build_people_list_export(payload)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    except ListExportError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while exporting a people list.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible generar el listado solicitado.'}, status=500)
+
+    response = HttpResponse(content, content_type=content_type)
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 
 @require_GET

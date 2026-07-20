@@ -199,7 +199,7 @@ function InscriptionPage() {
 
     setRegistrationForm((current) => ({
       ...current,
-      [name]: value,
+      [name]: name === 'nombre' ? value.toLocaleUpperCase('es-EC') : value,
     }))
   }
 
