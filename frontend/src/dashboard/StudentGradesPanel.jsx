@@ -80,10 +80,13 @@ export default function StudentGradesPanel() {
         const payload = await readResponsePayload(response)
         throw new Error(payload?.message ?? `No fue posible generar la vista previa (${response.status}).`)
       }
-      const blob = await response.blob()
-      if (!blob.size || !blob.type.startsWith('image/')) {
-        throw new Error('El servidor no devolvió una imagen válida para la vista previa.')
+      const responseBlob = await response.blob()
+      const previewBytes = await responseBlob.arrayBuffer()
+      const signature = new TextDecoder('ascii').decode(previewBytes.slice(0, 5))
+      if (!previewBytes.byteLength || signature !== '%PDF-') {
+        throw new Error('El servidor no devolvió un PDF válido para la vista previa.')
       }
+      const blob = new Blob([previewBytes], { type: 'application/pdf' })
       const objectUrl = window.URL.createObjectURL(blob)
       setPreviewUrl((current) => {
         if (current) {
@@ -321,11 +324,18 @@ export default function StudentGradesPanel() {
             {previewingId === previewCourse.estudiante_corte_id ? (
               <p className="student-certificate-pending">Cargando vista previa del certificado...</p>
             ) : previewUrl ? (
-              <img className="student-certificate-preview-image" src={previewUrl} alt="Vista previa del certificado" />
+              <div className="student-certificate-preview-canvas">
+                <iframe
+                  className="student-certificate-preview-frame"
+                  src={`${previewUrl}#page=1&zoom=page-fit&view=Fit`}
+                  title="Vista previa del certificado"
+                />
+              </div>
             ) : (
-              <p className="student-certificate-pending">
-                No fue posible cargar la vista previa del certificado.
-              </p>
+              <div className="student-certificate-preview-error" role="alert">
+                <strong>No fue posible cargar la vista previa del certificado.</strong>
+                <span>{error || 'Actualiza la página e inténtalo nuevamente.'}</span>
+              </div>
             )}
           </article>
         </div>

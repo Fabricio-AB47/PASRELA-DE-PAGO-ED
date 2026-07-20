@@ -16,14 +16,14 @@
   ],
   "logos": [
     {
-      "id": "08d69e387b9c4a4097fd5059f229ede5",
-      "display_name": "WhatsApp Image 2026-07-17 at 10.58.01",
-      "filename": "08d69e387b9c4a4097fd5059f229ede5.jpg",
-      "content_type": "image/jpeg",
-      "size_bytes": 14250,
+      "id": "40c9757347b44b409027fcbc81e1ace8",
+      "display_name": "image",
+      "filename": "40c9757347b44b409027fcbc81e1ace8.png",
+      "content_type": "image/png",
+      "size_bytes": 157895,
       "enabled": true,
-      "created_at": "2026-07-17T19:11:09+00:00",
-      "updated_at": "2026-07-17T19:11:09+00:00",
+      "created_at": "2026-07-20T14:15:54+00:00",
+      "updated_at": "2026-07-20T14:15:54+00:00",
       "created_by": "dir.ca@intec.edu.ec"
     }
   ],
@@ -32,14 +32,14 @@
       "template_type": "EDUCACION_CONTINUA",
       "background_id": "intec_background_default",
       "logo_ids": [
-        "d8a8c3dac4c347328679fdc28ef36466"
+        "40c9757347b44b409027fcbc81e1ace8"
       ],
       "use_default_logo": true,
       "show_complement_logos": true,
-      "updated_at": "2026-07-15T17:36:02+00:00",
+      "updated_at": "2026-07-20T14:15:54+00:00",
       "updated_by": "dir.ca@intec.edu.ec"
     }
   },
-  "updated_at": "2026-07-17T19:11:09+00:00",
+  "updated_at": "2026-07-20T14:15:54+00:00",
   "updated_by": "dir.ca@intec.edu.ec"
 }

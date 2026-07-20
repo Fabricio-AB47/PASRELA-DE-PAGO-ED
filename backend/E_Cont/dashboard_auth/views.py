@@ -57,7 +57,6 @@ from .inscription_catalogs import (
 )
 from .inscription_certificate import (
     CERTIFICATE_CONTENT_TYPE,
-    CERTIFICATE_PREVIEW_IMAGE_CONTENT_TYPE,
     InscriptionCertificateError,
     build_certificate_payload,
     create_stored_certificate_record,
@@ -1969,7 +1968,7 @@ def student_certificate_preview_view(request):
             status=500,
         )
 
-    response = HttpResponse(content, content_type=CERTIFICATE_PREVIEW_IMAGE_CONTENT_TYPE)
+    response = HttpResponse(content, content_type=CERTIFICATE_CONTENT_TYPE)
     response['Content-Disposition'] = f'inline; filename="{filename}"'
     return response
 

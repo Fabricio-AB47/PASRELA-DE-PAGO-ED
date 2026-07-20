@@ -11,7 +11,7 @@ from .continuing_education import (
     is_complement_available,
 )
 from .inscription_certificate import (
-    build_inscription_certificate_preview_image,
+    build_inscription_certificate,
     create_stored_certificate_record,
     load_signed_certificate_payload,
     load_or_create_stored_certificate,
@@ -108,7 +108,9 @@ def preview_student_certificate(
     payload = _build_student_certificate_payload(student, course)
     payload['codigo_certificado'] = 'VISTA-PREVIA'
     payload['certificate_code'] = 'VISTA-PREVIA'
-    return build_inscription_certificate_preview_image(payload)
+    # Use the same PDF renderer as the administrative preview so both portals
+    # preserve exactly the same template, margins and logo placement.
+    return build_inscription_certificate(payload)
 
 
 def send_student_certificate(

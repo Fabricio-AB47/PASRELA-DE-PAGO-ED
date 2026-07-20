@@ -63,14 +63,14 @@ class StudentCertificateEligibilityTests(TestCase):
         self.assertFalse(course['aprobado'])
         self.assertFalse(course['certificado_disponible'])
 
-    @patch('dashboard_auth.student_dashboard.build_inscription_certificate_preview_image')
+    @patch('dashboard_auth.student_dashboard.build_inscription_certificate')
     @patch('dashboard_auth.student_dashboard._student_certificate_course')
     def test_preview_is_available_without_issuing_certificate(self, certificate_course, build_preview):
         certificate_course.return_value = (
             {'codigo_estud': '1954', 'nombre': 'Estudiante Prueba'},
             _normalize_grade_course(_grade_row(grade='6.00', paid='0.00')),
         )
-        build_preview.return_value = (b'preview-image', 'vista_previa.png')
+        build_preview.return_value = (b'preview-pdf', 'vista_previa.pdf')
 
         content, filename = preview_student_certificate({'login': 'estudiante'}, '7')
 
@@ -80,8 +80,8 @@ class StudentCertificateEligibilityTests(TestCase):
             require_approved=False,
             require_email=False,
         )
-        self.assertEqual(content, b'preview-image')
-        self.assertEqual(filename, 'vista_previa.png')
+        self.assertEqual(content, b'preview-pdf')
+        self.assertEqual(filename, 'vista_previa.pdf')
 
     @patch('dashboard_auth.student_dashboard._fetch_student_grade_row')
     @patch('dashboard_auth.student_dashboard._student_grades_status')
