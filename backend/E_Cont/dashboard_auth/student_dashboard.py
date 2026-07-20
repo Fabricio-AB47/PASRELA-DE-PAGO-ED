@@ -105,6 +105,10 @@ def preview_student_certificate(
         require_approved=False,
         require_email=False,
     )
+    if not course['aprobado']:
+        raise StudentDashboardError(
+            'La vista previa estará disponible cuando la nota final esté entre 7.00 y 10.00.'
+        )
     payload = _build_student_certificate_payload(student, course)
     payload['codigo_certificado'] = 'VISTA-PREVIA'
     payload['certificate_code'] = 'VISTA-PREVIA'
@@ -605,7 +609,7 @@ def _normalize_grade_course(row: dict[str, Any]) -> dict[str, Any]:
     total_descuento = _to_decimal(row.get('TotalDescuento'))
     saldo_pendiente = max(Decimal('0.00'), total_curso - total_pagado - total_descuento)
     pago_completo = total_curso > 0 and saldo_pendiente <= 0
-    certificado_disponible = aprobado and pago_completo
+    certificado_disponible = aprobado
     estado_nota = _clean_text(row.get('EstadoNota')).upper()
     if certificado_disponible:
         certificado_estado = 'Disponible'
@@ -613,8 +617,6 @@ def _normalize_grade_course(row: dict[str, Any]) -> dict[str, Any]:
         certificado_estado = 'No disponible: curso no aprobado y pago pendiente'
     elif not aprobado:
         certificado_estado = 'No disponible: curso no aprobado'
-    else:
-        certificado_estado = 'No disponible: pago total pendiente'
     return {
         'estudiante_corte_id': _clean_text(row.get('EstudianteCorteId')),
         'corte_id': _clean_text(row.get('CorteId')),
@@ -699,12 +701,6 @@ def _student_certificate_course(
     if require_approved and not course['aprobado']:
         raise StudentDashboardError(
             'El certificado estará disponible cuando la nota final esté entre 7.00 y 10.00.'
-        )
-
-    if require_approved and not course['pago_completo']:
-        raise StudentDashboardError(
-            f'El certificado estará disponible cuando completes el pago total del curso. '
-            f'Saldo pendiente: ${course["saldo_pendiente"]}.'
         )
 
     if require_email and not _student_certificate_email(student, course):

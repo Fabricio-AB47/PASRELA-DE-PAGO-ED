@@ -45,7 +45,7 @@ CERTIFICATE_PREVIEW_IMAGE_CONTENT_TYPE = 'image/png'
 CERTIFICATE_STORAGE_DIR_NAME = 'certificados_inscripcion'
 CERTIFICATE_INSTITUTION_NAME = 'Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento INTEC'
 CERTIFICATE_SIGNING_SALT = 'dashboard_auth.inscription_certificate'
-CERTIFICATE_VERSION = '2026-07-20-centered-header-logos-v32'
+CERTIFICATE_VERSION = '2026-07-20-left-to-right-complement-logos-v34'
 DEFAULT_COURSE_START_DATE = '20 de julio de 2026'
 LOGO_FILE_NAME = 'Intec-Logowithslogangray.svg'
 EMAIL_LOGO_FILE_NAME = 'Intec-Logowithslogangray.png'
@@ -67,7 +67,7 @@ HEADER_COMPLEMENT_MARGIN_X_RATIO = 0.025
 # derecho del encabezado. El área termina antes del margen de la página y
 # comienza después del logo institucional central para conservar la plantilla.
 HEADER_COMPLEMENT_AREA_WIDTH_RATIO = 0.30
-HEADER_COMPLEMENT_AREA_HEIGHT_RATIO = 0.135
+HEADER_COMPLEMENT_AREA_HEIGHT_RATIO = 0.20
 HEADER_COMPLEMENT_AREA_TOP_RATIO = 0.045
 
 
@@ -758,13 +758,32 @@ def _draw_cut_logos(pdf, payload: dict[str, Any], width: float, height: float) -
     )
 
 
-def _logo_grid_dimensions(count: int) -> tuple[int, int]:
-    if count <= 1:
-        return 1, 1
-    if count <= 3:
-        return count, 1
-    columns = 2 if count == 4 else 3
-    return columns, (count + columns - 1) // columns
+def _complement_logo_slots(count: int) -> list[tuple[float, float, float, float]]:
+    """Return normalized boxes with the main partner above smaller logos."""
+    total = min(max(count, 0), MAX_COMPLEMENT_LOGOS)
+    if total == 0:
+        return []
+    if total == 1:
+        return [(0.0, 0.0, 1.0, 1.0)]
+
+    first_height = 0.56
+    row_gap = 0.08
+    lower_y = first_height + row_gap
+    lower_height = 1.0 - lower_y
+    column_gap = 0.025
+    lower_capacity = max(1, MAX_COMPLEMENT_LOGOS - 1)
+    lower_width = (1.0 - (column_gap * (lower_capacity - 1))) / lower_capacity
+    slots = [(0.0, 0.0, 1.0, first_height)]
+    slots.extend(
+        (
+            index * (lower_width + column_gap),
+            lower_y,
+            lower_width,
+            lower_height,
+        )
+        for index in range(total - 1)
+    )
+    return slots
 
 
 def _draw_pdf_logo_grid(
@@ -779,17 +798,23 @@ def _draw_pdf_logo_grid(
 ) -> None:
     if not logos:
         return
-    columns, rows = _logo_grid_dimensions(len(logos))
-    gap_x = 0.08 * inch if columns > 1 else 0
-    gap_y = 0.06 * inch if rows > 1 else 0
-    cell_width = max(0.1 * inch, (area_width - (gap_x * (columns - 1))) / columns)
-    cell_height = max(0.1 * inch, (area_height - (gap_y * (rows - 1))) / rows)
-    for index, logo_path in enumerate(logos):
-        row = index // columns
-        column = index % columns
-        cell_x = x + (column * (cell_width + gap_x))
-        cell_y = area_top - cell_height - (row * (cell_height + gap_y))
-        _draw_image_fit_box(pdf, logo_path, cell_x, cell_y, cell_width, cell_height, horizontal=horizontal)
+    for logo_path, (slot_x, slot_y, slot_width, slot_height) in zip(
+        logos,
+        _complement_logo_slots(len(logos)),
+    ):
+        cell_x = x + (slot_x * area_width)
+        cell_width = slot_width * area_width
+        cell_height = slot_height * area_height
+        cell_y = area_top - ((slot_y + slot_height) * area_height)
+        _draw_image_fit_box(
+            pdf,
+            logo_path,
+            cell_x,
+            cell_y,
+            cell_width,
+            cell_height,
+            horizontal=horizontal if slot_y == 0 else 'left',
+        )
 
 
 def _draw_image_fit_box(
@@ -950,16 +975,14 @@ def _paste_preview_logo_grid(
 ) -> None:
     if not logos:
         return
-    columns, rows = _logo_grid_dimensions(len(logos))
-    gap_x = int(image.size[0] * 0.006) if columns > 1 else 0
-    gap_y = int(image.size[1] * 0.008) if rows > 1 else 0
-    cell_width = max(16, (area_width - (gap_x * (columns - 1))) // columns)
-    cell_height = max(16, (area_height - (gap_y * (rows - 1))) // rows)
-    for index, logo_path in enumerate(logos):
-        row = index // columns
-        column = index % columns
-        cell_x = x + (column * (cell_width + gap_x))
-        cell_y = y + (row * (cell_height + gap_y))
+    for logo_path, (slot_x, slot_y, slot_width, slot_height) in zip(
+        logos,
+        _complement_logo_slots(len(logos)),
+    ):
+        cell_x = x + round(slot_x * area_width)
+        cell_y = y + round(slot_y * area_height)
+        cell_width = max(16, round(slot_width * area_width))
+        cell_height = max(16, round(slot_height * area_height))
         _paste_preview_image_fit_box(
             image,
             logo_path,
@@ -967,7 +990,7 @@ def _paste_preview_logo_grid(
             cell_y,
             cell_width,
             cell_height,
-            horizontal=horizontal,
+            horizontal=horizontal if slot_y == 0 else 'left',
         )
 
 

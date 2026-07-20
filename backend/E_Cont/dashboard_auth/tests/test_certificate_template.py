@@ -13,6 +13,7 @@ from dashboard_auth.certificate_template import (
     get_certificate_template_config,
     save_certificate_template_config,
 )
+from dashboard_auth.inscription_certificate import _complement_logo_slots
 
 
 class CertificateTemplateLogoTests(TestCase):
@@ -76,6 +77,33 @@ class CertificateTemplateLogoTests(TestCase):
         )
 
         self.assertEqual(certificate_template_complement_logo_paths('2'), [])
+
+    def test_one_complement_logo_uses_the_complete_available_area(self):
+        self.assertEqual(_complement_logo_slots(1), [(0.0, 0.0, 1.0, 1.0)])
+
+    def test_additional_complement_logos_are_smaller_and_below_the_first(self):
+        slots = _complement_logo_slots(5)
+
+        self.assertEqual(len(slots), 5)
+        first = slots[0]
+        self.assertEqual(first[:3], (0.0, 0.0, 1.0))
+        for slot in slots[1:]:
+            self.assertGreaterEqual(slot[1], first[3])
+            self.assertLess(slot[2], first[2])
+            self.assertLess(slot[3], first[3])
+            self.assertLessEqual(slot[0] + slot[2], 1.0)
+            self.assertLessEqual(slot[1] + slot[3], 1.0)
+
+    def test_lower_complement_logos_always_fill_from_left_to_right(self):
+        two_logo_slots = _complement_logo_slots(2)
+        five_logo_slots = _complement_logo_slots(5)
+
+        self.assertEqual(two_logo_slots[1][0], 0.0)
+        self.assertEqual(two_logo_slots[1][2], five_logo_slots[1][2])
+        self.assertEqual(
+            [slot[0] for slot in five_logo_slots[1:]],
+            sorted(slot[0] for slot in five_logo_slots[1:]),
+        )
 
     @staticmethod
     def _png_base64() -> str:

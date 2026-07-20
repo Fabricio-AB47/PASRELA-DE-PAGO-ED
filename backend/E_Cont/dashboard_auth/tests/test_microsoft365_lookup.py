@@ -25,6 +25,15 @@ class Microsoft365TeamTests(TestCase):
         }
 
         def graph_response(method, endpoint, _token_value, **_kwargs):
+            if '/users/' in endpoint and method == 'GET':
+                email = endpoint.split('/users/', 1)[1].split('?', 1)[0]
+                return {'id': f'user-{email}', 'userPrincipalName': email}
+            if '/owners?$select=' in endpoint and method == 'GET':
+                return {'value': [
+                    {'id': 'owner-1', 'userPrincipalName': 'docente1@intec.edu.ec'},
+                    {'id': 'owner-2', 'userPrincipalName': 'docente2@intec.edu.ec'},
+                    {'id': 'owner-3', 'userPrincipalName': 'docente3@intec.edu.ec'},
+                ]}
             if endpoint.endswith('/primaryChannel'):
                 return {'id': 'channel-1', 'displayName': 'General', 'webUrl': 'https://teams/channel/general'}
             if endpoint.endswith('/teams/group-1'):
@@ -43,6 +52,7 @@ class Microsoft365TeamTests(TestCase):
         )
 
         self.assertEqual(len(result['owners']), 3)
+        self.assertEqual(len(result['confirmed_owners']), 3)
         self.assertEqual(result['primary_channel']['display_name'], 'General')
         self.assertEqual(result['web_url'], 'https://teams/channel/general')
 

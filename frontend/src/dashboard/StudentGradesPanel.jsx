@@ -255,15 +255,17 @@ export default function StudentGradesPanel() {
                     </td>
                     <td>
                       <div className="student-certificate-actions">
-                        <button
-                          type="button"
-                          className="ghost-button compact-button table-action-button"
-                          disabled={previewingId === course.estudiante_corte_id}
-                          onClick={() => handlePreviewCertificate(course)}
-                        >
-                          {previewingId === course.estudiante_corte_id ? 'Cargando...' : 'Vista previa'}
-                        </button>
-                        {course.certificado_disponible ? (
+                        {course.aprobado ? (
+                          <button
+                            type="button"
+                            className="ghost-button compact-button table-action-button"
+                            disabled={previewingId === course.estudiante_corte_id}
+                            onClick={() => handlePreviewCertificate(course)}
+                          >
+                            {previewingId === course.estudiante_corte_id ? 'Cargando...' : 'Vista previa'}
+                          </button>
+                        ) : null}
+                        {course.aprobado ? (
                           <button
                             type="button"
                             className="ghost-button compact-button table-action-button"
@@ -273,7 +275,7 @@ export default function StudentGradesPanel() {
                             {sendingId === course.estudiante_corte_id ? 'Procesando...' : 'Descargar y enviar por correo'}
                           </button>
                         ) : null}
-                        <span className={course.certificado_disponible ? '' : 'is-pending'}>
+                        <span className={course.aprobado ? '' : 'is-pending'}>
                           {course.certificado_estado || '-'}
                         </span>
                       </div>

@@ -687,7 +687,10 @@ export default function AdminCertificateTemplatePanel() {
         ) : null}
 
         <label className="field">
-          <span>Agregar logos para el lado derecho (máximo 5)</span>
+          <span>
+            Agregar logos: el primero se mostrará junto al logo INTEC y los demás debajo,
+            en un tamaño menor (máximo 5)
+          </span>
           <input
             type="file"
             accept="image/png,image/jpeg"

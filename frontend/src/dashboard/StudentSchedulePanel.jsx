@@ -115,7 +115,6 @@ export default function StudentSchedulePanel() {
             <div className="module-card-header student-weekly-schedule-header">
               <div>
                 <h4>Horario semanal</h4>
-                <p>Materias organizadas de lunes a viernes, sin horarios duplicados.</p>
               </div>
               <div className="student-schedule-period" aria-label="Vigencia general del horario">
                 <div>
