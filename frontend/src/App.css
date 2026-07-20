@@ -357,6 +357,60 @@ textarea {
   min-height: 46px;
 }
 
+.role-choice-card {
+  max-width: 520px;
+}
+
+.role-choice-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.role-choice-button {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  column-gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.16);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.16);
+  color: var(--text-strong);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.role-choice-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background: var(--fintec-blanco);
+  box-shadow: 0 10px 24px rgba(var(--fintec-gris-oscuro-rgb), 0.14);
+}
+
+.role-choice-button > span {
+  grid-row: span 2;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fintec-rojo);
+  color: var(--fintec-blanco);
+  font-size: 1.15rem;
+}
+
+.role-choice-button strong {
+  color: var(--fintec-rojo);
+  font-size: 1rem;
+}
+
+.role-choice-button small {
+  margin-top: 3px;
+  color: var(--text-soft);
+}
+
 .secondary-link {
   margin-top: 18px;
   padding: 0;

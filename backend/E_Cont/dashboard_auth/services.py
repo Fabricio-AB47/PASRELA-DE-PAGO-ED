@@ -24,7 +24,7 @@ class InactiveUserError(AuthError):
 class RoleSelectionRequired(AuthError):
     def __init__(self, roles: list[dict[str, str]]):
         self.roles = roles
-        super().__init__('Selecciona si deseas ingresar como docente o administrativo.')
+        super().__init__('Selecciona el perfil con el que deseas ingresar al dashboard.')
 
 
 VALID_SCOPES = {'auto', 'student', 'teacher', 'staff'}
@@ -78,20 +78,17 @@ def authenticate_user(identifier: str, password: str, scope: str = 'auto') -> Au
     }
 
     if clean_scope == 'auto':
-        staff_user = _find_staff(clean_identifier, clean_password)
-        teacher_user = _find_teacher(clean_identifier, clean_password)
-        if staff_user is not None and teacher_user is not None:
+        matched_users = [
+            ('staff', 'Administrativo', _find_staff(clean_identifier, clean_password)),
+            ('teacher', 'Docente', _find_teacher(clean_identifier, clean_password)),
+            ('student', 'Estudiante', _find_student(clean_identifier, clean_password)),
+        ]
+        available_users = [item for item in matched_users if item[2] is not None]
+        if available_users:
             raise RoleSelectionRequired([
-                {'scope': 'staff', 'label': 'Administrativo'},
-                {'scope': 'teacher', 'label': 'Docente'},
+                {'scope': scope_name, 'label': label}
+                for scope_name, label, _user in available_users
             ])
-        if staff_user is not None:
-            return staff_user
-        if teacher_user is not None:
-            return teacher_user
-        student_user = _find_student(clean_identifier, clean_password)
-        if student_user is not None:
-            return student_user
         raise AuthError('No encontramos un usuario válido con esas credenciales.')
 
     scope_order = {

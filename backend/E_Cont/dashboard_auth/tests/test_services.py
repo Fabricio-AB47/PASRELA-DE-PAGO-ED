@@ -16,31 +16,52 @@ class DualRoleAuthenticationTests(TestCase):
     @patch('dashboard_auth.services._find_staff')
     @patch('dashboard_auth.services._find_teacher')
     @patch('dashboard_auth.services._find_student')
-    def test_auto_requests_choice_only_for_staff_and_teacher_duplicate(
+    def test_auto_requests_choice_for_every_available_profile(
         self, find_student, find_teacher, find_staff
     ):
         find_staff.return_value = object()
         find_teacher.return_value = object()
+        find_student.return_value = None
 
         with self.assertRaises(RoleSelectionRequired) as context:
             authenticate_user('usuario@intec.edu.ec', 'ClaveExistente', scope='auto')
 
         self.assertEqual([role['scope'] for role in context.exception.roles], ['staff', 'teacher'])
-        find_student.assert_not_called()
+        find_student.assert_called_once_with('usuario@intec.edu.ec', 'ClaveExistente')
 
     @patch('dashboard_auth.services._find_staff', return_value=None)
     @patch('dashboard_auth.services._find_teacher')
     @patch('dashboard_auth.services._find_student')
-    def test_auto_enters_teacher_when_there_is_no_administrative_duplicate(
+    def test_auto_requests_portal_even_when_only_teacher_is_available(
         self, find_student, find_teacher, _find_staff
     ):
+        find_student.return_value = None
         teacher_session = object()
         find_teacher.return_value = teacher_session
 
-        result = authenticate_user('docente@intec.edu.ec', 'ClaveExistente', scope='auto')
+        with self.assertRaises(RoleSelectionRequired) as context:
+            authenticate_user('docente@intec.edu.ec', 'ClaveExistente', scope='auto')
 
-        self.assertIs(result, teacher_session)
-        find_student.assert_not_called()
+        self.assertEqual(context.exception.roles, [{'scope': 'teacher', 'label': 'Docente'}])
+        find_student.assert_called_once_with('docente@intec.edu.ec', 'ClaveExistente')
+
+    @patch('dashboard_auth.services._find_staff')
+    @patch('dashboard_auth.services._find_teacher')
+    @patch('dashboard_auth.services._find_student')
+    def test_auto_offers_student_teacher_and_staff_when_all_match(
+        self, find_student, find_teacher, find_staff
+    ):
+        find_staff.return_value = object()
+        find_teacher.return_value = object()
+        find_student.return_value = object()
+
+        with self.assertRaises(RoleSelectionRequired) as context:
+            authenticate_user('multiprofile@intec.edu.ec', 'ClaveExistente', scope='auto')
+
+        self.assertEqual(
+            [role['scope'] for role in context.exception.roles],
+            ['staff', 'teacher', 'student'],
+        )
 
     @patch('dashboard_auth.services._find_staff')
     @patch('dashboard_auth.services._find_teacher')

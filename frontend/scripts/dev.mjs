@@ -22,6 +22,8 @@ let backendProcess = null
 let viteProcess = null
 let backendPort = null
 let frontendPort = null
+let viteStartAttempts = 0
+let isShuttingDown = false
 
 function requestedBackendPort() {
   const inlineArgument = process.argv.find((argument) => argument.startsWith('--backend-port='))
@@ -169,7 +171,7 @@ async function selectFrontendPort() {
 function startBackend() {
   backendProcess = spawn(
     python,
-    [managePy, 'runserver', '--noreload', `127.0.0.1:${backendPort}`],
+    [managePy, 'runserver', `127.0.0.1:${backendPort}`],
     {
       cwd: backendDir,
       stdio: 'inherit',
@@ -198,7 +200,11 @@ function startBackend() {
   })
 }
 
-function startVite() {
+async function startVite() {
+  // A different Vite process can bind the port between selectFrontendPort()
+  // and spawn(). Select again for every attempt and retry on that small race.
+  frontendPort = await selectFrontendPort()
+  console.log(`Iniciando frontend Vite en ${frontendUrl(frontendPort)} ...`)
   viteProcess = spawn(
     process.execPath,
     [viteBin, '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'],
@@ -213,7 +219,17 @@ function startVite() {
     },
   )
 
-  viteProcess.on('exit', (code) => {
+  viteProcess.on('exit', async (code) => {
+    if (!isShuttingDown && code && viteStartAttempts < 3) {
+      viteStartAttempts += 1
+      console.warn(`El puerto ${frontendPort} fue ocupado durante el arranque. Probando otro puerto frontend...`)
+      try {
+        await startVite()
+        return
+      } catch (error) {
+        console.error(error.message)
+      }
+    }
     if (backendProcess && !backendProcess.killed) {
       backendProcess.kill()
     }
@@ -222,6 +238,7 @@ function startVite() {
 }
 
 function shutdown() {
+  isShuttingDown = true
   if (viteProcess && !viteProcess.killed) {
     viteProcess.kill()
   }
@@ -235,7 +252,6 @@ process.on('SIGTERM', shutdown)
 
 try {
   backendPort = await selectBackendPort()
-  frontendPort = await selectFrontendPort()
 } catch (error) {
   console.error(error.message)
   process.exit(1)
@@ -254,5 +270,4 @@ if (!(await checkBackend(backendPort))) {
   console.log(`Backend Django disponible en http://127.0.0.1:${backendPort}.`)
 }
 
-console.log(`Iniciando frontend Vite en ${frontendUrl(frontendPort)} ...`)
-startVite()
+await startVite()

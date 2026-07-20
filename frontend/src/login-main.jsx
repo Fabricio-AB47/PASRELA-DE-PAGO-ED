@@ -77,6 +77,50 @@ function LoginPage() {
     setErrorMessage('')
   }
 
+  if (roleOptions.length) {
+    return (
+      <main className="login-layout">
+        <section className="visual-panel">
+          <div className="visual-backdrop">
+            <div className="visual-badge">Acceso validado</div>
+            <div className="visual-copy">
+              <span className="eyebrow">Selección de perfil</span>
+              <h1>Elige la vista con la que deseas continuar.</h1>
+              <p>Una misma cuenta puede tener acceso administrativo, docente y estudiantil.</p>
+            </div>
+          </div>
+        </section>
+        <section className="auth-panel">
+          <div className="auth-card role-choice-card">
+            <span className="eyebrow">Paso 2 de 2</span>
+            <h2>¿Cómo deseas ingresar?</h2>
+            <p className="auth-intro">Tus credenciales fueron verificadas. Selecciona únicamente uno de tus perfiles autorizados.</p>
+            <div className="role-choice-list" role="list" aria-label="Perfiles disponibles">
+              {roleOptions.map((role) => (
+                <button
+                  key={role.scope}
+                  type="button"
+                  className="role-choice-button"
+                  onClick={() => submitLogin(role.scope)}
+                  disabled={isSubmitting}
+                  role="listitem"
+                >
+                  <span>{roleIcon(role.scope)}</span>
+                  <strong>{role.label}</strong>
+                  <small>Ingresar como {role.label.toLowerCase()}</small>
+                </button>
+              ))}
+            </div>
+            {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+            <button type="button" className="secondary-link" onClick={() => setRoleOptions([])} disabled={isSubmitting}>
+              Usar otras credenciales
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main className="login-layout">
       <section className="visual-panel">
@@ -154,26 +198,6 @@ function LoginPage() {
               </div>
             </label>
 
-            {roleOptions.length ? (
-              <section className="role-selection-box" aria-labelledby="role-selection-title">
-                <strong id="role-selection-title">Encontramos más de un perfil</strong>
-                <p>Selecciona cómo deseas ingresar:</p>
-                <div className="role-selection-actions">
-                  {roleOptions.map((role) => (
-                    <button
-                      key={role.scope}
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => submitLogin(role.scope)}
-                      disabled={isSubmitting}
-                    >
-                      Ingresar como {role.label}
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
             {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
 
             <button className="submit-button" type="submit" disabled={isSubmitting}>
@@ -184,6 +208,12 @@ function LoginPage() {
       </section>
     </main>
   )
+}
+
+function roleIcon(scope) {
+  if (scope === 'staff') return '◈'
+  if (scope === 'teacher') return '◉'
+  return '●'
 }
 
 createRoot(document.getElementById('root')).render(
