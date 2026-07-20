@@ -6,12 +6,14 @@ import json
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 from zoneinfo import ZoneInfo
 
 from django.db import connection, transaction
 
 from .continuing_education import (
     connection_for_query,
+    complement_database_alias,
     complement_database_name,
     complement_version,
     configure_cut_in_complement,
@@ -19,6 +21,11 @@ from .continuing_education import (
     sync_student_enrollment_to_complement,
 )
 from .notifications import create_notification_safely
+from .microsoft365 import (
+    Microsoft365Error,
+    create_or_update_institutional_team,
+    upsert_institutional_calendar_event,
+)
 
 
 class CourseCutError(Exception):
@@ -51,6 +58,264 @@ WEEKDAY_LABELS = {
 }
 SCHEDULE_ONLINE_MODALITIES = {'EN LINEA', 'ONLINE', 'VIRTUAL', 'HIBRIDA', 'HIBRIDO'}
 SCHEDULE_MODALITIES = {'EN LÍNEA', 'PRESENCIAL'}
+
+
+def _ensure_course_module_schema() -> None:
+    db_name = complement_database_name()
+    _fetch_all(
+        f"""
+        IF OBJECT_ID(N'[{db_name}].[edu].[ModuloCorte]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [{db_name}].[edu].[ModuloCorte] (
+                [ModuloId] int IDENTITY(1,1) NOT NULL CONSTRAINT [PK_edu_ModuloCorte] PRIMARY KEY,
+                [CorteId] int NOT NULL,
+                [NumeroModulo] int NOT NULL,
+                [NombreModulo] nvarchar(200) NOT NULL,
+                [SemanaInicio] tinyint NOT NULL CONSTRAINT [DF_edu_ModuloCorte_SemanaInicio] DEFAULT (1),
+                [SemanaFin] tinyint NOT NULL CONSTRAINT [DF_edu_ModuloCorte_SemanaFin] DEFAULT (2),
+                [Descripcion] nvarchar(1000) NULL,
+                [TemaModulo] nvarchar(500) NULL,
+                [FechaInicio] date NULL,
+                [FechaFin] date NULL,
+                [FechaFinalizacion] date NULL,
+                [ActividadesFinales] nvarchar(2000) NULL,
+                [EstadoModulo] varchar(20) NOT NULL CONSTRAINT [DF_edu_ModuloCorte_Estado] DEFAULT ('ACTIVO'),
+                [UsuarioRegistro] varchar(50) NULL,
+                [FechaRegistro] datetime2(0) NOT NULL CONSTRAINT [DF_edu_ModuloCorte_Fecha] DEFAULT (sysdatetime()),
+                [UsuarioModifica] varchar(50) NULL,
+                [FechaModifica] datetime2(0) NULL,
+                CONSTRAINT [UQ_edu_ModuloCorte_CorteNumero] UNIQUE ([CorteId], [NumeroModulo])
+            );
+            CREATE INDEX [IX_edu_ModuloCorte_CorteEstado]
+                ON [{db_name}].[edu].[ModuloCorte] ([CorteId], [EstadoModulo], [NumeroModulo]);
+        END;
+
+        IF COL_LENGTH(N'[{db_name}].[edu].[ModuloCorte]', N'SemanaInicio') IS NULL
+            ALTER TABLE [{db_name}].[edu].[ModuloCorte] ADD [SemanaInicio] tinyint NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[ModuloCorte]', N'SemanaFin') IS NULL
+            ALTER TABLE [{db_name}].[edu].[ModuloCorte] ADD [SemanaFin] tinyint NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[ModuloCorte]', N'TemaModulo') IS NULL
+            ALTER TABLE [{db_name}].[edu].[ModuloCorte] ADD [TemaModulo] nvarchar(500) NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[ModuloCorte]', N'FechaFinalizacion') IS NULL
+            ALTER TABLE [{db_name}].[edu].[ModuloCorte] ADD [FechaFinalizacion] date NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[ModuloCorte]', N'ActividadesFinales') IS NULL
+            ALTER TABLE [{db_name}].[edu].[ModuloCorte] ADD [ActividadesFinales] nvarchar(2000) NULL;
+
+        IF OBJECT_ID(N'[{db_name}].[edu].[ModuloDocente]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [{db_name}].[edu].[ModuloDocente] (
+                [ModuloDocenteId] int IDENTITY(1,1) NOT NULL CONSTRAINT [PK_edu_ModuloDocente] PRIMARY KEY,
+                [ModuloId] int NOT NULL,
+                [DocenteCorteId] int NOT NULL,
+                [RolModulo] varchar(20) NOT NULL CONSTRAINT [DF_edu_ModuloDocente_Rol] DEFAULT ('DOCENTE'),
+                [EstadoModuloDocente] varchar(20) NOT NULL CONSTRAINT [DF_edu_ModuloDocente_Estado] DEFAULT ('ACTIVO'),
+                [UsuarioRegistro] varchar(50) NULL,
+                [FechaRegistro] datetime2(0) NOT NULL CONSTRAINT [DF_edu_ModuloDocente_Fecha] DEFAULT (sysdatetime()),
+                [UsuarioModifica] varchar(50) NULL,
+                [FechaModifica] datetime2(0) NULL,
+                CONSTRAINT [FK_edu_ModuloDocente_Modulo] FOREIGN KEY ([ModuloId])
+                    REFERENCES [edu].[ModuloCorte] ([ModuloId]),
+                CONSTRAINT [FK_edu_ModuloDocente_Docente] FOREIGN KEY ([DocenteCorteId])
+                    REFERENCES [edu].[CorteDocente] ([DocenteCorteId]),
+                CONSTRAINT [UQ_edu_ModuloDocente_ModuloDocente] UNIQUE ([ModuloId], [DocenteCorteId])
+            );
+            CREATE INDEX [IX_edu_ModuloDocente_ModuloEstado]
+                ON [{db_name}].[edu].[ModuloDocente] ([ModuloId], [EstadoModuloDocente], [DocenteCorteId]);
+        END;
+
+        IF COL_LENGTH(N'[{db_name}].[edu].[HorarioCorte]', N'ModuloId') IS NULL
+            ALTER TABLE [{db_name}].[edu].[HorarioCorte] ADD [ModuloId] int NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[SesionCorte]', N'ModuloId') IS NULL
+            ALTER TABLE [{db_name}].[edu].[SesionCorte] ADD [ModuloId] int NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[SesionCorte]', N'GraphEventId') IS NULL
+            ALTER TABLE [{db_name}].[edu].[SesionCorte] ADD [GraphEventId] nvarchar(200) NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[SesionCorte]', N'GraphTransactionId') IS NULL
+            ALTER TABLE [{db_name}].[edu].[SesionCorte] ADD [GraphTransactionId] varchar(100) NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[SesionCorte]', N'EstadoCalendario') IS NULL
+            ALTER TABLE [{db_name}].[edu].[SesionCorte] ADD [EstadoCalendario] varchar(30) NULL;
+        IF COL_LENGTH(N'[{db_name}].[edu].[SesionCorte]', N'ErrorCalendario') IS NULL
+            ALTER TABLE [{db_name}].[edu].[SesionCorte] ADD [ErrorCalendario] nvarchar(1000) NULL;
+        """,
+        [],
+    )
+
+
+def _ensure_four_course_modules(corte_id: int, cut: dict[str, Any]) -> None:
+    start_date = _coerce_date(cut.get('fecha_inicio_raw') or cut.get('fecha_inicio_iso'))
+    user = 'CONFIGURACION_4_MODULOS'
+    for module_number in range(1, 5):
+        week_start = ((module_number - 1) * 2) + 1
+        week_end = week_start + 1
+        module_start = start_date + timedelta(days=(week_start - 1) * 7) if start_date else None
+        module_end = start_date + timedelta(days=(week_end * 7) - 1) if start_date else None
+        name = f'MÓDULO {("I", "II", "III", "IV")[module_number - 1]}'
+        _fetch_all(
+            f"""
+            MERGE [{complement_database_name()}].[edu].[ModuloCorte] AS T
+            USING (SELECT %s AS [CorteId], %s AS [NumeroModulo]) AS S
+              ON T.[CorteId] = S.[CorteId] AND T.[NumeroModulo] = S.[NumeroModulo]
+            WHEN MATCHED THEN UPDATE SET
+                [NombreModulo] = %s, [SemanaInicio] = %s, [SemanaFin] = %s,
+                [FechaInicio] = COALESCE(T.[FechaInicio], %s), [FechaFin] = COALESCE(T.[FechaFin], %s),
+                [EstadoModulo] = 'ACTIVO',
+                [UsuarioModifica] = %s, [FechaModifica] = sysdatetime()
+            WHEN NOT MATCHED THEN INSERT
+                ([CorteId], [NumeroModulo], [NombreModulo], [SemanaInicio], [SemanaFin],
+                 [FechaInicio], [FechaFin], [EstadoModulo], [UsuarioRegistro])
+                VALUES (S.[CorteId], S.[NumeroModulo], %s, %s, %s, %s, %s, 'ACTIVO', %s);
+            """,
+            [corte_id, module_number, name, week_start, week_end, module_start, module_end, user,
+             name, week_start, week_end, module_start, module_end, user],
+        )
+
+
+def _fetch_course_modules(corte_id: int) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        f"""
+        SELECT
+            M.[ModuloId], M.[CorteId], M.[NumeroModulo], M.[NombreModulo], M.[SemanaInicio], M.[SemanaFin], M.[Descripcion],
+            M.[TemaModulo], M.[FechaInicio], M.[FechaFin], M.[FechaFinalizacion], M.[ActividadesFinales], M.[EstadoModulo],
+            MD.[ModuloDocenteId], MD.[DocenteCorteId], MD.[RolModulo], MD.[EstadoModuloDocente]
+        FROM [{complement_database_name()}].[edu].[ModuloCorte] M
+        LEFT JOIN [{complement_database_name()}].[edu].[ModuloDocente] MD
+          ON MD.[ModuloId] = M.[ModuloId]
+         AND MD.[EstadoModuloDocente] = 'ACTIVO'
+        WHERE M.[CorteId] = %s AND M.[EstadoModulo] = 'ACTIVO'
+        ORDER BY M.[NumeroModulo], M.[ModuloId], MD.[ModuloDocenteId]
+        """,
+        [corte_id],
+    )
+    modules: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        module_id = _clean_text(row.get('ModuloId'))
+        module = modules.setdefault(module_id, {
+            'modulo_id': module_id,
+            'corte_id': _clean_text(row.get('CorteId')),
+            'numero_modulo': _safe_int(row.get('NumeroModulo'), default=0),
+            'nombre_modulo': _clean_text(row.get('NombreModulo')),
+            'semana_inicio': _safe_int(row.get('SemanaInicio'), default=0),
+            'semana_fin': _safe_int(row.get('SemanaFin'), default=0),
+            'descripcion': _clean_text(row.get('Descripcion')),
+            'tema_modulo': _clean_text(row.get('TemaModulo')),
+            'fecha_inicio': _date_iso(row.get('FechaInicio')),
+            'fecha_fin': _date_iso(row.get('FechaFin')),
+            'fecha_finalizacion': _date_iso(row.get('FechaFinalizacion')),
+            'actividades_finales': _clean_text(row.get('ActividadesFinales')),
+            'estado': _clean_text(row.get('EstadoModulo')),
+            'docente_corte_ids': [],
+            'docentes': [],
+        })
+        teacher_id = _clean_text(row.get('DocenteCorteId'))
+        if teacher_id and teacher_id not in module['docente_corte_ids']:
+            module['docente_corte_ids'].append(teacher_id)
+            module['docentes'].append({
+                'modulo_docente_id': _clean_text(row.get('ModuloDocenteId')),
+                'docente_corte_id': teacher_id,
+                'rol_modulo': _clean_text(row.get('RolModulo')) or 'DOCENTE',
+            })
+    return list(modules.values())
+
+
+def save_course_cut_module(payload: dict[str, Any], *, user_login: str = '') -> dict[str, Any]:
+    _ensure_course_cut_schema()
+    _ensure_course_module_schema()
+    corte_id = _safe_int(payload.get('corte_id') or payload.get('CorteId'), default=0)
+    cut = _fetch_cut_by_id(corte_id) if corte_id > 0 else None
+    if not cut:
+        raise CourseCutError('Selecciona una cohorte válida para guardar el módulo.')
+    _ensure_four_course_modules(corte_id, cut)
+
+    module_id = _safe_int(payload.get('modulo_id') or payload.get('ModuloId'), default=0)
+    if module_id <= 0:
+        raise CourseCutError('Selecciona uno de los cuatro módulos configurados para la cohorte.')
+    teacher_ids = []
+    raw_teacher_ids = payload.get('docente_corte_ids') or payload.get('teacher_ids') or []
+    if not isinstance(raw_teacher_ids, list):
+        raise CourseCutError('La selección de docentes del módulo no es válida.')
+    for value in raw_teacher_ids:
+        teacher_id = _safe_int(value, default=0)
+        if teacher_id > 0 and teacher_id not in teacher_ids:
+            teacher_ids.append(teacher_id)
+    if not teacher_ids:
+        raise CourseCutError('Selecciona al menos un docente para el módulo.')
+    if len(teacher_ids) > 3:
+        raise CourseCutError('Cada módulo permite seleccionar hasta tres docentes.')
+
+    valid_teachers = {_safe_int(item.get('docente_corte_id'), default=0) for item in _fetch_schedule_teachers(corte_id)}
+    if any(teacher_id not in valid_teachers for teacher_id in teacher_ids):
+        raise CourseCutError('Uno de los docentes seleccionados no está matriculado en la cohorte.')
+
+    existing = _fetch_one(
+        f"""
+        SELECT [ModuloId], [NumeroModulo], [FechaInicio], [FechaFin]
+        FROM [{complement_database_name()}].[edu].[ModuloCorte]
+        WHERE [ModuloId] = %s AND [CorteId] = %s AND [NumeroModulo] BETWEEN 1 AND 4
+        """,
+        [module_id, corte_id],
+    )
+    if not existing:
+        raise CourseCutError('El módulo seleccionado no pertenece a los cuatro módulos de la cohorte.')
+    module_number = _safe_int(existing.get('NumeroModulo'), default=0)
+    canonical_name = f'MÓDULO {("I", "II", "III", "IV")[module_number - 1]}'
+    custom_start = (
+        _coerce_date(payload.get('fecha_inicio') or payload.get('FechaInicio'))
+        or _coerce_date(existing.get('FechaInicio'))
+    )
+    custom_end = (
+        _coerce_date(payload.get('fecha_fin') or payload.get('FechaFin'))
+        or _coerce_date(existing.get('FechaFin'))
+    )
+    if not custom_start or not custom_end:
+        raise CourseCutError(f'Debes definir fecha de inicio y fin para el {canonical_name}.')
+    if custom_start > custom_end:
+        raise CourseCutError(f'La fecha de inicio del {canonical_name} no puede ser posterior a su fecha de fin.')
+    if (custom_end - custom_start).days > 13:
+        raise CourseCutError(f'El {canonical_name} puede abarcar como máximo dos semanas (14 días).')
+    completion_date = (
+        _coerce_date(payload.get('fecha_finalizacion') or payload.get('FechaFinalizacion'))
+        or custom_end
+    )
+    if not (custom_start <= completion_date <= custom_end):
+        raise CourseCutError(f'La fecha de finalización del {canonical_name} debe estar dentro de su período.')
+    _fetch_all(
+        f"""
+        UPDATE [{complement_database_name()}].[edu].[ModuloCorte]
+        SET [NombreModulo] = %s, [Descripcion] = %s, [TemaModulo] = %s,
+            [FechaInicio] = %s, [FechaFin] = %s, [FechaFinalizacion] = %s, [ActividadesFinales] = %s,
+            [UsuarioModifica] = %s, [FechaModifica] = sysdatetime(), [EstadoModulo] = 'ACTIVO'
+        WHERE [ModuloId] = %s AND [CorteId] = %s
+        """,
+        [canonical_name, _trim_to_max(payload.get('descripcion'), 1000) or None,
+         _trim_to_max(payload.get('tema_modulo'), 500) or None,
+         custom_start, custom_end, completion_date,
+         _trim_to_max(payload.get('actividades_finales'), 2000) or None,
+         _trim_to_max(user_login or 'SISTEMA', 50), module_id, corte_id],
+    )
+
+    _fetch_all(
+        f"""
+        UPDATE [{complement_database_name()}].[edu].[ModuloDocente]
+        SET [EstadoModuloDocente] = 'INACTIVO', [UsuarioModifica] = %s, [FechaModifica] = sysdatetime()
+        WHERE [ModuloId] = %s;
+        """,
+        [_trim_to_max(user_login or 'SISTEMA', 50), module_id],
+    )
+    for index, teacher_id in enumerate(teacher_ids):
+        role = 'COORDINADOR' if index == 0 else 'DOCENTE'
+        _fetch_all(
+            f"""
+            MERGE [{complement_database_name()}].[edu].[ModuloDocente] AS T
+            USING (SELECT %s AS [ModuloId], %s AS [DocenteCorteId]) AS S
+              ON T.[ModuloId] = S.[ModuloId] AND T.[DocenteCorteId] = S.[DocenteCorteId]
+            WHEN MATCHED THEN UPDATE SET [RolModulo] = %s, [EstadoModuloDocente] = 'ACTIVO',
+                [UsuarioModifica] = %s, [FechaModifica] = sysdatetime()
+            WHEN NOT MATCHED THEN INSERT ([ModuloId], [DocenteCorteId], [RolModulo], [UsuarioRegistro])
+                VALUES (S.[ModuloId], S.[DocenteCorteId], %s, %s);
+            """,
+            [module_id, teacher_id, role, _trim_to_max(user_login or 'SISTEMA', 50),
+             role, _trim_to_max(user_login or 'SISTEMA', 50)],
+        )
+    return list_course_cut_schedule(corte_id)
 
 
 def list_course_cuts() -> list[dict[str, Any]]:
@@ -412,7 +677,6 @@ def list_course_cut_students(corte_id: Any) -> dict[str, Any]:
     cut = _fetch_cut_by_id(normalized_corte_id)
     if not cut:
         raise CourseCutError('No se encontró la corte seleccionada.')
-
     complement_status = _course_cut_complement_status()
     complement_index = _fetch_complement_student_index(normalized_corte_id) if complement_status['available'] else {}
     students = [
@@ -850,6 +1114,7 @@ def save_attendance_records(payload: dict[str, Any], *, user_login: str = '') ->
 
 def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
     _ensure_course_cut_schema()
+    _ensure_course_module_schema()
     normalized_corte_id = _safe_int(corte_id, default=0)
     if normalized_corte_id <= 0:
         raise CourseCutError('Debes seleccionar una corte para consultar el horario.')
@@ -857,9 +1122,11 @@ def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
     cut = _fetch_cut_by_id(normalized_corte_id)
     if not cut:
         raise CourseCutError('No se encontró la corte seleccionada.')
+    _ensure_four_course_modules(normalized_corte_id, cut)
 
+    complement_index = _fetch_complement_student_index(normalized_corte_id)
     source_students = [
-        _normalize_cut_student(row, {})
+        _normalize_cut_student(row, complement_index)
         for row in _fetch_course_cut_student_rows(normalized_corte_id)
         if _clean_text(row.get('EstadoRegistro')).upper() == 'A'
     ]
@@ -867,6 +1134,7 @@ def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
     schedule_status = _schedule_complement_status(require_write=False)
     teams_status = _teams_complement_status(require_write=False)
     teachers = _fetch_schedule_teachers(normalized_corte_id)
+    modules = _fetch_course_modules(normalized_corte_id)
     if not schedule_status['available']:
         return {
             'cut': cut,
@@ -874,6 +1142,7 @@ def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
             'sessions': [],
             'source_students': source_students,
             'teachers': teachers,
+            'modules': modules,
             'team': None,
             'team_members': [],
             'graph_queue': [],
@@ -903,6 +1172,7 @@ def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
         'sessions': sessions,
         'source_students': source_students,
         'teachers': teachers,
+        'modules': modules,
         'team': team,
         'team_members': team_members,
         'graph_queue': graph_queue,
@@ -920,6 +1190,36 @@ def list_course_cut_schedule(corte_id: Any) -> dict[str, Any]:
 
 def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -> dict[str, Any]:
     _ensure_course_cut_schema()
+    _ensure_course_module_schema()
+    raw_module_schedules = payload.get('module_schedules') or payload.get('horarios_modulos')
+    if raw_module_schedules is not None:
+        if not isinstance(raw_module_schedules, list) or not 1 <= len(raw_module_schedules) <= 4:
+            raise CourseCutError('Debes enviar entre uno y cuatro horarios de módulos.')
+        module_ids = [
+            _safe_int(item.get('modulo_id'), default=0)
+            for item in raw_module_schedules
+            if isinstance(item, dict)
+        ]
+        if len(module_ids) != len(raw_module_schedules) or any(module_id <= 0 for module_id in module_ids):
+            raise CourseCutError('La configuración conjunta contiene un módulo inválido.')
+        if len(set(module_ids)) != len(module_ids):
+            raise CourseCutError('No puedes repetir un módulo en la configuración conjunta.')
+
+        base_payload = {key: value for key, value in payload.items() if key not in {'module_schedules', 'horarios_modulos'}}
+        results = []
+        # Los cuatro módulos forman una sola operación: si uno falla, no se
+        # deben dejar horarios o sesiones parciales en la base complementaria.
+        with transaction.atomic(using=complement_database_alias()):
+            for module_schedule in raw_module_schedules:
+                item_payload = {**base_payload, **module_schedule, 'horario_id': module_schedule.get('horario_id') or ''}
+                results.append(save_course_cut_schedule(item_payload, user_login=user_login))
+        return {
+            'batch': True,
+            'total_modulos': len(results),
+            'modules': results,
+            'updated': results[-1].get('updated') if results else None,
+        }
+
     corte_id = _safe_int(payload.get('corte_id') or payload.get('CorteId'), default=0)
     if corte_id <= 0:
         raise CourseCutError('Debes seleccionar una corte para crear el horario.')
@@ -933,6 +1233,24 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
         raise CourseCutError('No se encontró la corte seleccionada.')
 
     selected_teacher = _resolve_schedule_teacher(corte_id, payload)
+    selected_module = _resolve_schedule_module(corte_id, payload, selected_teacher)
+    selected_module_id = _safe_int(selected_module.get('modulo_id'), default=0)
+    existing_module_schedules = [
+        row for row in _fetch_schedule_rows(corte_id)
+        if _safe_int(row.get('ModuloId'), default=0) == selected_module_id
+        and _clean_text(row.get('EstadoHorario')).upper() != 'INACTIVO'
+    ]
+    editing_existing = _truthy_value(
+        payload.get('editar_existente') or payload.get('edit_existing'),
+        default=False,
+    )
+    if existing_module_schedules and not editing_existing:
+        raise CourseCutError(
+            f'El {selected_module.get("nombre_modulo") or "módulo"} ya tiene un horario registrado. '
+            'Utiliza el apartado Editar horarios registrados.'
+        )
+    if editing_existing and not existing_module_schedules:
+        raise CourseCutError('El módulo seleccionado todavía no tiene un horario registrado para editar.')
 
     configure_cut_in_complement(
         corte_id,
@@ -941,6 +1259,15 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
     )
 
     fechas_clase = _class_dates_from_payload(payload)
+    module_start = _coerce_date(selected_module.get('fecha_inicio'))
+    module_end = _coerce_date(selected_module.get('fecha_fin'))
+    if fechas_clase and module_start and module_end:
+        outside_dates = [item for item in fechas_clase if item < module_start or item > module_end]
+        if outside_dates:
+            raise CourseCutError(
+                f'Las fechas del {selected_module.get("nombre_modulo") or "módulo"} deben estar entre '
+                f'{module_start.isoformat()} y {module_end.isoformat()}.'
+            )
     dia_semana = _safe_int(payload.get('dia_semana') or payload.get('DiaSemana'), default=0)
     if fechas_clase:
         dia_semana = _sql_weekday(fechas_clase[0])
@@ -957,6 +1284,7 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
     modalidad = _normalize_schedule_modality(payload.get('modalidad') or payload.get('Modalidad'), default='EN LÍNEA')
     if modalidad not in SCHEDULE_MODALITIES:
         raise CourseCutError('La modalidad debe ser EN LÍNEA o PRESENCIAL.')
+    database_modalidad = _schedule_database_modality(modalidad)
 
     aula = _trim_to_max(payload.get('aula') or payload.get('Aula'), 100) or None
     enlace_virtual = _trim_to_max(
@@ -974,6 +1302,18 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
     generar_sesiones = _truthy_value(payload.get('generar_sesiones'), default=True)
 
     horario_id = _safe_int(payload.get('horario_id') or payload.get('HorarioId'), default=0)
+    if editing_existing and horario_id <= 0:
+        same_day_schedule = next(
+            (
+                row for row in existing_module_schedules
+                if _safe_int(row.get('DiaSemana'), default=0) == dia_semana
+            ),
+            None,
+        )
+        horario_id = _safe_int(
+            (same_day_schedule or existing_module_schedules[0]).get('HorarioId'),
+            default=0,
+        )
     if horario_id > 0:
         schedule = _update_course_cut_schedule(
             corte_id=corte_id,
@@ -981,7 +1321,7 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
             dia_semana=dia_semana,
             hora_inicio=hora_inicio,
             hora_fin=hora_fin,
-            modalidad=modalidad,
+            modalidad=database_modalidad,
             aula=aula,
             enlace_virtual=enlace_virtual,
             usuario_registro=user_login or 'SISTEMA',
@@ -993,7 +1333,7 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
             dia_semana=dia_semana,
             hora_inicio=hora_inicio,
             hora_fin=hora_fin,
-            modalidad=modalidad,
+            modalidad=database_modalidad,
             aula=aula,
             enlace_virtual=enlace_virtual,
             usuario_registro=user_login or 'SISTEMA',
@@ -1010,11 +1350,12 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
             raise CourseCutError('No fue posible identificar el horario para crear las fechas de clase.')
         generated_sessions = _sync_calendar_schedule_sessions(
             corte_id=corte_id,
+            modulo_id=selected_module_id,
             primary_horario_id=horario_id,
             fechas_clase=fechas_clase,
             hora_inicio=hora_inicio,
             hora_fin=hora_fin,
-            modalidad=modalidad,
+            modalidad=database_modalidad,
             aula=aula,
             enlace_virtual=enlace_virtual,
             usuario_registro=user_login or 'SISTEMA',
@@ -1040,10 +1381,33 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
                 usuario_registro=user_login or 'SISTEMA',
             )
 
+    _attach_module_to_schedule_records(
+        corte_id=corte_id,
+        modulo_id=selected_module_id,
+        schedule=schedule or {},
+        generated_sessions=generated_sessions,
+    )
+    if fechas_clase:
+        _cancel_unselected_module_sessions(
+            corte_id=corte_id,
+            modulo_id=selected_module_id,
+            selected_dates=set(fechas_clase),
+            usuario_registro=user_login or 'SISTEMA',
+        )
+    for module_schedule in _fetch_schedule_rows(corte_id):
+        if _safe_int(module_schedule.get('ModuloId'), default=0) != selected_module_id:
+            continue
+        _attach_teacher_to_schedule(
+            corte_id=corte_id,
+            horario_id=_safe_int(module_schedule.get('HorarioId'), default=0),
+            docente_responsable=selected_teacher,
+            usuario_registro=user_login or 'SISTEMA',
+        )
     updated = list_course_cut_schedule(corte_id)
     return {
         'cut': cut,
         'teacher': selected_teacher,
+        'module': selected_module,
         'schedule': _normalize_schedule_row(schedule) if schedule else None,
         'generated_sessions': [_normalize_session_row(row) for row in generated_sessions],
         'generated_count': len(generated_sessions),
@@ -1053,6 +1417,7 @@ def save_course_cut_schedule(payload: dict[str, Any], *, user_login: str = '') -
 
 def sync_course_cut_teams(payload: dict[str, Any], *, user_login: str = '') -> dict[str, Any]:
     _ensure_course_cut_schema()
+    _ensure_course_module_schema()
     corte_id = _safe_int(payload.get('corte_id') or payload.get('CorteId'), default=0)
     if corte_id <= 0:
         raise CourseCutError('Debes seleccionar una corte para matricular por Teams.')
@@ -1065,8 +1430,11 @@ def sync_course_cut_teams(payload: dict[str, Any], *, user_login: str = '') -> d
     if not cut:
         raise CourseCutError('No se encontró la corte seleccionada.')
 
-    selected_teacher = _resolve_schedule_teacher(corte_id, payload)
-    selected_schedule = _resolve_schedule_for_teams(corte_id, payload)
+    course_modules = _fetch_course_modules(corte_id)
+    course_schedules = [_normalize_schedule_row(row) for row in _fetch_schedule_rows(corte_id)]
+    course_sessions = [_normalize_session_row(row) for row in _fetch_schedule_session_rows(corte_id, limit=500)]
+    if not course_schedules or not course_sessions:
+        raise CourseCutError('Primero crea y guarda los horarios y fechas de los cuatro módulos.')
 
     configure_cut_in_complement(
         corte_id,
@@ -1119,15 +1487,48 @@ def sync_course_cut_teams(payload: dict[str, Any], *, user_login: str = '') -> d
             usuario_registro=user_login or 'SISTEMA',
         )
 
-    team_id = _trim_to_max(payload.get('team_id') or payload.get('TeamId'), 100)
-    group_id = _trim_to_max(payload.get('group_id') or payload.get('GroupId'), 100) or None
-    web_url = _trim_to_max(
-        payload.get('web_url')
-        or payload.get('enlace_virtual')
-        or payload.get('WebUrl')
-        or selected_schedule.get('enlace_virtual'),
-        1000,
-    ) or None
+    enrolled = list_enrolled_students(corte_id, limit=500).get('students', [])
+    teachers = _fetch_schedule_teachers(corte_id)
+    student_emails = [
+        _institutional_email(student.get('usuario_login') or student.get('correo_intec'))
+        for student in enrolled
+        if _institutional_email(student.get('usuario_login') or student.get('correo_intec'))
+    ]
+    teacher_emails = [
+        _institutional_email(teacher.get('usuario_login') or teacher.get('correo_intec'))
+        for teacher in teachers
+        if _institutional_email(teacher.get('usuario_login') or teacher.get('correo_intec'))
+    ]
+    if not teachers:
+        raise CourseCutError('La cohorte no tiene docentes matriculados para agregarlos al equipo de Teams.')
+    teachers_without_account = [
+        _clean_text(teacher.get('nombre')) or _clean_text(teacher.get('codigo_docente'))
+        for teacher in teachers
+        if not _institutional_email(teacher.get('usuario_login') or teacher.get('correo_intec'))
+    ]
+    if teachers_without_account:
+        raise CourseCutError(
+            'Todos los docentes deben tener una cuenta @intec.edu.ec antes de crear el equipo. '
+            f"Falta configurar: {', '.join(teachers_without_account)}."
+        )
+    organizer_teacher = teachers[0]
+    owner_emails = list(dict.fromkeys([*teacher_emails, *additional_owners]))
+    current_team = _fetch_team_corte(corte_id) or team or {}
+    try:
+        graph_team = create_or_update_institutional_team(
+            cohort_id=corte_id,
+            display_name=requested_name or _clean_text(current_team.get('DisplayName')) or f'Educación Continua - Cohorte {corte_id}',
+            description=f'Aula única de Educación Continua para la cohorte {corte_id}.',
+            visibility=visibility,
+            owner_emails=owner_emails,
+            member_emails=student_emails,
+        )
+    except Microsoft365Error as exc:
+        raise CourseCutError(str(exc)) from exc
+
+    team_id = _trim_to_max(graph_team.get('team_id'), 100)
+    group_id = _trim_to_max(graph_team.get('group_id'), 100) or None
+    web_url = _trim_to_max(graph_team.get('web_url'), 1000) or None
     if team_corte_id > 0 and team_id:
         team = _confirm_team_corte(
             team_corte_id=team_corte_id,
@@ -1135,9 +1536,7 @@ def sync_course_cut_teams(payload: dict[str, Any], *, user_login: str = '') -> d
             web_url=web_url,
             group_id=group_id,
         )
-
-    if web_url:
-        _apply_virtual_link_to_schedule(corte_id, web_url, horario_id=selected_schedule.get('horario_id'))
+        _mark_team_creation_queue_completed(team_corte_id, graph_team)
 
     current_team = _fetch_team_corte(corte_id) or team or {}
     effective_team_id = _trim_to_max(current_team.get('TeamId') or team_id, 100)
@@ -1148,18 +1547,39 @@ def sync_course_cut_teams(payload: dict[str, Any], *, user_login: str = '') -> d
             corte_id=corte_id,
             usuario_registro=user_login or 'SISTEMA',
         )
-        members_message = 'Matrícula de miembros en Teams encolada.'
+        _confirm_synchronized_team_members(members)
+        members = _fetch_team_member_rows(corte_id)
+        members_message = 'Estudiantes y docentes matriculados en un único equipo de Teams.'
+
+    calendar_summary = _sync_course_calendar_events(
+        corte_id=corte_id,
+        cut=cut,
+        modules=course_modules,
+        sessions=course_sessions,
+        organizer_email=(
+            _institutional_email(organizer_teacher.get('usuario_login'))
+            or _institutional_email(organizer_teacher.get('correo_intec'))
+        ),
+        attendee_emails=list(dict.fromkeys([*teacher_emails, *student_emails, *additional_owners])),
+        team_web_url=web_url,
+        team_group_id=group_id or _trim_to_max(current_team.get('GroupId') or current_team.get('TeamId'), 100),
+        usuario_registro=user_login or 'SISTEMA',
+    )
 
     updated = list_course_cut_schedule(corte_id)
     return {
         'cut': cut,
-        'teacher': selected_teacher,
-        'schedule': selected_schedule,
+        'teacher': organizer_teacher,
+        'teachers': teachers,
+        'primary_channel': graph_team.get('primary_channel') or {},
+        'modules': course_modules,
+        'schedules': course_schedules,
         'team': _normalize_team_row(current_team),
         'team_members': [_normalize_team_member_row(row) for row in members],
         'additional_owners': _fetch_team_additional_owners(corte_id),
         'student_sync': student_sync.get('summary', {}),
         'members_message': members_message,
+        'calendar': calendar_summary,
         'updated': updated,
     }
 
@@ -2087,6 +2507,14 @@ def _normalize_schedule_modality(value: Any, *, default: str = '') -> str:
     return raw_value
 
 
+def _schedule_database_modality(value: Any) -> str:
+    """Translate the dashboard label to the values enforced by SQL Server."""
+    normalized = _normalize_schedule_modality(value)
+    if normalized == 'EN LÍNEA':
+        return 'VIRTUAL'
+    return normalized
+
+
 def _schedule_teacher_observation(docente_responsable: dict[str, Any] | None) -> str | None:
     teacher = docente_responsable or {}
     nombre = _clean_text(teacher.get('nombre'))
@@ -2187,6 +2615,7 @@ def _fetch_schedule_rows(corte_id: int) -> list[dict[str, Any]]:
         SELECT
             H.[HorarioId],
             H.[CorteId],
+            H.[ModuloId],
             H.[DiaSemana],
             CONVERT(varchar(5), H.[HoraInicio], 108) AS [HoraInicio],
             CONVERT(varchar(5), H.[HoraFin], 108) AS [HoraFin],
@@ -2209,6 +2638,7 @@ def _fetch_schedule_rows(corte_id: int) -> list[dict[str, Any]]:
         GROUP BY
             H.[HorarioId],
             H.[CorteId],
+            H.[ModuloId],
             H.[DiaSemana],
             H.[HoraInicio],
             H.[HoraFin],
@@ -2233,6 +2663,7 @@ def _fetch_schedule_session_rows(corte_id: int, *, limit: Any = 200) -> list[dic
             S.[SesionId],
             S.[CorteId],
             S.[HorarioId],
+            S.[ModuloId],
             S.[FechaClase],
             CONVERT(varchar(5), S.[HoraInicio], 108) AS [HoraInicio],
             CONVERT(varchar(5), S.[HoraFin], 108) AS [HoraFin],
@@ -2240,7 +2671,11 @@ def _fetch_schedule_session_rows(corte_id: int, *, limit: Any = 200) -> list[dic
             S.[Modalidad],
             S.[Aula],
             S.[EnlaceVirtual],
-            S.[EstadoSesion]
+            S.[EstadoSesion],
+            S.[GraphEventId],
+            S.[GraphTransactionId],
+            S.[EstadoCalendario],
+            S.[ErrorCalendario]
         FROM [{complement_database_name()}].[edu].[SesionCorte] S
         WHERE S.[CorteId] = %s
           AND S.[EstadoSesion] <> 'CANCELADA'
@@ -2319,14 +2754,82 @@ def _resolve_schedule_teacher(corte_id: int, payload: dict[str, Any]) -> dict[st
     raise CourseCutError('El docente seleccionado no está matriculado en la corte elegida.')
 
 
+def _resolve_schedule_module(
+    corte_id: int,
+    payload: dict[str, Any],
+    selected_teacher: dict[str, Any],
+) -> dict[str, Any]:
+    modules = _fetch_course_modules(corte_id)
+    if not modules:
+        raise CourseCutError('Primero crea un módulo y asigna sus docentes antes de guardar el horario.')
+    module_id = _clean_text(payload.get('modulo_id') or payload.get('ModuloId'))
+    if not module_id and len(modules) == 1:
+        selected_module = modules[0]
+    else:
+        selected_module = next(
+            (item for item in modules if _clean_text(item.get('modulo_id')) == module_id),
+            None,
+        )
+    if not selected_module:
+        raise CourseCutError('Selecciona el módulo correspondiente antes de guardar el horario.')
+    teacher_id = _clean_text(selected_teacher.get('docente_corte_id'))
+    if teacher_id not in selected_module.get('docente_corte_ids', []):
+        raise CourseCutError('El docente responsable no está asignado al módulo seleccionado.')
+    return selected_module
+
+
+def _attach_module_to_schedule_records(
+    *,
+    corte_id: int,
+    modulo_id: int,
+    schedule: dict[str, Any],
+    generated_sessions: list[dict[str, Any]],
+) -> None:
+    if modulo_id <= 0:
+        return
+    schedule_ids = {
+        _safe_int(schedule.get('HorarioId') or schedule.get('horario_id'), default=0),
+        *{
+            _safe_int(row.get('HorarioId') or row.get('horario_id'), default=0)
+            for row in generated_sessions
+        },
+    }
+    schedule_ids.discard(0)
+    session_ids = {
+        _safe_int(row.get('SesionId') or row.get('sesion_id'), default=0)
+        for row in generated_sessions
+    }
+    session_ids.discard(0)
+    for schedule_id in schedule_ids:
+        _fetch_all(
+            f"""
+            UPDATE [{complement_database_name()}].[edu].[HorarioCorte]
+            SET [ModuloId] = %s
+            WHERE [CorteId] = %s AND [HorarioId] = %s;
+            UPDATE [{complement_database_name()}].[edu].[SesionCorte]
+            SET [ModuloId] = %s
+            WHERE [CorteId] = %s AND [HorarioId] = %s;
+            """,
+            [modulo_id, corte_id, schedule_id, modulo_id, corte_id, schedule_id],
+        )
+    for session_id in session_ids:
+        _fetch_all(
+            f"UPDATE [{complement_database_name()}].[edu].[SesionCorte] SET [ModuloId] = %s WHERE [CorteId] = %s AND [SesionId] = %s",
+            [modulo_id, corte_id, session_id],
+        )
+
+
 def _resolve_schedule_for_teams(corte_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     schedule_status = _schedule_complement_status(require_write=False)
     if not schedule_status['available']:
         raise CourseCutError('La base complementaria no está disponible para validar el horario de Teams.')
 
     schedules = [_normalize_schedule_row(row) for row in _fetch_schedule_rows(corte_id)]
+    module_id = _clean_text(payload.get('modulo_id') or payload.get('ModuloId'))
+    if module_id:
+        schedules = [item for item in schedules if _clean_text(item.get('modulo_id')) == module_id]
     if not schedules:
-        raise CourseCutError('Primero crea y guarda el horario antes de matricular por Teams.')
+        raise CourseCutError('Primero crea y guarda el horario del módulo antes de matricular por Teams.')
 
     horario_id = _clean_text(
         payload.get('horario_id')
@@ -2522,6 +3025,7 @@ def _generate_schedule_sessions(
 def _sync_calendar_schedule_sessions(
     *,
     corte_id: int,
+    modulo_id: int,
     primary_horario_id: int,
     fechas_clase: list[date],
     hora_inicio: time,
@@ -2558,6 +3062,7 @@ def _sync_calendar_schedule_sessions(
             schedule = (
                 _fetch_matching_course_cut_schedule(
                     corte_id=corte_id,
+                    modulo_id=modulo_id,
                     dia_semana=dia_semana,
                     hora_inicio=hora_inicio,
                     hora_fin=hora_fin,
@@ -2616,6 +3121,7 @@ def _sync_calendar_schedule_sessions(
 def _fetch_matching_course_cut_schedule(
     *,
     corte_id: int,
+    modulo_id: int,
     dia_semana: int,
     hora_inicio: time,
     hora_fin: time,
@@ -2637,13 +3143,12 @@ def _fetch_matching_course_cut_schedule(
             [Observacion]
         FROM [{complement_database_name()}].[edu].[HorarioCorte]
         WHERE [CorteId] = %s
+          AND [ModuloId] = %s
           AND [DiaSemana] = %s
-          AND [HoraInicio] = %s
-          AND [HoraFin] = %s
           AND ([EstadoHorario] COLLATE DATABASE_DEFAULT) = 'ACTIVO'
         ORDER BY [HorarioId] ASC
         """,
-        [corte_id, dia_semana, hora_inicio, hora_fin],
+        [corte_id, modulo_id, dia_semana],
     )
 
 
@@ -2739,6 +3244,37 @@ def _fetch_schedule_sessions_for_horario(corte_id: int, horario_id: int) -> list
         """,
         [corte_id, horario_id],
     )
+
+
+def _cancel_unselected_module_sessions(
+    *,
+    corte_id: int,
+    modulo_id: int,
+    selected_dates: set[date],
+    usuario_registro: str,
+) -> None:
+    rows = _fetch_all(
+        f"""
+        SELECT [SesionId], [HorarioId], [FechaClase], [EstadoSesion]
+        FROM [{complement_database_name()}].[edu].[SesionCorte]
+        WHERE [CorteId] = %s
+          AND [ModuloId] = %s
+          AND ([EstadoSesion] COLLATE DATABASE_DEFAULT) <> 'CANCELADA'
+        """,
+        [corte_id, modulo_id],
+    )
+    for row in rows:
+        session_date = _coerce_date(row.get('FechaClase'))
+        if session_date in selected_dates:
+            continue
+        if _clean_text(row.get('EstadoSesion')).upper() != 'PROGRAMADA':
+            continue
+        _cancel_schedule_session(
+            sesion_id=_safe_int(row.get('SesionId'), default=0),
+            corte_id=corte_id,
+            horario_id=_safe_int(row.get('HorarioId'), default=0),
+            usuario_registro=usuario_registro,
+        )
 
 
 def _insert_schedule_session(
@@ -2967,6 +3503,157 @@ def _enqueue_team_members(*, corte_id: int, usuario_registro: str) -> list[dict[
     )
 
 
+def _mark_team_creation_queue_completed(team_corte_id: int, graph_result: dict[str, Any]) -> None:
+    _fetch_all(
+        f"""
+        UPDATE [{complement_database_name()}].[graph].[OperacionQueue]
+        SET [EstadoOperacion] = 'COMPLETADO',
+            [ResponseJson] = %s,
+            [HttpStatusCode] = 200,
+            [FechaFinProceso] = sysdatetime(),
+            [ErrorOperacion] = NULL
+        WHERE [TipoOperacion] = 'CREAR_TEAM'
+          AND [Entidad] = 'graph.TeamCorte'
+          AND [EntidadId] = %s
+          AND [EstadoOperacion] IN ('PENDIENTE','PROCESANDO');
+        """,
+        [json.dumps(graph_result, ensure_ascii=False), team_corte_id],
+    )
+
+
+def _confirm_synchronized_team_members(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        member_id = _safe_int(row.get('TeamMiembroId'), default=0)
+        upn = _clean_text(row.get('UserPrincipalName'))
+        if member_id <= 0 or not upn:
+            continue
+        _fetch_all(
+            f"""
+            EXEC [{complement_database_name()}].[graph].[usp_ConfirmarMiembroTeamsCorte]
+                @TeamMiembroId = %s,
+                @GraphUserId = %s,
+                @ResponseJson = %s,
+                @ErrorGraph = NULL
+            """,
+            [member_id, upn, json.dumps({'userPrincipalName': upn}, ensure_ascii=False)],
+        )
+
+
+def _sync_course_calendar_events(
+    *,
+    corte_id: int,
+    cut: dict[str, Any],
+    modules: list[dict[str, Any]],
+    sessions: list[dict[str, Any]],
+    organizer_email: str,
+    attendee_emails: list[str],
+    team_web_url: str | None,
+    team_group_id: str | None,
+    usuario_registro: str,
+) -> dict[str, Any]:
+    module_names = {
+        _clean_text(module.get('modulo_id')): _clean_text(module.get('nombre_modulo'))
+        for module in modules
+    }
+    course_name = (
+        _clean_text(cut.get('nombre_curso_materia'))
+        or _clean_text(cut.get('materias_label'))
+        or _clean_text(cut.get('curso_educontinua'))
+        or 'Educación Continua'
+    )
+    created = 0
+    updated = 0
+    errors: list[dict[str, str]] = []
+    for session in sessions:
+        session_id = _safe_int(session.get('sesion_id'), default=0)
+        session_date = _clean_text(session.get('fecha'))
+        start_time = _clean_text(session.get('hora_inicio'))
+        end_time = _clean_text(session.get('hora_fin'))
+        if session_id <= 0 or not session_date or not start_time or not end_time:
+            continue
+        raw = _fetch_one(
+            f"""
+            SELECT [GraphEventId], [GraphTransactionId]
+            FROM [{complement_database_name()}].[edu].[SesionCorte]
+            WHERE [CorteId] = %s AND [SesionId] = %s
+            """,
+            [corte_id, session_id],
+        ) or {}
+        event_id = _clean_text(raw.get('GraphEventId'))
+        transaction_id = _clean_text(raw.get('GraphTransactionId')) or str(
+            uuid5(NAMESPACE_URL, f'intec:educontinua:corte:{corte_id}:sesion:{session_id}')
+        )
+        module_name = module_names.get(_clean_text(session.get('modulo_id'))) or 'Módulo'
+        subject = f'{course_name} - {module_name}'
+        body = (
+            f'<p>Clase programada de <strong>{course_name}</strong>.</p>'
+            f'<p>{module_name} · Cohorte {corte_id}</p>'
+            + (f'<p><a href="{team_web_url}">Abrir el equipo de Teams</a></p>' if team_web_url else '')
+        )
+        try:
+            event = upsert_institutional_calendar_event(
+                organizer_email=organizer_email,
+                group_id=_clean_text(team_group_id),
+                event_id=event_id,
+                transaction_id=transaction_id,
+                subject=subject,
+                body_html=body,
+                start_datetime=f'{session_date}T{start_time}:00',
+                end_datetime=f'{session_date}T{end_time}:00',
+                attendee_emails=attendee_emails,
+            )
+            saved_event_id = _clean_text(event.get('id')) or event_id
+            meeting = event.get('onlineMeeting') if isinstance(event.get('onlineMeeting'), dict) else {}
+            join_url = _clean_text(meeting.get('joinUrl') or event.get('onlineMeetingUrl')) or _clean_text(team_web_url)
+            _fetch_all(
+                f"""
+                UPDATE [{complement_database_name()}].[edu].[SesionCorte]
+                SET [GraphEventId] = %s,
+                    [GraphTransactionId] = %s,
+                    [EstadoCalendario] = 'CALENDARIZADO',
+                    [ErrorCalendario] = NULL,
+                    [EnlaceVirtual] = COALESCE(NULLIF(%s, ''), [EnlaceVirtual]),
+                    [UsuarioRegistro] = %s
+                WHERE [CorteId] = %s AND [SesionId] = %s
+                """,
+                [saved_event_id, transaction_id, join_url, _trim_to_max(usuario_registro, 50), corte_id, session_id],
+            )
+            if event_id:
+                updated += 1
+            else:
+                created += 1
+        except Microsoft365Error as exc:
+            error_text = _trim_to_max(str(exc), 1000)
+            errors.append({'sesion_id': str(session_id), 'error': error_text})
+            _fetch_all(
+                f"""
+                UPDATE [{complement_database_name()}].[edu].[SesionCorte]
+                SET [GraphTransactionId] = %s,
+                    [EstadoCalendario] = 'ERROR',
+                    [ErrorCalendario] = %s,
+                    [UsuarioRegistro] = %s
+                WHERE [CorteId] = %s AND [SesionId] = %s
+                """,
+                [transaction_id, error_text, _trim_to_max(usuario_registro, 50), corte_id, session_id],
+            )
+    if team_web_url:
+        _fetch_all(
+            f"""
+            UPDATE [{complement_database_name()}].[edu].[HorarioCorte]
+            SET [EnlaceVirtual] = %s
+            WHERE [CorteId] = %s AND [EstadoHorario] = 'ACTIVO'
+            """,
+            [team_web_url, corte_id],
+        )
+    return {
+        'total': len(sessions),
+        'creados': created,
+        'actualizados': updated,
+        'errores': len(errors),
+        'detalle_errores': errors[:20],
+    }
+
+
 def _update_team_display_name(*, corte_id: int, team_corte_id: int, display_name: str) -> dict[str, Any] | None:
     """Keep the local Team definition and its queued Graph payload aligned."""
     clean_name = _trim_to_max(display_name, 256)
@@ -3013,6 +3700,12 @@ def _ensure_team_additional_owner_schema() -> bool:
     if not _teams_complement_status(require_write=False)['available']:
         return False
     try:
+        existing = _fetch_one(
+            f"SELECT OBJECT_ID(N'[{complement_database_name()}].[graph].[TeamAdministradorAdicional]', N'U') AS TableId",
+            [],
+        )
+        if existing and existing.get('TableId'):
+            return True
         _fetch_all(
             f"""
             IF OBJECT_ID(N'[{complement_database_name()}].[graph].[TeamAdministradorAdicional]', N'U') IS NULL
@@ -3048,33 +3741,40 @@ def _normalize_additional_owner_emails(value: Any) -> list[str]:
             continue
         if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
             raise CourseCutError(f'El correo de administrador "{email}" no es válido.')
+        if not email.endswith('@intec.edu.ec'):
+            raise CourseCutError(
+                f'El correo "{email}" no es institucional. Teams solo permite cuentas @intec.edu.ec.'
+            )
         if email not in seen:
             seen.add(email)
             emails.append(email)
     return emails[:20]
 
 
+def _institutional_email(value: Any) -> str:
+    email = _clean_text(value).lower()
+    return email if email.endswith('@intec.edu.ec') else ''
+
+
 def _save_team_additional_owners(*, corte_id: int, team_corte_id: int, emails: list[str], usuario_registro: str) -> None:
     if not _ensure_team_additional_owner_schema():
-        if emails:
-            raise CourseCutError(
-                'La base complementaria no permite guardar administradores adicionales de Teams. '
-                'Ejecuta la actualización del módulo de Teams con una cuenta que tenga permiso CREATE TABLE.'
-            )
         return
-    _fetch_all(
-        f"DELETE FROM [{complement_database_name()}].[graph].[TeamAdministradorAdicional] WHERE [CorteId] = %s",
-        [corte_id],
-    )
-    for email in emails:
+    try:
         _fetch_all(
-            f"""
-            INSERT INTO [{complement_database_name()}].[graph].[TeamAdministradorAdicional]
-                ([TeamCorteId], [CorteId], [Correo], [UsuarioRegistro])
-            VALUES (%s, %s, %s, %s)
-            """,
-            [team_corte_id, corte_id, email, _trim_to_max(usuario_registro, 50)],
+            f"DELETE FROM [{complement_database_name()}].[graph].[TeamAdministradorAdicional] WHERE [CorteId] = %s",
+            [corte_id],
         )
+        for email in emails:
+            _fetch_all(
+                f"""
+                INSERT INTO [{complement_database_name()}].[graph].[TeamAdministradorAdicional]
+                    ([TeamCorteId], [CorteId], [Correo], [UsuarioRegistro])
+                VALUES (%s, %s, %s, %s)
+                """,
+                [team_corte_id, corte_id, email, _trim_to_max(usuario_registro, 50)],
+            )
+    except Exception:
+        return
 
 
 def _fetch_team_additional_owners(corte_id: int) -> list[dict[str, Any]]:
@@ -3201,6 +3901,7 @@ def _normalize_schedule_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         'horario_id': _clean_text(row.get('HorarioId')),
         'corte_id': _clean_text(row.get('CorteId')),
+        'modulo_id': _clean_text(row.get('ModuloId')),
         'dia_semana': dia_semana,
         'dia_semana_label': WEEKDAY_LABELS.get(dia_semana, ''),
         'hora_inicio': _clean_text(row.get('HoraInicio')),
@@ -3226,6 +3927,7 @@ def _normalize_session_row(row: dict[str, Any]) -> dict[str, Any]:
         'sesion_id': _clean_text(row.get('SesionId')),
         'corte_id': _clean_text(row.get('CorteId')),
         'horario_id': _clean_text(row.get('HorarioId')),
+        'modulo_id': _clean_text(row.get('ModuloId')),
         'fecha': _date_iso(row.get('FechaClase')),
         'hora_inicio': _clean_text(row.get('HoraInicio')),
         'hora_fin': _clean_text(row.get('HoraFin')),
@@ -3234,6 +3936,10 @@ def _normalize_session_row(row: dict[str, Any]) -> dict[str, Any]:
         'aula': _clean_text(row.get('Aula')),
         'enlace_virtual': _clean_text(row.get('EnlaceVirtual')),
         'estado': _clean_text(row.get('EstadoSesion')),
+        'graph_event_id': _clean_text(row.get('GraphEventId')),
+        'graph_transaction_id': _clean_text(row.get('GraphTransactionId')),
+        'estado_calendario': _clean_text(row.get('EstadoCalendario')),
+        'error_calendario': _clean_text(row.get('ErrorCalendario')),
     }
 
 
@@ -4009,13 +4715,15 @@ def _fetch_complement_student_index(corte_id: int) -> dict[str, dict[str, Any]]:
         rows = _fetch_all(
             f"""
             SELECT
-                CAST(E.[CorteEstudianteIdPrincipal] AS varchar(30)) AS CorteEstudianteId,
-                CAST(E.[EstudianteCorteId] AS varchar(30)) AS EstudianteCorteId,
-                E.[CodigoEstud],
-                E.[EstadoMatricula],
-                E.[FechaMatricula]
-            FROM [{complement_database_name()}].[edu].[CorteEstudiante] E
-            WHERE E.[CorteId] = %s
+                CAST(M.[CorteEstudianteIdPrincipal] AS varchar(30)) AS CorteEstudianteId,
+                CAST(M.[EstudianteCorteId] AS varchar(30)) AS EstudianteCorteId,
+                M.[CodigoEstud],
+                M.[CorreoIntec],
+                M.[UsuarioLogin],
+                M.[EstadoMatricula],
+                M.[FechaMatricula]
+            FROM [{complement_database_name()}].[edu].[VW_MatriculaEstudianteCompleta] M
+            WHERE M.[CorteId] = %s
             """,
             [corte_id],
         )
@@ -4062,6 +4770,12 @@ def _normalize_cut_student(
         'cedula': str(row.get('CedulaEst') or '').strip(),
         'nombre': str(row.get('ApellidosNombre') or '').strip() or 'Sin nombre',
         'correo_personal': str(row.get('CorreoPersonal') or '').strip(),
+        'correo_intec': _institutional_email(
+            complement_row.get('CorreoIntec') or complement_row.get('UsuarioLogin')
+        ),
+        'usuario_login': _institutional_email(
+            complement_row.get('UsuarioLogin') or complement_row.get('CorreoIntec')
+        ),
         'num_matricula': str(row.get('Num_Matricula') or '').strip(),
         'fecha_inicio': _date_iso(row.get('FechaInicioEstudiante')),
         'estado_participacion': str(row.get('EstadoParticipacion') or '').strip(),

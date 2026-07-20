@@ -13,9 +13,9 @@ function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [roleOptions, setRoleOptions] = useState([])
 
-  async function handleSubmit(event) {
-    event.preventDefault()
+  async function submitLogin(scope = 'auto') {
     setIsSubmitting(true)
     setErrorMessage('')
 
@@ -27,7 +27,7 @@ function LoginPage() {
         },
         body: JSON.stringify({
           ...form,
-          scope: 'auto',
+          scope,
         }),
       })
 
@@ -35,6 +35,11 @@ function LoginPage() {
 
       if (!payload) {
         throw new Error(`El servidor devolvió una respuesta vacía (${response.status}).`)
+      }
+
+      if (payload.selection_required && Array.isArray(payload.roles)) {
+        setRoleOptions(payload.roles)
+        return
       }
 
       if (!response.ok || !payload.ok) {
@@ -57,12 +62,19 @@ function LoginPage() {
     }
   }
 
+  function handleSubmit(event) {
+    event.preventDefault()
+    submitLogin('auto')
+  }
+
   function handleChange(event) {
     const { name, value } = event.target
     setForm((current) => ({
       ...current,
       [name]: value,
     }))
+    setRoleOptions([])
+    setErrorMessage('')
   }
 
   return (
@@ -97,8 +109,8 @@ function LoginPage() {
           <span className="eyebrow">Login dashboard</span>
           <h2>Iniciar sesión</h2>
           <p className="auth-intro">
-            El sistema detecta automáticamente si tu acceso corresponde a estudiante,
-            docente o administrativo.
+            Ingresa tus credenciales. El sistema detectará automáticamente el perfil
+            correspondiente.
           </p>
           <p className="auto-detection-note">
             Si buscas consultar una inscripción, usa la página pública separada.
@@ -141,6 +153,26 @@ function LoginPage() {
                 </button>
               </div>
             </label>
+
+            {roleOptions.length ? (
+              <section className="role-selection-box" aria-labelledby="role-selection-title">
+                <strong id="role-selection-title">Encontramos más de un perfil</strong>
+                <p>Selecciona cómo deseas ingresar:</p>
+                <div className="role-selection-actions">
+                  {roleOptions.map((role) => (
+                    <button
+                      key={role.scope}
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => submitLogin(role.scope)}
+                      disabled={isSubmitting}
+                    >
+                      Ingresar como {role.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
 

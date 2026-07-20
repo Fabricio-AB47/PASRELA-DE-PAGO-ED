@@ -57,6 +57,299 @@ class Microsoft365GraphError(Microsoft365Error):
         self.graph_status_code = graph_status_code
 
 
+def create_or_update_institutional_team(
+    *,
+    cohort_id: int,
+    display_name: str,
+    description: str,
+    visibility: str,
+    owner_emails: list[str],
+    member_emails: list[str],
+) -> dict[str, Any]:
+    """Create one Microsoft 365 group/team per cohort and synchronize its roster."""
+    config = _graph_config()
+    token = _get_access_token(config)
+    nickname = re.sub(r'[^a-z0-9-]', '', f'ec-corte-{cohort_id}'.lower())[:64]
+    filter_value = quote(f"mailNickname eq '{nickname}'", safe="'()$")
+    lookup = _graph_request(
+        'GET',
+        f"{config['base_url']}/groups?$filter={filter_value}&$select=id,displayName,mailNickname",
+        token,
+        operation='consultar el equipo institucional de la cohorte',
+    )
+    groups = lookup.get('value') if isinstance(lookup, dict) else []
+    group = groups[0] if isinstance(groups, list) and groups else None
+    if not group:
+        group = _graph_request_with_retry(
+            'POST',
+            f"{config['base_url']}/groups",
+            token,
+            body={
+                'displayName': str(display_name or f'Educación Continua - Cohorte {cohort_id}')[:256],
+                'description': str(description or '')[:1024],
+                'groupTypes': ['Unified'],
+                'mailEnabled': True,
+                'mailNickname': nickname,
+                'securityEnabled': False,
+                'visibility': 'Public' if visibility == 'Public' else 'Private',
+            },
+            operation='crear el grupo institucional de Teams',
+            retry_statuses={429, 503, 504},
+        )
+    group_id = str((group or {}).get('id') or '').strip()
+    if not group_id:
+        raise Microsoft365GraphError('Microsoft Graph no devolvió el identificador del grupo de Teams.')
+
+    owners = _unique_graph_emails(owner_emails)
+    members = _unique_graph_emails([*owner_emails, *member_emails])
+    if not owners:
+        raise Microsoft365ValidationError(
+            'No existe una cuenta institucional de docente o administrador para asignar como propietario del Team.'
+        )
+    roster_errors: list[str] = []
+    for email in members:
+        try:
+            _add_graph_directory_reference(config, token, group_id, email, 'members')
+        except Microsoft365GraphError as exc:
+            if exc.graph_status_code != 400:
+                roster_errors.append(f'{email}: {exc}')
+    for email in owners:
+        try:
+            _add_graph_directory_reference(config, token, group_id, email, 'owners')
+        except Microsoft365GraphError as exc:
+            if exc.graph_status_code != 400:
+                roster_errors.append(f'{email}: {exc}')
+
+    confirmed_owners = _ensure_group_has_team_owner(config, token, group_id, owners)
+    if not confirmed_owners:
+        raise Microsoft365GraphError(
+            'Microsoft Graph no confirmo propietarios para el grupo. '
+            'Verifica que al menos un docente o administrador tenga cuenta @intec.edu.ec activa.'
+        )
+
+    try:
+        _graph_request_with_retry(
+            'PUT',
+            f"{config['base_url']}/groups/{quote(group_id, safe='')}/team",
+            token,
+            body={},
+            operation='habilitar el grupo como equipo de Teams',
+            retry_statuses={400, 404, 429, 503, 504},
+        )
+    except Microsoft365GraphError as exc:
+        if exc.graph_status_code != 409:
+            raise
+
+    team_details: dict[str, Any] = {}
+    try:
+        team_details = _graph_request_with_retry(
+            'GET',
+            f"{config['base_url']}/teams/{quote(group_id, safe='')}",
+            token,
+            operation='consultar el equipo de Teams creado',
+            retry_statuses={404, 429, 503, 504},
+        )
+    except Microsoft365GraphError:
+        team_details = {}
+
+    primary_channel: dict[str, Any] = {}
+    try:
+        primary_channel = _graph_request_with_retry(
+            'GET',
+            f"{config['base_url']}/teams/{quote(group_id, safe='')}/primaryChannel",
+            token,
+            operation='consultar el canal principal del equipo de Teams',
+            retry_statuses={404, 429, 503, 504},
+        )
+    except Microsoft365GraphError:
+        primary_channel = {}
+
+    team_web_url = str(team_details.get('webUrl') or '') or (
+        f'https://teams.microsoft.com/l/team/{quote(group_id, safe="")}/conversations'
+        f'?groupId={quote(group_id, safe="")}&tenantId={quote(config["tenant_id"], safe="")}'
+    )
+    channel_web_url = str(primary_channel.get('webUrl') or '') or team_web_url
+
+    return {
+        'team_id': group_id,
+        'group_id': group_id,
+        'web_url': channel_web_url,
+        'team_web_url': team_web_url,
+        'primary_channel': {
+            'id': str(primary_channel.get('id') or ''),
+            'display_name': str(primary_channel.get('displayName') or 'General'),
+            'web_url': channel_web_url,
+        },
+        'owners': owners,
+        'confirmed_owners': confirmed_owners,
+        'members': members,
+        'roster_errors': roster_errors,
+    }
+
+
+def upsert_institutional_calendar_event(
+    *,
+    organizer_email: str,
+    group_id: str = '',
+    event_id: str = '',
+    transaction_id: str,
+    subject: str,
+    body_html: str,
+    start_datetime: str,
+    end_datetime: str,
+    attendee_emails: list[str],
+) -> dict[str, Any]:
+    """Create or update a Teams-enabled event in the institutional calendar."""
+    config = _graph_config()
+    token = _get_access_token(config)
+    organizer = str(organizer_email or '').strip().lower()
+    if not organizer:
+        raise Microsoft365ValidationError('No existe un correo institucional para organizar el calendario.')
+    payload: dict[str, Any] = {
+        'subject': str(subject or 'Clase de Educación Continua')[:255],
+        'body': {'contentType': 'HTML', 'content': str(body_html or '')},
+        'start': {'dateTime': start_datetime, 'timeZone': 'SA Pacific Standard Time'},
+        'end': {'dateTime': end_datetime, 'timeZone': 'SA Pacific Standard Time'},
+        'attendees': [
+            {'emailAddress': {'address': email}, 'type': 'required'}
+            for email in _unique_graph_emails(attendee_emails)
+            if email != organizer
+        ],
+        'isOnlineMeeting': True,
+        'onlineMeetingProvider': 'teamsForBusiness',
+        'allowNewTimeProposals': False,
+    }
+    clean_event_id = str(event_id or '').strip()
+    clean_group_id = str(group_id or '').strip()
+    if clean_group_id:
+        group_base = f"{config['base_url']}/groups/{quote(clean_group_id, safe='')}/calendar/events"
+        group_access_denied = False
+        if clean_event_id:
+            try:
+                return _graph_request_with_retry(
+                    'PATCH',
+                    f"{group_base}/{quote(clean_event_id, safe='')}",
+                    token,
+                    body=payload,
+                    operation='actualizar una sesion en el calendario del equipo de Teams',
+                    retry_statuses={429, 503, 504},
+                )
+            except Microsoft365GraphError as exc:
+                if exc.graph_status_code == 403:
+                    group_access_denied = True
+                elif exc.graph_status_code != 404:
+                    raise
+        if not group_access_denied:
+            payload['transactionId'] = transaction_id
+            try:
+                return _graph_request_with_retry(
+                    'POST',
+                    group_base,
+                    token,
+                    body=payload,
+                    operation='calendarizar una sesion en el equipo de Teams',
+                    retry_statuses={429, 503, 504},
+                )
+            except Microsoft365GraphError as exc:
+                if exc.graph_status_code != 403:
+                    raise
+        payload.pop('transactionId', None)
+    if clean_event_id:
+        method = 'PATCH'
+        endpoint = f"{config['base_url']}/users/{quote(organizer, safe='')}/events/{quote(clean_event_id, safe='')}"
+    else:
+        method = 'POST'
+        endpoint = f"{config['base_url']}/users/{quote(organizer, safe='')}/events"
+        payload['transactionId'] = transaction_id
+    return _graph_request_with_retry(
+        method,
+        endpoint,
+        token,
+        body=payload,
+        operation='calendarizar una sesión de Educación Continua',
+        retry_statuses={429, 503, 504},
+    )
+
+
+def _unique_graph_emails(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(
+        str(value or '').strip().lower()
+        for value in values
+        if str(value or '').strip().lower().endswith('@intec.edu.ec')
+    ))
+
+
+def _add_graph_directory_reference(
+    config: dict[str, str], token: str, group_id: str, email: str, relation: str,
+) -> None:
+    user_id = _resolve_graph_user_id(config, token, email)
+    _graph_request_with_retry(
+        'POST',
+        f"{config['base_url']}/groups/{quote(group_id, safe='')}/{relation}/$ref",
+        token,
+        body={'@odata.id': f"{config['base_url']}/users/{quote(user_id, safe='')}"},
+        operation=f'agregar {email} como {relation} del equipo',
+        retry_statuses={404, 429, 503, 504},
+    )
+
+
+def _resolve_graph_user_id(config: dict[str, str], token: str, email: str) -> str:
+    user = _graph_request_with_retry(
+        'GET',
+        f"{config['base_url']}/users/{quote(email, safe='')}?$select=id,userPrincipalName,mail",
+        token,
+        operation=f'validar usuario institucional {email}',
+        retry_statuses={404, 429, 503, 504},
+    )
+    user_id = str(user.get('id') or '').strip()
+    if not user_id:
+        raise Microsoft365GraphError(f'Microsoft Graph no devolvio id para el usuario {email}.')
+    return user_id
+
+
+def _fetch_group_owner_emails(config: dict[str, str], token: str, group_id: str) -> list[str]:
+    payload = _graph_request_with_retry(
+        'GET',
+        f"{config['base_url']}/groups/{quote(group_id, safe='')}/owners?$select=id,userPrincipalName,mail",
+        token,
+        operation='consultar propietarios del grupo de Teams',
+        retry_statuses={404, 429, 503, 504},
+    )
+    values = payload.get('value') if isinstance(payload, dict) else []
+    result: list[str] = []
+    if isinstance(values, list):
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            email = str(item.get('userPrincipalName') or item.get('mail') or '').strip().lower()
+            if email:
+                result.append(email)
+    return result
+
+
+def _ensure_group_has_team_owner(
+    config: dict[str, str],
+    token: str,
+    group_id: str,
+    owner_emails: list[str],
+) -> list[str]:
+    delays = [0.0, 2.0, 4.0, 8.0, 12.0]
+    for attempt_index, delay in enumerate(delays):
+        if delay:
+            time.sleep(delay)
+        confirmed = _fetch_group_owner_emails(config, token, group_id)
+        if confirmed:
+            return confirmed
+        for email in owner_emails:
+            try:
+                _add_graph_directory_reference(config, token, group_id, email, 'members')
+                _add_graph_directory_reference(config, token, group_id, email, 'owners')
+            except Microsoft365GraphError as exc:
+                if exc.graph_status_code not in {400, 409} or attempt_index == len(delays) - 1:
+                    raise
+    return _fetch_group_owner_emails(config, token, group_id)
+
+
 def upload_continuing_education_voucher(
     content: bytes,
     *,
@@ -188,6 +481,43 @@ def create_microsoft365_user(payload: dict[str, Any]) -> dict[str, Any]:
 
 def create_microsoft365_teacher_user(payload: dict[str, Any]) -> dict[str, Any]:
     return _create_microsoft365_user_with_license(payload, license_kind='teacher')
+
+
+def find_microsoft365_user_by_email(correo: Any) -> dict[str, Any]:
+    """Read-only lookup of an existing Microsoft 365 user by institutional email."""
+    clean_email = str(correo or '').strip().lower()
+    if not clean_email:
+        raise Microsoft365ValidationError('Debes indicar el correo institucional que se desea validar.')
+
+    config = _graph_config()
+    _validate_domain_email(clean_email, config['domain'])
+    token = _get_access_token(config)
+    endpoint = (
+        f"{config['base_url']}/users/{quote(clean_email, safe='')}"
+        '?$select=id,displayName,userPrincipalName,mail,accountEnabled,employeeId'
+    )
+    try:
+        user = _graph_request(
+            'GET',
+            endpoint,
+            token,
+            operation='validar correo existente en Microsoft 365 sin modificarlo',
+        )
+    except Microsoft365GraphError as exc:
+        if exc.graph_status_code == 404:
+            return {'exists': False, 'correo': clean_email, 'read_only': True}
+        raise
+
+    institutional_email = str(user.get('userPrincipalName') or user.get('mail') or clean_email).strip().lower()
+    return {
+        'exists': True,
+        'correo': institutional_email,
+        'read_only': True,
+        'account_enabled': bool(user.get('accountEnabled')),
+        'display_name': str(user.get('displayName') or '').strip(),
+        'employee_id': re.sub(r'\D+', '', str(user.get('employeeId') or '')),
+        'user_id': str(user.get('id') or '').strip(),
+    }
 
 
 def _create_microsoft365_user_with_license(

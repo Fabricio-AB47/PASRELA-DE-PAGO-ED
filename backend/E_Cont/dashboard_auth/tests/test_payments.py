@@ -10,7 +10,12 @@ from dashboard_auth.payments import (
     _generated_payment_link_metrics,
     _fetch_payment_rows,
     _ensure_all_digital_payment_receipt,
+    _find_existing_student_credentials,
+    _find_existing_teacher_credentials,
     _list_generated_payment_links,
+    _provision_or_reuse_student_credentials,
+    _registered_payment_metrics,
+    _resolve_student_enrollment_identity,
     _serialize_registered_user_payment,
     _sync_excel_course_charge_adjustments,
     _store_continuing_education_voucher,
@@ -55,6 +60,26 @@ class PaymentSqlResultTests(TestCase):
 
         self.assertEqual(rows, [{'value': 7}])
 
+    @patch('dashboard_auth.payments.cache.get', return_value=None)
+    @patch('dashboard_auth.payments.cache.set')
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    def test_payment_metrics_include_total_pending_collection(self, fetch_rows, _cache_set, _cache_get):
+        fetch_rows.return_value = [{
+            'registered_users': 26,
+            'users_with_payments': 24,
+            'payment_records': 25,
+            'uploaded_invoices': 6,
+            'total_value': '9600.00',
+            'registered_value': '8280.00',
+            'discount_value': '40.00',
+            'pending_collection_value': '2280.00',
+        }]
+
+        result = _registered_payment_metrics('edu.CorteEstudiante', 'fin.Cuenta', 'fin.Movimiento', 'fin.Factura')
+
+        self.assertEqual(result['pending_collection_value'], '1280.00')
+        self.assertIn('EffectiveSummary', fetch_rows.call_args.args[0])
+
 
 class AdminPaymentPayloadTests(TestCase):
     @patch('dashboard_auth.payments._get_payment_provider_transaction')
@@ -64,6 +89,172 @@ class AdminPaymentPayloadTests(TestCase):
         admin_get_payment_info({'transaccion_id': 'TX-123'})
 
         provider_call.assert_called_once_with('TX-123')
+
+
+class TeacherCredentialReuseTests(TestCase):
+    @patch('dashboard_auth.payments.find_microsoft365_user_by_email')
+    @patch('dashboard_auth.payments._find_existing_teacher_credentials')
+    @patch('dashboard_auth.payments._find_existing_student_credentials', return_value=None)
+    def test_validates_and_reuses_teacher_credentials_by_cedula(
+        self, _student_credentials, teacher_credentials, office_lookup
+    ):
+        teacher_credentials.return_value = {
+            'correo': 'docente@intec.edu.ec',
+            'password_temporal': 'ClaveExistente',
+            'credentials_reused': True,
+            'reused_teacher_credentials': True,
+            'credential_source': 'USUARIOS_DOCENTE',
+        }
+        office_lookup.return_value = {
+            'exists': True,
+            'correo': 'docente@intec.edu.ec',
+            'employee_id': '1104371859',
+            'user_id': 'office-user-1',
+        }
+
+        result = _resolve_student_enrollment_identity(
+            nombre='Docente Estudiante',
+            cedula='1104371859',
+        )
+
+        office_lookup.assert_called_once_with('docente@intec.edu.ec')
+        self.assertTrue(result['reused_teacher_credentials'])
+        self.assertTrue(result['office365_reused'])
+        self.assertEqual(result['password_temporal'], 'ClaveExistente')
+
+    @patch('dashboard_auth.payments.find_microsoft365_user_by_email')
+    @patch('dashboard_auth.payments._fetch_payment_rows', return_value=[])
+    @patch('dashboard_auth.payments._find_existing_teacher_credentials', return_value=None)
+    @patch('dashboard_auth.payments._find_existing_student_credentials', return_value=None)
+    def test_reuses_existing_office_account_without_modifying_it(
+        self, _student_credentials, _teacher_credentials, _rows, office_lookup
+    ):
+        office_lookup.return_value = {
+            'exists': True,
+            'correo': 'juan.perez@intec.edu.ec',
+            'display_name': 'Juan Perez',
+            'employee_id': '1104371859',
+            'user_id': 'office-user-2',
+        }
+
+        result = _resolve_student_enrollment_identity(
+            nombre='Juan Perez',
+            cedula='1104371859',
+        )
+
+        self.assertTrue(result['office365_reused'])
+        self.assertTrue(result['office365_read_only'])
+        self.assertEqual(result['credential_source'], 'MICROSOFT365_EXISTENTE_SOLO_LECTURA')
+
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    def test_resolves_existing_student_credentials_by_normalized_identity(self, fetch_rows):
+        fetch_rows.return_value = [{
+            'codigo_estud': '1954',
+            'correo_intec': 'estudiante@intec.edu.ec',
+            'password': 'ClaveExistente',
+        }]
+
+        result = _find_existing_student_credentials('110-437-1859')
+
+        self.assertTrue(result['credentials_reused'])
+        self.assertTrue(result['reused_student_credentials'])
+        self.assertFalse(result['reused_teacher_credentials'])
+        self.assertEqual(result['correo'], 'estudiante@intec.edu.ec')
+        self.assertEqual(fetch_rows.call_args.args[1], ['1104371859', '1104371859'])
+
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    def test_resolves_existing_teacher_credentials_by_normalized_identity(self, fetch_rows):
+        fetch_rows.return_value = [{
+            'codigo_doc': '15',
+            'codigo_usuario': '81',
+            'login': 'docente@intec.edu.ec',
+            'password': 'ClaveExistente',
+        }]
+
+        result = _find_existing_teacher_credentials('110-437-1859')
+
+        self.assertTrue(result['reused_teacher_credentials'])
+        self.assertEqual(result['correo'], 'docente@intec.edu.ec')
+        self.assertEqual(result['password_temporal'], 'ClaveExistente')
+        self.assertEqual(fetch_rows.call_args.args[1], ['1104371859', '2'])
+
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    def test_rejects_ambiguous_teacher_credentials(self, fetch_rows):
+        fetch_rows.return_value = [
+            {'login': 'uno@intec.edu.ec', 'password': 'Clave1'},
+            {'login': 'dos@intec.edu.ec', 'password': 'Clave2'},
+        ]
+
+        with self.assertRaisesRegex(PaymentGatewayError, 'más de una credencial'):
+            _find_existing_teacher_credentials('1104371859')
+
+    @patch('dashboard_auth.payments.create_microsoft365_user')
+    @patch('dashboard_auth.payments._mark_correos_estud_intec_sent')
+    @patch('dashboard_auth.payments._send_intec_welcome_email')
+    @patch('dashboard_auth.payments._update_official_intec_credentials')
+    def test_reuses_teacher_identity_without_creating_microsoft_account(
+        self, update_credentials, send_email, mark_sent, create_microsoft_user
+    ):
+        send_email.return_value = {'sent': True}
+        identity = {
+            'correo': 'docente@intec.edu.ec',
+            'password_temporal': 'ClaveExistente',
+            'reused_teacher_credentials': True,
+            'codigo_doc': '15',
+            'codigo_usuario': '81',
+        }
+
+        microsoft_result, email_result = _provision_or_reuse_student_credentials(
+            identity=identity,
+            nombre='Docente Estudiante',
+            cedula='1104371859',
+            recipient_email='personal@example.com',
+            course_name='Educación continua',
+            official_record={'codigo_estud': '1954'},
+            require_microsoft365=True,
+        )
+
+        create_microsoft_user.assert_not_called()
+        update_credentials.assert_called_once_with(
+            codigo_estud='1954',
+            correo_intec='docente@intec.edu.ec',
+            password_temporal='ClaveExistente',
+        )
+        self.assertTrue(send_email.call_args.kwargs['credentials_reused'])
+        mark_sent.assert_called_once_with('1954')
+        self.assertTrue(microsoft_result['reused'])
+        self.assertTrue(email_result['sent'])
+
+    @patch('dashboard_auth.payments.create_microsoft365_user')
+    @patch('dashboard_auth.payments._mark_correos_estud_intec_sent')
+    @patch('dashboard_auth.payments._send_intec_welcome_email')
+    @patch('dashboard_auth.payments._update_official_intec_credentials')
+    def test_reuses_student_identity_without_creating_microsoft_account(
+        self, update_credentials, send_email, mark_sent, create_microsoft_user
+    ):
+        send_email.return_value = {'sent': True}
+        identity = {
+            'correo': 'estudiante@intec.edu.ec',
+            'password_temporal': 'ClaveExistente',
+            'credentials_reused': True,
+            'reused_student_credentials': True,
+            'credential_source': 'CORREOS_ESTUD_INTEC',
+            'codigo_estud': '1954',
+        }
+
+        microsoft_result, _ = _provision_or_reuse_student_credentials(
+            identity=identity,
+            nombre='Estudiante Existente',
+            cedula='1104371859',
+            recipient_email='personal@example.com',
+            course_name='Educación continua',
+            official_record={'codigo_estud': '1954'},
+            require_microsoft365=True,
+        )
+
+        create_microsoft_user.assert_not_called()
+        self.assertEqual(send_email.call_args.kwargs['credential_source'], 'CORREOS_ESTUD_INTEC')
+        self.assertTrue(microsoft_result['reused'])
 
 
 class AutomaticPaymentReconciliationTests(TestCase):
@@ -252,6 +443,7 @@ class ContinuingEducationManualPaymentTests(TestCase):
 class ContinuingEducationDiscountTests(TestCase):
     def test_accepts_referred_discount_type(self):
         self.assertIn('DESCUENTO_REFERIDO', CONTINUING_EDUCATION_DISCOUNT_TYPES)
+        self.assertIn('BECA_INTEC', CONTINUING_EDUCATION_DISCOUNT_TYPES)
 
     def test_calculates_discount_percentage_from_course_value(self):
         value = _calculate_percentage_discount(
@@ -335,6 +527,24 @@ class ContinuingEducationDiscountTests(TestCase):
 
 
 class ExcelEnrollmentValueTests(TestCase):
+    def test_full_scholarship_marks_account_as_paid_without_cash_payment(self):
+        result = _serialize_registered_user_payment({
+            'codigo_estud': '2001',
+            'estudiante_corte_id': '10',
+            'corte_id': '1',
+            'nombre': 'Estudiante con beca',
+            'total_value': '400.00',
+            'registered_value': '0.00',
+            'discount_value': '400.00',
+            'payment_count': 0,
+            'invoice_count': 0,
+            'is_excel_enrollment': 0,
+        })
+
+        self.assertEqual(result['pending_balance'], '0.00')
+        self.assertEqual(result['payment_status'], 'PAGADO')
+        self.assertTrue(result['certificate_payment_ready'])
+
     def test_excel_enrollment_net_amount_is_four_hundred(self):
         self.assertEqual(str(EXCEL_ENROLLMENT_NET_AMOUNT), '400.00')
 

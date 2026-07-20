@@ -24,7 +24,7 @@ function formatMoney(value) {
 }
 
 function isAccountPaid(account) {
-  return Number(account?.registered_value || 0) > 0 && Number(account?.pending_balance || 0) <= 0
+  return Number(account?.total_value || 0) > 0 && Number(account?.pending_balance || 0) <= 0
 }
 
 function accountBalanceStatus(account) {
@@ -33,9 +33,14 @@ function accountBalanceStatus(account) {
 
 function discountTypeFromMovement(payment) {
   const detail = String(payment?.detalle || '').toUpperCase()
+  if (detail.startsWith('BECA INTEC ')) return 'BECA_INTEC'
   if (detail.startsWith('BECA ')) return 'BECA'
   const match = detail.match(/^DESCUENTO\s+([A-Z_]+)\s+/)
   return match?.[1] || 'OTRO'
+}
+
+function isScholarshipType(value) {
+  return value === 'BECA' || value === 'BECA_INTEC'
 }
 
 function discountPercentageFromMovement(payment, courseValue) {
@@ -314,7 +319,7 @@ export default function AdminPaymentsPanel() {
       const discountLabel = discountEntryForm.tipo_descuento.replaceAll('_', ' ').toLowerCase()
       const appliedValue = payload.result?.value ?? calculatedDiscountValue
       setDiscountSuccess(
-        `${discountEntryForm.tipo_descuento === 'BECA' ? 'Beca' : `Descuento por ${discountLabel}`} del ${discountEntryForm.porcentaje} % (${formatMoney(appliedValue)}) aplicado a ${discountEntryUser.nombre}.`,
+        `${isScholarshipType(discountEntryForm.tipo_descuento) ? (discountEntryForm.tipo_descuento === 'BECA_INTEC' ? 'Beca INTEC' : 'Beca') : `Descuento por ${discountLabel}`} del ${discountEntryForm.porcentaje} % (${formatMoney(appliedValue)}) aplicado a ${discountEntryUser.nombre}.`,
       )
       setActivePaymentModal(null)
       await loadRegisteredPayments({
@@ -865,6 +870,10 @@ export default function AdminPaymentsPanel() {
             <strong>{formatMoney(paymentsResult.metrics.registered_value)}</strong>
           </div>
           <div>
+            <span>Total pendiente de cobro</span>
+            <strong>{formatMoney(paymentsResult.metrics.pending_collection_value)}</strong>
+          </div>
+          <div>
             <span>Descuentos y becas</span>
             <strong>{formatMoney(paymentsResult.metrics.discount_value)}</strong>
           </div>
@@ -1276,14 +1285,14 @@ export default function AdminPaymentsPanel() {
               </div>
               <form className="auth-form payment-entry-form" onSubmit={handleDiscountEntrySubmit}>
                 <div className="lookup-grid payment-entry-grid">
-                  <label className="field"><span>Tipo de beneficio *</span><select name="tipo_descuento" value={discountEntryForm.tipo_descuento} onChange={handleDiscountEntryChange}><option value="BECA">Beca</option><option value="CONVENIO">Convenio</option><option value="PRONTO_PAGO">Pronto pago</option><option value="PROMOCIONAL">Promocional</option><option value="INSTITUCIONAL">Institucional</option><option value="DESCUENTO_REFERIDO">Descuento referido</option><option value="OTRO">Otro</option></select></label>
+                  <label className="field"><span>Tipo de beneficio *</span><select name="tipo_descuento" value={discountEntryForm.tipo_descuento} onChange={handleDiscountEntryChange}><option value="BECA">Beca</option><option value="BECA_INTEC">Beca INTEC</option><option value="CONVENIO">Convenio</option><option value="PRONTO_PAGO">Pronto pago</option><option value="PROMOCIONAL">Promocional</option><option value="INSTITUCIONAL">Institucional</option><option value="DESCUENTO_REFERIDO">Descuento referido</option><option value="OTRO">Otro</option></select></label>
                   <label className="field"><span>Porcentaje del descuento o beca *</span><input name="porcentaje" type="number" min="0" max="100" step="0.01" required value={discountEntryForm.porcentaje} onChange={handleDiscountEntryChange} placeholder="0 a 100" /><small className="field-hint">Rango permitido: 0 a 100 %. Para aplicar el beneficio debe ser mayor que 0. Se calcula sobre {formatMoney(discountCourseValue)}.</small></label>
                   <label className="field full-span"><span>Motivo *</span><input name="motivo" maxLength="200" required value={discountEntryForm.motivo} onChange={handleDiscountEntryChange} placeholder="Ejemplo: convenio institucional autorizado" /></label>
                   <label className="field full-span payment-observation-field"><span>Observaciones</span><textarea name="observacion" maxLength="500" rows="4" value={discountEntryForm.observacion} onChange={handleDiscountEntryChange} placeholder="Agrega detalles, autorización o condiciones aplicadas..." /><small className="field-hint">{discountEntryForm.observacion.length}/500 caracteres</small></label>
                 </div>
                 {discountEntryError ? <p className="form-error">{discountEntryError}</p> : null}
                 <div className="discount-warning">El descuento o beca reducirá el saldo pendiente, pero no se contabilizará como dinero pagado. Si el cálculo supera el saldo, se aplicará únicamente el valor pendiente.</div>
-                <button type="submit" className="submit-button payment-entry-submit" disabled={isSavingDiscount}>{isSavingDiscount ? 'Aplicando...' : discountEntryForm.tipo_descuento === 'BECA' ? 'Guardar beca' : 'Guardar descuento'}</button>
+                <button type="submit" className="submit-button payment-entry-submit" disabled={isSavingDiscount}>{isSavingDiscount ? 'Aplicando...' : isScholarshipType(discountEntryForm.tipo_descuento) ? 'Guardar beca' : 'Guardar descuento'}</button>
               </form>
             </div>
           </section>
@@ -1314,7 +1323,7 @@ export default function AdminPaymentsPanel() {
               </div>
               <form className="auth-form payment-entry-form" onSubmit={handleDiscountCorrectionSubmit}>
                 <div className="lookup-grid payment-entry-grid">
-                  <label className="field"><span>Tipo de beneficio corregido *</span><select name="tipo_descuento" value={discountCorrectionForm.tipo_descuento} onChange={handleDiscountCorrectionChange}><option value="BECA">Beca</option><option value="CONVENIO">Convenio</option><option value="PRONTO_PAGO">Pronto pago</option><option value="PROMOCIONAL">Promocional</option><option value="INSTITUCIONAL">Institucional</option><option value="DESCUENTO_REFERIDO">Descuento referido</option><option value="OTRO">Otro</option></select></label>
+                  <label className="field"><span>Tipo de beneficio corregido *</span><select name="tipo_descuento" value={discountCorrectionForm.tipo_descuento} onChange={handleDiscountCorrectionChange}><option value="BECA">Beca</option><option value="BECA_INTEC">Beca INTEC</option><option value="CONVENIO">Convenio</option><option value="PRONTO_PAGO">Pronto pago</option><option value="PROMOCIONAL">Promocional</option><option value="INSTITUCIONAL">Institucional</option><option value="DESCUENTO_REFERIDO">Descuento referido</option><option value="OTRO">Otro</option></select></label>
                   <label className="field"><span>Nuevo porcentaje *</span><input name="porcentaje" type="number" min="0" max="100" step="0.01" required value={discountCorrectionForm.porcentaje} onChange={handleDiscountCorrectionChange} placeholder="0 a 100" /><small className="field-hint">Puede corregirse aunque la cuenta esté pagada.</small></label>
                   <label className="field full-span"><span>Motivo del beneficio *</span><input name="motivo" maxLength="200" required value={discountCorrectionForm.motivo} onChange={handleDiscountCorrectionChange} placeholder="Motivo que quedará en el nuevo movimiento" /></label>
                   <label className="field full-span"><span>Motivo de la corrección *</span><textarea name="motivo_correccion" maxLength="300" rows="3" required value={discountCorrectionForm.motivo_correccion} onChange={handleDiscountCorrectionChange} placeholder="Explica por qué se corrige el movimiento anterior" /></label>

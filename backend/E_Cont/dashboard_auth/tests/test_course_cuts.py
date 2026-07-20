@@ -3,10 +3,81 @@ from unittest.mock import MagicMock, patch
 
 from dashboard_auth.course_cuts import (
     CourseCutError,
+    _fetch_course_modules,
+    _ensure_four_course_modules,
     _fetch_complement_student_index,
+    _normalize_additional_owner_emails,
+    _resolve_schedule_module,
+    _schedule_database_modality,
     _sync_student_to_complement,
     update_course_cut,
 )
+
+
+class CourseModuleTests(TestCase):
+    def test_additional_owners_accept_only_institutional_accounts(self):
+        self.assertEqual(
+            _normalize_additional_owner_emails(['Coordinador@intec.edu.ec']),
+            ['coordinador@intec.edu.ec'],
+        )
+        with self.assertRaisesRegex(CourseCutError, '@intec.edu.ec'):
+            _normalize_additional_owner_emails(['coordinador@gmail.com'])
+
+    def test_translates_online_label_to_complement_database_value(self):
+        self.assertEqual(_schedule_database_modality('EN LÍNEA'), 'VIRTUAL')
+        self.assertEqual(_schedule_database_modality('VIRTUAL'), 'VIRTUAL')
+        self.assertEqual(_schedule_database_modality('PRESENCIAL'), 'PRESENCIAL')
+
+    @patch('dashboard_auth.course_cuts._fetch_all')
+    def test_configures_four_modules_across_eight_weeks(self, fetch_all):
+        _ensure_four_course_modules(7, {'fecha_inicio_iso': '2026-07-20'})
+
+        self.assertEqual(fetch_all.call_count, 4)
+        calls = [item.args[1] for item in fetch_all.call_args_list]
+        self.assertEqual([(params[3], params[4]) for params in calls], [(1, 2), (3, 4), (5, 6), (7, 8)])
+        self.assertEqual(calls[0][5].isoformat(), '2026-07-20')
+        self.assertEqual(calls[-1][6].isoformat(), '2026-09-13')
+
+    @patch('dashboard_auth.course_cuts._fetch_all')
+    def test_groups_multiple_teachers_inside_same_module(self, fetch_all):
+        fetch_all.return_value = [
+            {'ModuloId': 10, 'CorteId': 7, 'NumeroModulo': 1, 'NombreModulo': 'MÓDULO I',
+             'TemaModulo': 'Fundamentos', 'FechaFinalizacion': '2026-08-02',
+             'ActividadesFinales': 'Evaluación y proyecto final.',
+             'EstadoModulo': 'ACTIVO', 'ModuloDocenteId': 1, 'DocenteCorteId': 21, 'RolModulo': 'COORDINADOR'},
+            {'ModuloId': 10, 'CorteId': 7, 'NumeroModulo': 1, 'NombreModulo': 'MÓDULO I',
+             'EstadoModulo': 'ACTIVO', 'ModuloDocenteId': 2, 'DocenteCorteId': 22, 'RolModulo': 'DOCENTE'},
+        ]
+
+        modules = _fetch_course_modules(7)
+
+        self.assertEqual(len(modules), 1)
+        self.assertEqual(modules[0]['docente_corte_ids'], ['21', '22'])
+        self.assertEqual(modules[0]['tema_modulo'], 'Fundamentos')
+        self.assertEqual(modules[0]['fecha_finalizacion'], '2026-08-02')
+        self.assertEqual(modules[0]['actividades_finales'], 'Evaluación y proyecto final.')
+
+    @patch('dashboard_auth.course_cuts._fetch_course_modules')
+    def test_same_teacher_can_be_selected_in_different_modules(self, fetch_modules):
+        fetch_modules.return_value = [
+            {'modulo_id': '10', 'docente_corte_ids': ['21']},
+            {'modulo_id': '11', 'docente_corte_ids': ['21', '22']},
+        ]
+
+        selected = _resolve_schedule_module(
+            7,
+            {'modulo_id': '11'},
+            {'docente_corte_id': '21'},
+        )
+
+        self.assertEqual(selected['modulo_id'], '11')
+
+    @patch('dashboard_auth.course_cuts._fetch_course_modules')
+    def test_rejects_teacher_not_assigned_to_selected_module(self, fetch_modules):
+        fetch_modules.return_value = [{'modulo_id': '10', 'docente_corte_ids': ['21']}]
+
+        with self.assertRaisesRegex(CourseCutError, 'no está asignado'):
+            _resolve_schedule_module(7, {'modulo_id': '10'}, {'docente_corte_id': '22'})
 
 
 class ComplementStudentIndexTests(TestCase):

@@ -39,6 +39,7 @@ from .course_cuts import (
     list_course_cut_students,
     list_course_cuts,
     save_attendance_records,
+    save_course_cut_module,
     save_course_cut_schedule,
     save_grade_transfer,
     sync_course_cut_students,
@@ -99,7 +100,13 @@ from .security import (
     require_student_session,
     require_teacher_session,
 )
-from .services import AuthError, InactiveUserError, InvalidScopeError, authenticate_user
+from .services import (
+    AuthError,
+    InactiveUserError,
+    InvalidScopeError,
+    RoleSelectionRequired,
+    authenticate_user,
+)
 from .student_registration import (
     RegisteredUserExistsError,
     USER_REGISTERED_MESSAGE,
@@ -134,6 +141,7 @@ from .teacher_enrollment import (
     TeacherEnrollmentError,
     create_teacher_entry_and_send_credentials,
     enroll_existing_teacher,
+    inspect_teacher_identity_by_cedula,
     list_teacher_candidates,
 )
 
@@ -228,6 +236,17 @@ def login_view(request):
 
     try:
         user = authenticate_user(identifier, password, scope)
+    except RoleSelectionRequired as exc:
+        clear_request_rate_limit(request, scope='dashboard-login', identifier=identifier)
+        return JsonResponse(
+            {
+                'ok': False,
+                'selection_required': True,
+                'message': str(exc),
+                'roles': exc.roles,
+            },
+            status=409,
+        )
     except InvalidScopeError as exc:
         return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
     except InactiveUserError as exc:
@@ -1161,6 +1180,27 @@ def admin_course_cut_schedule_save_view(request):
 @csrf_exempt
 @require_POST
 @require_admin_session
+def admin_course_cut_module_save_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = save_course_cut_module(payload, user_login=_dashboard_user_login(request))
+    except CourseCutError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while saving course module.')
+        return JsonResponse(
+            {'ok': False, 'message': 'Ocurrió un error interno guardando el módulo y sus docentes.'},
+            status=500,
+        )
+    return JsonResponse({'ok': True, 'message': 'Módulo y docentes guardados.', 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
 def admin_course_cut_teams_sync_view(request):
     try:
         payload = json.loads(request.body.decode('utf-8'))
@@ -2043,6 +2083,28 @@ def admin_academic_enrollment_selected_view(request):
 @csrf_exempt
 @require_POST
 @require_admin_session
+def admin_teacher_identity_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+
+    try:
+        result = inspect_teacher_identity_by_cedula(payload.get('cedula'), nombre=payload.get('nombre'))
+    except TeacherEnrollmentError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while validating teacher identity.')
+        return JsonResponse(
+            {'ok': False, 'message': 'Ocurrió un error interno validando la cédula.'},
+            status=500,
+        )
+    return JsonResponse({'ok': True, 'message': result['message'], 'result': result})
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
 def admin_teacher_entry_view(request):
     try:
         payload = json.loads(request.body.decode('utf-8'))
@@ -2309,7 +2371,7 @@ def admin_payment_discount_view(request):
     except Exception:
         logger.exception('Unexpected error registering continuing education discount.')
         return JsonResponse({'ok': False, 'message': 'No fue posible registrar el descuento.'}, status=500)
-    benefit_name = 'Beca' if result.get('discount_type') == 'BECA' else 'Descuento'
+    benefit_name = 'Beca' if result.get('discount_type') in {'BECA', 'BECA_INTEC'} else 'Descuento'
     return JsonResponse(
         {'ok': True, 'message': f'{benefit_name} registrada en INTECEDUCONTINUA.', 'result': result},
         status=201,

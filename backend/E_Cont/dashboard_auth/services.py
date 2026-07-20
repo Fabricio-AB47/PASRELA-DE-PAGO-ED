@@ -21,6 +21,12 @@ class InactiveUserError(AuthError):
     pass
 
 
+class RoleSelectionRequired(AuthError):
+    def __init__(self, roles: list[dict[str, str]]):
+        self.roles = roles
+        super().__init__('Selecciona si deseas ingresar como docente o administrativo.')
+
+
 VALID_SCOPES = {'auto', 'student', 'teacher', 'staff'}
 
 
@@ -71,8 +77,24 @@ def authenticate_user(identifier: str, password: str, scope: str = 'auto') -> Au
         'staff': _find_staff,
     }
 
+    if clean_scope == 'auto':
+        staff_user = _find_staff(clean_identifier, clean_password)
+        teacher_user = _find_teacher(clean_identifier, clean_password)
+        if staff_user is not None and teacher_user is not None:
+            raise RoleSelectionRequired([
+                {'scope': 'staff', 'label': 'Administrativo'},
+                {'scope': 'teacher', 'label': 'Docente'},
+            ])
+        if staff_user is not None:
+            return staff_user
+        if teacher_user is not None:
+            return teacher_user
+        student_user = _find_student(clean_identifier, clean_password)
+        if student_user is not None:
+            return student_user
+        raise AuthError('No encontramos un usuario válido con esas credenciales.')
+
     scope_order = {
-        'auto': ('staff', 'teacher', 'student'),
         'student': ('student',),
         'teacher': ('teacher',),
         'staff': ('staff',),

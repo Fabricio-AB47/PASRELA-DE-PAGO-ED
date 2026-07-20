@@ -2,20 +2,33 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from decimal import Decimal, InvalidOperation
 from html import escape
 from typing import Any
 
 from django.db import connection, transaction
 
-from .continuing_education import complement_database_name, sync_teacher_assignment_to_complement
+from .continuing_education import (
+    complement_connection,
+    complement_database_name,
+    complement_version,
+    sync_teacher_assignment_to_complement,
+)
 from .microsoft365 import (
     Microsoft365Error,
     Microsoft365ValidationError,
     build_intec_account_identity,
     create_microsoft365_teacher_user,
+    find_microsoft365_user_by_email,
 )
-from .payments import PaymentGatewayError, _build_intec_logo_attachment, _send_graph_mail
+from .payments import (
+    PaymentGatewayError,
+    _build_intec_logo_attachment,
+    _find_existing_student_credentials,
+    _find_existing_teacher_credentials,
+    _send_graph_mail,
+)
 
 
 class TeacherEnrollmentError(Exception):
@@ -28,6 +41,252 @@ DEFAULT_PARALLEL = 'A'
 DEFAULT_JOURNEY_CODE = 1
 
 
+def _find_existing_office365_identity(*, nombre: str, cedula: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    local_identity = build_intec_account_identity(nombre=nombre, cedula=cedula)
+    candidates: list[tuple[str, bool]] = []
+    rows = _fetch_all(
+        """
+        SELECT correo FROM (
+            SELECT TOP (1) LTRIM(RTRIM(ISNULL(D.correo, ''))) AS correo, 1 AS prioridad
+            FROM dbo.DATOSDOCENTE D
+            WHERE REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.cedula_doc, ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+            ORDER BY D.codigo_doc DESC
+        ) docente
+        WHERE NULLIF(correo, '') IS NOT NULL
+        UNION ALL
+        SELECT correo FROM (
+            SELECT TOP (1) LTRIM(RTRIM(ISNULL(C.CorreoIntec, ''))) AS correo, 2 AS prioridad
+            FROM dbo.DATOS_ESTUD D
+            INNER JOIN dbo.CorreosEstudIntec C
+              ON CAST(C.codestud AS varchar(50)) = CAST(D.codigo_estud AS varchar(50))
+            WHERE (
+                REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.Cedula_Est, ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+                OR REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(CAST(D.Cedula AS varchar(50)), ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+            )
+            ORDER BY C.fecha DESC, D.codigo_estud DESC
+        ) estudiante
+        WHERE NULLIF(correo, '') IS NOT NULL
+        """,
+        [cedula, cedula, cedula],
+    )
+    for row in rows:
+        candidate = _clean_text(row.get('correo')).lower()
+        if candidate and all(item[0] != candidate for item in candidates):
+            candidates.append((candidate, True))
+    if all(item[0] != local_identity['correo'] for item in candidates):
+        candidates.append((local_identity['correo'], False))
+
+    for candidate, linked_by_cedula in candidates:
+        try:
+            office_user = find_microsoft365_user_by_email(candidate)
+        except Microsoft365ValidationError:
+            continue
+        if not office_user.get('exists'):
+            continue
+        office_employee_id = re.sub(r'\D+', '', _clean_text(office_user.get('employee_id')))
+        if office_employee_id and office_employee_id != cedula:
+            continue
+        if not linked_by_cedula:
+            expected_name = _normalized_identity_name(local_identity.get('display_name'))
+            office_name = _normalized_identity_name(office_user.get('display_name'))
+            if office_name and office_name != expected_name:
+                continue
+        institutional_email = _clean_text(office_user.get('correo') or candidate).lower()
+        identity = {
+            **local_identity,
+            'correo': institutional_email,
+            'credentials_reused': False,
+            'reused_teacher_credentials': False,
+            'office365_reused': True,
+            'office365_read_only': True,
+            'credential_source': 'MICROSOFT365_EXISTENTE_SOLO_LECTURA',
+        }
+        return identity, {
+            'ok': True,
+            'created': False,
+            'reused': True,
+            'read_only': True,
+            'message': (
+                'El correo ya existe en Microsoft 365 y se reutilizó sin modificar la cuenta, '
+                'su contraseña, sus atributos ni sus licencias.'
+            ),
+            'user': office_user,
+        }
+    return None
+
+
+def _normalized_identity_name(value: Any) -> str:
+    normalized = unicodedata.normalize('NFKD', _clean_text(value))
+    ascii_value = ''.join(character for character in normalized if not unicodedata.combining(character))
+    return ' '.join(ascii_value.upper().split())
+
+
+def _prepare_teacher_credentials(*, nombre: str, cedula: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        existing_identity = _find_existing_teacher_credentials(cedula)
+    except PaymentGatewayError as exc:
+        raise TeacherEnrollmentError(str(exc)) from exc
+    if existing_identity:
+        return existing_identity, {
+            'ok': True,
+            'created': False,
+            'reused': True,
+            'message': 'Credenciales docentes existentes reutilizadas; no se creó una cuenta Microsoft 365.',
+            'user': {
+                'correo': existing_identity['correo'],
+                'codigo_doc': existing_identity.get('codigo_doc'),
+                'codigo_usuario': existing_identity.get('codigo_usuario'),
+            },
+        }
+
+    try:
+        existing_identity = _find_existing_student_credentials(cedula)
+    except PaymentGatewayError as exc:
+        raise TeacherEnrollmentError(str(exc)) from exc
+    if existing_identity:
+        return existing_identity, {
+            'ok': True,
+            'created': False,
+            'reused': True,
+            'message': 'Credenciales estudiantiles existentes reutilizadas; no se creó una cuenta Microsoft 365.',
+            'user': {
+                'correo': existing_identity['correo'],
+                'codigo_estud': existing_identity.get('codigo_estud'),
+            },
+        }
+
+    try:
+        office_identity = _find_existing_office365_identity(nombre=nombre, cedula=cedula)
+        if office_identity:
+            return office_identity
+        local_identity = build_intec_account_identity(nombre=nombre, cedula=cedula)
+        microsoft365_user = create_microsoft365_teacher_user(
+            {'nombre_completo': nombre, 'cedula': cedula}
+        )
+    except (Microsoft365Error, Microsoft365ValidationError) as exc:
+        raise TeacherEnrollmentError(str(exc)) from exc
+
+    institutional_email = str(microsoft365_user.get('correo') or local_identity['correo']).strip()
+    identity = {
+        **local_identity,
+        'correo': institutional_email,
+        'credentials_reused': False,
+        'reused_teacher_credentials': False,
+        'credential_source': 'NUEVA_CUENTA_DOCENTE',
+    }
+    return identity, {
+        'ok': True,
+        'created': True,
+        'reused': False,
+        'message': 'Usuario Microsoft 365 creado y licenciado como profesor.',
+        'user': microsoft365_user,
+    }
+
+
+def _teacher_user_result(identity: dict[str, Any]) -> dict[str, str]:
+    return {
+        'action': 'reutilizado',
+        'codigo_usuario': _clean_text(identity.get('codigo_usuario')),
+        'tipo_usuario': str(_teacher_user_type()),
+        'login': _clean_text(identity.get('correo')),
+    }
+
+
+def inspect_teacher_identity_by_cedula(cedula: Any, *, nombre: Any = '') -> dict[str, Any]:
+    """Checks reusable credentials without exposing the stored password."""
+    _ensure_teacher_schema()
+    normalized_identity = re.sub(r'\D+', '', _clean_text(cedula))
+    if not re.fullmatch(r'\d{6,20}', normalized_identity):
+        raise TeacherEnrollmentError(
+            'La cédula debe contener solo números (entre 6 y 20 dígitos).'
+        )
+
+    teacher_record = _fetch_one(
+        """
+        SELECT TOP (1)
+            CAST(D.codigo_doc AS varchar(50)) AS codigo_doc,
+            LTRIM(RTRIM(ISNULL(D.apellidos_nombre, ''))) AS nombre,
+            LTRIM(RTRIM(ISNULL(D.correop, ''))) AS correo_personal
+        FROM dbo.DATOSDOCENTE D
+        WHERE REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.cedula_doc, ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+        ORDER BY D.codigo_doc DESC
+        """,
+        [normalized_identity],
+    )
+    student_record = _fetch_one(
+        """
+        SELECT TOP (1) CAST(D.codigo_estud AS varchar(50)) AS codigo_estud
+        FROM dbo.DATOS_ESTUD D
+        WHERE (
+            REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.Cedula_Est, ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+            OR REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(CAST(D.Cedula AS varchar(50)), ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+        )
+        ORDER BY D.codigo_estud DESC
+        """,
+        [normalized_identity, normalized_identity],
+    )
+
+    try:
+        teacher_credentials = _find_existing_teacher_credentials(normalized_identity)
+        student_credentials = _find_existing_student_credentials(normalized_identity)
+    except PaymentGatewayError as exc:
+        raise TeacherEnrollmentError(str(exc)) from exc
+
+    selected_identity = teacher_credentials or student_credentials
+    office_identity = None
+    office_result = None
+    identity_name = _clean_text(nombre) or _clean_text((teacher_record or {}).get('nombre'))
+    if not selected_identity and identity_name:
+        try:
+            office_match = _find_existing_office365_identity(
+                nombre=identity_name,
+                cedula=normalized_identity,
+            )
+        except Microsoft365Error as exc:
+            raise TeacherEnrollmentError(str(exc)) from exc
+        if office_match:
+            office_identity, office_result = office_match
+    profiles = []
+    if teacher_record:
+        profiles.append('DOCENTE')
+    if student_record:
+        profiles.append('ESTUDIANTE')
+
+    result = {
+        'cedula': normalized_identity,
+        'exists': bool(profiles),
+        'profiles': profiles,
+        'credentials_found': bool(selected_identity),
+        'credentials_reused': bool(selected_identity),
+        'correo_intec': _clean_text((selected_identity or office_identity or {}).get('correo')).lower(),
+        'credential_source': _clean_text((selected_identity or office_identity or {}).get('credential_source')),
+        'office365_found': bool(office_identity),
+        'office365_read_only': bool(office_identity),
+        'office365_check_performed': bool(selected_identity or identity_name),
+        'nombre': _clean_text((teacher_record or {}).get('nombre')),
+        'correo_personal': _clean_text((teacher_record or {}).get('correo_personal')).lower(),
+    }
+    if selected_identity:
+        profile_label = ' y '.join(profile.lower() for profile in profiles) or 'usuario existente'
+        result['message'] = (
+            f'Cédula encontrada como {profile_label}. Se reutilizarán el correo institucional y la '
+            'contraseña registrados; no se creará otra cuenta de Office 365.'
+        )
+    elif office_identity:
+        result['message'] = office_result['message']
+    elif profiles:
+        result['message'] = (
+            'La cédula ya existe, pero no tiene credenciales institucionales reutilizables. '
+            'Al registrar se creará la cuenta correspondiente.'
+        )
+    else:
+        result['message'] = (
+            'La cédula no está registrada como docente ni estudiante. '
+            'Al registrar se crearán sus credenciales institucionales.'
+        )
+    return result
+
+
 def create_teacher_entry_and_send_credentials(
     payload: dict[str, Any],
     *,
@@ -36,37 +295,30 @@ def create_teacher_entry_and_send_credentials(
     _ensure_teacher_schema()
     teacher_payload = _clean_teacher_profile_payload(payload)
 
-    try:
-        local_identity = build_intec_account_identity(
-            nombre=teacher_payload['nombre'],
-            cedula=teacher_payload['cedula'],
-        )
-    except Microsoft365ValidationError as exc:
-        raise TeacherEnrollmentError(str(exc)) from exc
-
-    try:
-        microsoft365_user = create_microsoft365_teacher_user(
-            {
-                'nombre_completo': teacher_payload['nombre'],
-                'cedula': teacher_payload['cedula'],
-            }
-        )
-    except Microsoft365Error as exc:
-        raise TeacherEnrollmentError(str(exc)) from exc
-
-    institutional_email = str(microsoft365_user.get('correo') or local_identity['correo']).strip()
-    password_temporal = local_identity['password_temporal']
+    identity, microsoft365_result = _prepare_teacher_credentials(
+        nombre=teacher_payload['nombre'],
+        cedula=teacher_payload['cedula'],
+    )
+    institutional_email = identity['correo']
+    password_temporal = identity['password_temporal']
+    credentials_reused = bool(identity.get('credentials_reused'))
+    office365_reused = bool(identity.get('office365_reused'))
+    teacher_user_exists = bool(identity.get('reused_teacher_credentials'))
 
     with transaction.atomic():
         teacher_record = _upsert_teacher_record(
             teacher_payload,
             institutional_email=institutional_email,
         )
-        user_record = _upsert_teacher_user(
-            cedula=teacher_payload['cedula'],
-            login=institutional_email,
-            password=password_temporal,
-            user_login=user_login,
+        user_record = (
+            _teacher_user_result(identity)
+            if teacher_user_exists
+            else _upsert_teacher_user(
+                cedula=teacher_payload['cedula'],
+                login=institutional_email,
+                password=password_temporal,
+                user_login=user_login,
+            )
         )
 
     email_result = {'sent': False, 'message': 'No ejecutado.'}
@@ -77,11 +329,13 @@ def create_teacher_entry_and_send_credentials(
             intec_email=institutional_email,
             password=password_temporal,
             assignment={},
+            credentials_reused=credentials_reused,
+            office365_reused=office365_reused,
         )
     except PaymentGatewayError as exc:
         email_result = {
             'sent': False,
-            'message': f'Credenciales generadas, pero no fue posible enviarlas por correo: {str(exc)}',
+            'message': f'Credenciales listas, pero no fue posible enviarlas por correo: {str(exc)}',
         }
 
     return {
@@ -91,11 +345,9 @@ def create_teacher_entry_and_send_credentials(
             'correo_intec': institutional_email,
             'password_temporal': password_temporal,
         },
-        'microsoft365': {
-            'ok': True,
-            'message': 'Usuario Microsoft 365 creado y licenciado como profesor.',
-            'user': microsoft365_user,
-        },
+        'credentials_reused': credentials_reused,
+        'office365_reused': office365_reused,
+        'microsoft365': microsoft365_result,
         'email_result': email_result,
     }
 
@@ -154,8 +406,33 @@ def enroll_existing_teacher(
     _ensure_teacher_schema()
     assignment_payload = _clean_teacher_assignment_payload(payload)
     teacher = _fetch_teacher_for_assignment(payload)
+    _ensure_complement_teacher_capacity(
+        corte_id=assignment_payload.get('corte_id'),
+        codigo_doc=teacher.get('codigo_doc'),
+    )
+    identity, microsoft365_result = _prepare_teacher_credentials(
+        nombre=teacher['nombre'],
+        cedula=teacher['cedula'],
+    )
+    credentials_reused = bool(identity.get('credentials_reused'))
+    office365_reused = bool(identity.get('office365_reused'))
+    teacher_user_exists = bool(identity.get('reused_teacher_credentials'))
 
     with transaction.atomic():
+        if teacher_user_exists:
+            user_record = _teacher_user_result(identity)
+        else:
+            user_record = _upsert_teacher_user(
+                cedula=teacher['cedula'],
+                login=identity['correo'],
+                password=identity['password_temporal'],
+                user_login=user_login,
+            )
+            _update_teacher_institutional_email(
+                codigo_doc=teacher['codigo_doc'],
+                institutional_email=identity['correo'],
+            )
+            teacher['correo_intec'] = identity['correo']
         if assignment_payload.get('skip_primary_assignment'):
             assignment = _build_cut_only_assignment(
                 codigo_doc=teacher['codigo_doc'],
@@ -173,10 +450,40 @@ def enroll_existing_teacher(
         user_login=user_login,
     )
 
+    recipient_email = _clean_text(
+        payload.get('email') or payload.get('correo_personal') or teacher.get('correo_personal')
+    ).lower()
+    email_result = {'sent': False, 'message': 'El docente no tiene un correo personal registrado.'}
+    if recipient_email:
+        try:
+            email_result = _send_teacher_credentials_email(
+                recipient_email=recipient_email,
+                recipient_name=teacher['nombre'],
+                intec_email=identity['correo'],
+                password=identity['password_temporal'],
+                assignment=assignment,
+                credentials_reused=credentials_reused,
+                office365_reused=office365_reused,
+            )
+        except PaymentGatewayError as exc:
+            email_result = {
+                'sent': False,
+                'message': f'Credenciales listas, pero no fue posible enviarlas por correo: {str(exc)}',
+            }
+
     return {
         'teacher': teacher,
+        'user': user_record,
         'assignment': assignment,
         'continuing_education': continuing_education,
+        'credentials': {
+            'correo_intec': identity['correo'],
+            'password_temporal': identity['password_temporal'],
+        },
+        'credentials_reused': credentials_reused,
+        'office365_reused': office365_reused,
+        'microsoft365': microsoft365_result,
+        'email_result': email_result,
         'user_login': user_login or 'SISTEMA',
     }
 
@@ -188,38 +495,35 @@ def enroll_teacher_and_send_credentials(
 ) -> dict[str, Any]:
     _ensure_teacher_schema()
     teacher_payload = _clean_teacher_payload(payload)
+    _ensure_complement_teacher_capacity(
+        corte_id=teacher_payload.get('corte_id'),
+        codigo_doc=teacher_payload.get('codigo_doc'),
+    )
 
-    try:
-        local_identity = build_intec_account_identity(
-            nombre=teacher_payload['nombre'],
-            cedula=teacher_payload['cedula'],
-        )
-    except Microsoft365ValidationError as exc:
-        raise TeacherEnrollmentError(str(exc)) from exc
-
-    try:
-        microsoft365_user = create_microsoft365_teacher_user(
-            {
-                'nombre_completo': teacher_payload['nombre'],
-                'cedula': teacher_payload['cedula'],
-            }
-        )
-    except Microsoft365Error as exc:
-        raise TeacherEnrollmentError(str(exc)) from exc
-
-    institutional_email = str(microsoft365_user.get('correo') or local_identity['correo']).strip()
-    password_temporal = local_identity['password_temporal']
+    identity, microsoft365_result = _prepare_teacher_credentials(
+        nombre=teacher_payload['nombre'],
+        cedula=teacher_payload['cedula'],
+    )
+    institutional_email = identity['correo']
+    password_temporal = identity['password_temporal']
+    credentials_reused = bool(identity.get('credentials_reused'))
+    office365_reused = bool(identity.get('office365_reused'))
+    teacher_user_exists = bool(identity.get('reused_teacher_credentials'))
 
     with transaction.atomic():
         teacher_record = _upsert_teacher_record(
             teacher_payload,
             institutional_email=institutional_email,
         )
-        user_record = _upsert_teacher_user(
-            cedula=teacher_payload['cedula'],
-            login=institutional_email,
-            password=password_temporal,
-            user_login=user_login,
+        user_record = (
+            _teacher_user_result(identity)
+            if teacher_user_exists
+            else _upsert_teacher_user(
+                cedula=teacher_payload['cedula'],
+                login=institutional_email,
+                password=password_temporal,
+                user_login=user_login,
+            )
         )
         assignment = _upsert_teacher_assignment(
             codigo_doc=teacher_record['codigo_doc'],
@@ -240,11 +544,13 @@ def enroll_teacher_and_send_credentials(
             intec_email=institutional_email,
             password=password_temporal,
             assignment=assignment,
+            credentials_reused=credentials_reused,
+            office365_reused=office365_reused,
         )
     except PaymentGatewayError as exc:
         email_result = {
             'sent': False,
-            'message': f'Credenciales generadas, pero no fue posible enviarlas por correo: {str(exc)}',
+            'message': f'Credenciales listas, pero no fue posible enviarlas por correo: {str(exc)}',
         }
 
     return {
@@ -256,11 +562,9 @@ def enroll_teacher_and_send_credentials(
             'correo_intec': institutional_email,
             'password_temporal': password_temporal,
         },
-        'microsoft365': {
-            'ok': True,
-            'message': 'Usuario Microsoft 365 creado y licenciado como profesor.',
-            'user': microsoft365_user,
-        },
+        'credentials_reused': credentials_reused,
+        'office365_reused': office365_reused,
+        'microsoft365': microsoft365_result,
         'email_result': email_result,
     }
 
@@ -622,6 +926,18 @@ def _upsert_teacher_user(
     }
 
 
+def _update_teacher_institutional_email(*, codigo_doc: str, institutional_email: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE dbo.DATOSDOCENTE
+            SET correo = %s
+            WHERE CAST(codigo_doc AS varchar(50)) = %s
+            """,
+            [_trim_to_max(institutional_email, 100), str(codigo_doc)],
+        )
+
+
 def _upsert_teacher_assignment(
     *,
     codigo_doc: str,
@@ -858,6 +1174,30 @@ def _sync_teacher_assignment_to_complement(
         }
 
 
+def _ensure_complement_teacher_capacity(*, corte_id: Any, codigo_doc: Any) -> None:
+    numeric_corte_id = _safe_int(corte_id, default=0)
+    numeric_codigo_doc = _safe_int(codigo_doc, default=0)
+    if numeric_corte_id <= 0 or complement_version() != 'v5':
+        return
+    try:
+        with complement_connection().cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(CASE WHEN EstadoDocenteCorte NOT IN ('ANULADO','RETIRADO','INACTIVO') THEN 1 END) AS TotalActivos,
+                    COUNT(CASE WHEN CodigoDocente = %s AND EstadoDocenteCorte NOT IN ('ANULADO','RETIRADO','INACTIVO') THEN 1 END) AS YaMatriculado
+                FROM edu.CorteDocente
+                WHERE CorteId = %s
+                """,
+                [numeric_codigo_doc, numeric_corte_id],
+            )
+            row = cursor.fetchone() or (0, 0)
+    except Exception:
+        return
+    if int(row[0] or 0) >= 3 and int(row[1] or 0) == 0:
+        raise TeacherEnrollmentError('El curso ya tiene el máximo de tres docentes matriculados.')
+
+
 def _send_teacher_credentials_email(
     *,
     recipient_email: str,
@@ -865,20 +1205,45 @@ def _send_teacher_credentials_email(
     intec_email: str,
     password: str,
     assignment: dict[str, str],
+    credentials_reused: bool = False,
+    office365_reused: bool = False,
 ) -> dict[str, Any]:
     safe_recipient = escape(recipient_name or recipient_email)
     safe_intec_email = escape(intec_email)
     safe_password = escape(password)
+    password_label = 'Contraseña del dashboard' if office365_reused else 'Contraseña'
+    office_note = (
+        'El correo ya existía en Microsoft 365 y no se modificaron su contraseña, atributos ni licencias. '
+        'La contraseña mostrada corresponde únicamente al dashboard INTEC.'
+        if office365_reused
+        else ''
+    )
     if assignment.get('materia') or assignment.get('codigo_materia'):
         safe_course = escape(assignment.get('materia') or 'la materia asignada')
         safe_period = escape(assignment.get('periodo') or assignment.get('codigo_periodo') or 'el período seleccionado')
         safe_parallel = escape(assignment.get('paralelo') or DEFAULT_PARALLEL)
-        detail_text = (
-            f'Tu cuenta institucional docente ha sido creada y asignada a '
-            f'<strong>{safe_course}</strong> para {safe_period}, paralelo {safe_parallel}.'
+        account_text = (
+            'Tu correo existente de Microsoft 365 fue reutilizado sin modificaciones y fue asignado a'
+            if office365_reused
+            else (
+                'Tus credenciales docentes existentes fueron conservadas y tu cuenta fue asignada a'
+                if credentials_reused
+                else 'Tu cuenta institucional docente ha sido creada y asignada a'
+            )
         )
+        detail_text = f'{account_text} <strong>{safe_course}</strong> para {safe_period}, paralelo {safe_parallel}.'
     else:
-        detail_text = 'Tu cuenta institucional docente ha sido creada correctamente.'
+        detail_text = (
+            'Tu correo existente de Microsoft 365 fue reutilizado sin realizar modificaciones.'
+            if office365_reused
+            else (
+                'Tus credenciales docentes existentes fueron conservadas y se muestran nuevamente a continuación.'
+                if credentials_reused
+                else 'Tu cuenta institucional docente ha sido creada correctamente.'
+            )
+        )
+    if office_note:
+        detail_text = f'{detail_text} {office_note}'
     logo_attachment = _build_intec_logo_attachment()
     logo_html = ''
     if logo_attachment:
@@ -912,7 +1277,7 @@ def _send_teacher_credentials_email(
                     <td style="padding:14px 16px;font-size:14px;color:#111827;"><strong>Usuario:</strong> {safe_intec_email}</td>
                   </tr>
                   <tr>
-                    <td style="padding:14px 16px;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;"><strong>Contraseña:</strong> {safe_password}</td>
+                    <td style="padding:14px 16px;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;"><strong>{password_label}:</strong> {safe_password}</td>
                   </tr>
                 </table>
                 <p style="margin:0;font-size:13px;line-height:1.6;color:#6b7280;">Conserva estas credenciales en un lugar seguro y no las compartas con terceros.</p>

@@ -183,7 +183,7 @@ export default function AdminTeacherEnrollmentPanel() {
   const [form, setForm] = useState(initialForm)
   const [teacherSearch, setTeacherSearch] = useState('')
   const [teacherCandidates, setTeacherCandidates] = useState([])
-  const [selectedTeacher, setSelectedTeacher] = useState(null)
+  const [selectedTeachers, setSelectedTeachers] = useState([])
   const [isLoadingCatalogs, setIsLoadingCatalogs] = useState(true)
   const [isLoadingCuts, setIsLoadingCuts] = useState(true)
   const [isLoadingStudents, setIsLoadingStudents] = useState(false)
@@ -330,12 +330,22 @@ export default function AdminTeacherEnrollmentPanel() {
   }
 
   function selectTeacher(teacher) {
-    setSelectedTeacher(teacher)
+    const teacherId = String(teacher.codigo_doc || '')
+    const exists = selectedTeachers.some((item) => String(item.codigo_doc || '') === teacherId)
+    if (!exists && selectedTeachers.length >= 3) {
+      setError('Puedes seleccionar hasta tres docentes para el curso.')
+      return
+    }
+    const nextTeachers = exists
+      ? selectedTeachers.filter((item) => String(item.codigo_doc || '') !== teacherId)
+      : [...selectedTeachers, teacher]
+    setSelectedTeachers(nextTeachers)
     setResult(null)
-    setMessage(`Docente seleccionado: ${teacher.nombre}`)
+    setError('')
+    setMessage(`${nextTeachers.length} docente(s) seleccionado(s).`)
     setForm((current) => ({
       ...current,
-      codigo_doc: String(teacher.codigo_doc || ''),
+      codigo_doc: String(nextTeachers[0]?.codigo_doc || ''),
     }))
   }
 
@@ -346,8 +356,8 @@ export default function AdminTeacherEnrollmentPanel() {
     setMessage('')
     setResult(null)
 
-    if (!selectedTeacher?.codigo_doc && !form.codigo_doc) {
-      setError('Busca y selecciona un docente antes de matricular.')
+    if (!selectedTeachers.length) {
+      setError('Busca y selecciona entre uno y tres docentes antes de matricular.')
       setIsSubmitting(false)
       return
     }
@@ -358,25 +368,26 @@ export default function AdminTeacherEnrollmentPanel() {
     }
 
     try {
-      const response = await adminFetch('/api/auth/admin/teacher-enrollment/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ...form,
-          corte_id: selectedCut.corte_id,
-          codigo_doc: selectedTeacher?.codigo_doc || form.codigo_doc,
-          cedula: selectedTeacher?.cedula || '',
-        }),
-      })
-      const payload = await readResponsePayload(response)
-      if (!payload || !response.ok || !payload.ok) {
-        throw new Error(payload?.message ?? `No fue posible matricular al docente (${response.status}).`)
+      const processed = []
+      for (const teacher of selectedTeachers) {
+        const response = await adminFetch('/api/auth/admin/teacher-enrollment/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...form,
+            corte_id: selectedCut.corte_id,
+            codigo_doc: teacher.codigo_doc,
+            cedula: teacher.cedula || '',
+          }),
+        })
+        const payload = await readResponsePayload(response)
+        if (!payload || !response.ok || !payload.ok) {
+          throw new Error(`${teacher.nombre}: ${payload?.message ?? `no fue posible matricular (${response.status})`}`)
+        }
+        processed.push(payload.result)
       }
-
-      setResult(payload.result)
-      setMessage(payload.message || 'Matrícula docente procesada.')
+      setResult(processed.at(-1) || null)
+      setMessage(`${processed.length} docente(s) matriculado(s) correctamente en el curso.`)
     } catch (submitError) {
       setError(submitError.message)
     } finally {
@@ -423,7 +434,7 @@ export default function AdminTeacherEnrollmentPanel() {
     !isLoadingCatalogs &&
     !isLoadingCuts &&
     Boolean(selectedCut?.corte_id) &&
-    Boolean(selectedTeacher?.codigo_doc || form.codigo_doc)
+    selectedTeachers.length > 0
   )
 
   useEffect(() => {
@@ -490,7 +501,7 @@ export default function AdminTeacherEnrollmentPanel() {
               <h4>Buscar docente</h4>
               <p>Consulta registros existentes en DATOSDOCENTE por nombre o número de cédula.</p>
             </div>
-            <strong>{selectedTeacher ? `Seleccionado: ${selectedTeacher.codigo_doc}` : 'Sin selección'}</strong>
+            <strong>{selectedTeachers.length ? `${selectedTeachers.length} de 3 seleccionados` : 'Sin selección'}</strong>
           </div>
 
           <div className="student-selection-toolbar">
@@ -522,10 +533,10 @@ export default function AdminTeacherEnrollmentPanel() {
                 type="button"
                 className="ghost-button compact-button"
                 onClick={() => {
-                  setSelectedTeacher(null)
+                  setSelectedTeachers([])
                   setForm((current) => ({ ...current, codigo_doc: '' }))
                 }}
-                disabled={!selectedTeacher}
+                disabled={!selectedTeachers.length}
               >
                 Limpiar selección
               </button>
@@ -551,9 +562,8 @@ export default function AdminTeacherEnrollmentPanel() {
                       <td>
                         <label className="student-selector-cell">
                           <input
-                            type="radio"
-                            name="selected_teacher"
-                            checked={String(selectedTeacher?.codigo_doc || '') === teacherId}
+                            type="checkbox"
+                            checked={selectedTeachers.some((item) => String(item.codigo_doc || '') === teacherId)}
                             onChange={() => selectTeacher(teacher)}
                           />
                           <span>{teacher.codigo_doc}</span>
@@ -657,7 +667,7 @@ export default function AdminTeacherEnrollmentPanel() {
         {selectedCut ? (
           <p className="payment-result-note">
             Se asignará la cohorte {cutLabel(selectedCut)}
-            {selectedTeacher ? ` a ${selectedTeacher.nombre}.` : '.'}
+            {selectedTeachers.length ? ` a ${selectedTeachers.map((teacher) => teacher.nombre).join(', ')}.` : '.'}
           </p>
         ) : null}
 

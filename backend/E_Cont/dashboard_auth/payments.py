@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import secrets
+import unicodedata
 from base64 import b64decode, b64encode, urlsafe_b64decode
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime
@@ -38,6 +39,7 @@ from .microsoft365 import (
     Microsoft365ValidationError,
     build_intec_account_identity,
     create_microsoft365_user,
+    find_microsoft365_user_by_email,
     upload_continuing_education_voucher,
 )
 from .payment_receipt import build_all_digital_payment_receipt
@@ -59,6 +61,7 @@ class ProviderHttpError(PaymentGatewayError):
 
 
 DEFAULT_PAYMENT_RECEIPT_EMAIL = 'DeptCobranzas@intec.edu.ec'
+DEFAULT_TEACHER_USER_TYPE = 2
 GRAPH_MAIL_CC_ENV_KEYS = (
     'MS_MAIL_CC_RECIPIENTS',
     'MICROSOFT_MAIL_CC_RECIPIENTS',
@@ -68,6 +71,7 @@ GRAPH_MAIL_SEND_ROLE = 'Mail.Send'
 EXCEL_ENROLLMENT_NET_AMOUNT = Decimal('400.00')
 CONTINUING_EDUCATION_DISCOUNT_TYPES = {
     'BECA',
+    'BECA_INTEC',
     'CONVENIO',
     'PRONTO_PAGO',
     'PROMOCIONAL',
@@ -164,6 +168,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         provider_response={'status': 'pendiente', 'source': 'form-submit'},
     )
 
+    intec_account = _resolve_student_enrollment_identity(nombre=nombre, cedula=cedula)
     official_record = _upsert_official_inscription_records(
         cedula=cedula,
         nombre=nombre,
@@ -183,6 +188,7 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         payment_link='PENDIENTE',
         continuing_education_charge=Decimal('500.00'),
         enrollment_origin='LINK_PAGO',
+        credential_identity=intec_account,
     )
     matricula = _payment_email_matricula_label(official_record, matricula)
     _update_inscription_request_matricula(inscription_id, matricula)
@@ -191,55 +197,15 @@ def create_payment_link_and_notify(payload: dict[str, Any]) -> dict[str, Any]:
         'message': 'Sincronización oficial completada.',
         'record': official_record,
     }
-    microsoft365_result: dict[str, Any] = {'ok': False, 'message': 'No ejecutado.'}
-    welcome_email_result: dict[str, Any] = {'sent': False, 'message': 'No ejecutado.'}
-    try:
-        intec_account = build_intec_account_identity(nombre=nombre, cedula=cedula)
-    except Microsoft365ValidationError as exc:
-        raise PaymentGatewayError(str(exc)) from exc
-
-    try:
-        microsoft365_user = create_microsoft365_user(
-            {
-                'nombre_completo': nombre,
-                'cedula': cedula,
-            }
-        )
-        microsoft365_result = {
-            'ok': True,
-            'message': 'Usuario Microsoft 365 creado y licenciado correctamente.',
-            'user': microsoft365_user,
-        }
-        resolved_intec_email = str(microsoft365_user.get('correo') or intec_account['correo']).strip()
-        if resolved_intec_email:
-            intec_account['correo'] = resolved_intec_email
-            if official_record:
-                _update_official_intec_credentials(
-                    codigo_estud=official_record['codigo_estud'],
-                    correo_intec=resolved_intec_email,
-                    password_temporal=intec_account['password_temporal'],
-                )
-        try:
-            welcome_email_result = _send_intec_welcome_email(
-                recipient_email=email,
-                recipient_name=nombre,
-                intec_email=intec_account['correo'],
-                password=intec_account['password_temporal'],
-                course_name=_resolve_welcome_course_name(payload),
-            )
-            if welcome_email_result.get('sent') and official_record:
-                _mark_correos_estud_intec_sent(official_record['codigo_estud'])
-        except PaymentGatewayError as exc:
-            welcome_email_result = {
-                'sent': False,
-                'message': f'Usuario Microsoft 365 creado, pero no fue posible enviar bienvenida: {str(exc)}',
-            }
-        microsoft365_result['welcome_email'] = welcome_email_result
-    except Microsoft365Error as exc:
-        microsoft365_result = {
-            'ok': False,
-            'message': str(exc),
-        }
+    microsoft365_result, welcome_email_result = _provision_or_reuse_student_credentials(
+        identity=intec_account,
+        nombre=nombre,
+        cedula=cedula,
+        recipient_email=email,
+        course_name=_resolve_welcome_course_name(payload),
+        official_record=official_record,
+        require_microsoft365=False,
+    )
 
     provider_payload = _build_alldigital_payload(
         raw_payload=payload,
@@ -416,10 +382,7 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
         )
 
     descripcion = _compose_mass_matriculation_description(payload, descripcion)
-    try:
-        intec_account = build_intec_account_identity(nombre=nombre, cedula=cedula)
-    except Microsoft365ValidationError as exc:
-        raise PaymentGatewayError(str(exc)) from exc
+    intec_account = _resolve_student_enrollment_identity(nombre=nombre, cedula=cedula)
 
     official_record = _upsert_official_inscription_records(
         cedula=cedula,
@@ -461,55 +424,19 @@ def create_mass_matriculation_and_credentials(payload: dict[str, Any]) -> dict[s
         create_payment_record=False,
         continuing_education_charge=EXCEL_ENROLLMENT_NET_AMOUNT if is_excel_enrollment else Decimal('500.00'),
         enrollment_origin='EXCEL' if is_excel_enrollment else 'BOTON_PAGOS',
+        credential_identity=intec_account,
     )
     matricula = _payment_email_matricula_label(official_record, matricula)
 
-    microsoft365_result: dict[str, Any] = {'ok': False, 'message': 'No ejecutado.'}
-    welcome_email_result: dict[str, Any] = {'sent': False, 'message': 'No ejecutado.'}
-
-    try:
-        microsoft365_user = create_microsoft365_user(
-            {
-                'nombre_completo': nombre,
-                'cedula': cedula,
-            }
-        )
-        microsoft365_result = {
-            'ok': True,
-            'message': 'Usuario Microsoft 365 creado y licenciado correctamente.',
-            'user': microsoft365_user,
-        }
-        resolved_intec_email = str(microsoft365_user.get('correo') or intec_account['correo']).strip()
-        if resolved_intec_email:
-            intec_account['correo'] = resolved_intec_email
-            _update_official_intec_credentials(
-                codigo_estud=official_record['codigo_estud'],
-                correo_intec=resolved_intec_email,
-                password_temporal=intec_account['password_temporal'],
-            )
-    except Microsoft365Error as exc:
-        microsoft365_result = {
-            'ok': False,
-            'message': str(exc),
-        }
-        raise PaymentGatewayError(f'No fue posible crear el usuario Microsoft 365: {str(exc)}') from exc
-
-    try:
-        welcome_email_result = _send_intec_welcome_email(
-            recipient_email=email,
-            recipient_name=nombre,
-            intec_email=intec_account['correo'],
-            password=intec_account['password_temporal'],
-            course_name=_resolve_welcome_course_name(payload),
-        )
-        if welcome_email_result.get('sent'):
-            _mark_correos_estud_intec_sent(official_record['codigo_estud'])
-    except PaymentGatewayError as exc:
-        welcome_email_result = {
-            'sent': False,
-            'message': f'Usuario Microsoft 365 creado, pero no fue posible enviar bienvenida: {str(exc)}',
-        }
-    microsoft365_result['welcome_email'] = welcome_email_result
+    microsoft365_result, welcome_email_result = _provision_or_reuse_student_credentials(
+        identity=intec_account,
+        nombre=nombre,
+        cedula=cedula,
+        recipient_email=email,
+        course_name=_resolve_welcome_course_name(payload),
+        official_record=official_record,
+        require_microsoft365=True,
+    )
 
     provider_response = {
         'status': 'completado',
@@ -1488,7 +1415,7 @@ def _sync_missing_continuing_education_payment_accounts() -> dict[str, Any]:
         except Exception:
             errors += 1
     if synced:
-        cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+        cache.delete(f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}')
     return {'processed': len(missing_rows), 'synced': synced, 'errors': errors}
 
 
@@ -1525,7 +1452,7 @@ def _sync_excel_course_charge_adjustments() -> dict[str, Any]:
         except Exception:
             errors += 1
     if adjusted:
-        cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+        cache.delete(f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}')
     return {'processed': len(rows), 'adjusted': adjusted, 'unchanged': unchanged, 'errors': errors}
 
 
@@ -1947,7 +1874,7 @@ def register_continuing_education_payment(payload: dict[str, Any], *, user_login
             _trim_to_max(payload.get('observacion'), 500),
         ],
     )
-    cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}')
     payment_result = payment_rows[0] if payment_rows else {}
     payment_reference = _first_non_empty(
         payment_result.get('MovimientoId'),
@@ -2077,7 +2004,7 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
         course_value=course_value,
         pending_balance=pending_balance,
     )
-    benefit_label = 'BECA' if discount_type == 'BECA' else f'DESCUENTO {discount_type}'
+    benefit_label = 'BECA INTEC' if discount_type == 'BECA_INTEC' else ('BECA' if discount_type == 'BECA' else f'DESCUENTO {discount_type}')
     percentage_label = _format_percentage(percentage)
     calculation_note = (
         f'PORCENTAJE={percentage_label}%; BASE_CURSO={course_value:.2f}; '
@@ -2106,13 +2033,13 @@ def register_continuing_education_discount(payload: dict[str, Any], *, user_logi
             _trim_to_max(stored_observation, 500),
         ],
     )
-    cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}')
     create_notification_safely(
         event_key=f"discount:{account.get('CuentaId')}:{movement_rows[0].get('MovimientoId') if movement_rows else reason}",
         notification_type='DISCOUNT_APPLIED',
-        title='Beca aplicada' if discount_type == 'BECA' else 'Descuento aplicado',
+        title='Beca aplicada' if discount_type in {'BECA', 'BECA_INTEC'} else 'Descuento aplicado',
         message=(
-            f'Se aplicó {"una beca" if discount_type == "BECA" else "un descuento"} '
+            f'Se aplicó {"una beca INTEC" if discount_type == "BECA_INTEC" else ("una beca" if discount_type == "BECA" else "un descuento")} '
             f'del {percentage_label} % (${value:.2f}) a tu cuenta de Educación Continua.'
         ),
         recipient_category='student',
@@ -2202,7 +2129,7 @@ def correct_continuing_education_discount(payload: dict[str, Any], *, user_login
         raise PaymentGatewayError('Los demás beneficios ya cubren el valor completo del curso.')
 
     percentage_label = _format_percentage(percentage)
-    benefit_label = 'BECA' if discount_type == 'BECA' else f'DESCUENTO {discount_type}'
+    benefit_label = 'BECA INTEC' if discount_type == 'BECA_INTEC' else ('BECA' if discount_type == 'BECA' else f'DESCUENTO {discount_type}')
     observation = _trim_to_max(
         (
             f'CORRECCIÓN MOVIMIENTO {movement_id}; PORCENTAJE={percentage_label}%; '
@@ -2245,7 +2172,7 @@ def correct_continuing_education_discount(payload: dict[str, Any], *, user_login
             new_value, movement_id, _trim_to_max(user_login or 'SISTEMA', 50), observation,
         ],
     )
-    cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}')
     replacement = correction_rows[0] if correction_rows else {}
     create_notification_safely(
         event_key=f'discount-corrected:{movement_id}:{replacement.get("movimiento_id")}',
@@ -2370,7 +2297,7 @@ def upload_continuing_education_invoice(payload: dict[str, Any], *, user_login: 
             movement_id,
         ],
     )
-    cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}')
     return {
         'ok': True,
         'database': complement_database_name(),
@@ -2791,7 +2718,7 @@ def _sync_confirmed_link_payment_to_complement(payment: dict[str, Any]) -> None:
             ],
         )
         payment['complement_payment_status'] = 'SINCRONIZADO'
-        cache.delete(f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}')
+        cache.delete(f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}')
     except Exception as exc:
         payment['complement_payment_status'] = 'PENDIENTE'
         payment['complement_payment_error'] = str(exc)
@@ -2960,7 +2887,7 @@ def _registered_payment_metrics(
     movements_table: str,
     invoices_table: str,
 ) -> dict[str, Any]:
-    cache_key = f'dashboard:continuing-education-payment-metrics:v5-invoices:{complement_database_name()}'
+    cache_key = f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}'
     cached_metrics = cache.get(cache_key)
     if isinstance(cached_metrics, dict):
         return cached_metrics
@@ -2981,21 +2908,51 @@ def _registered_payment_metrics(
             LEFT JOIN {movements_table} AS M ON M.CuentaId = C.CuentaId
             LEFT JOIN {invoices_table} AS F ON F.MovimientoId = M.MovimientoId
             GROUP BY CE.CorteEstudianteIdPrincipal
+        ), EffectiveSummary AS (
+            SELECT
+                E.CorteEstudianteIdPrincipal,
+                ISNULL(P.payment_count, 0) AS payment_count,
+                ISNULL(P.invoice_count, 0) AS invoice_count,
+                CASE
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%'
+                    THEN {EXCEL_ENROLLMENT_NET_AMOUNT}
+                    ELSE ISNULL(P.total_value, 0)
+                END AS total_value,
+                ISNULL(P.registered_value, 0) AS registered_value,
+                CASE
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%'
+                    THEN ISNULL(P.discount_value, 0) - ISNULL(P.excel_net_adjustment, 0)
+                    ELSE ISNULL(P.discount_value, 0)
+                END AS discount_value
+            FROM {complement_enrollments} AS E
+            LEFT JOIN AccountSummary AS P
+              ON P.CorteEstudianteIdPrincipal = E.CorteEstudianteIdPrincipal
         )
         SELECT
             COUNT(*) AS registered_users,
-            SUM(CASE WHEN ISNULL(P.payment_count, 0) > 0 THEN 1 ELSE 0 END) AS users_with_payments,
-            SUM(ISNULL(P.payment_count, 0)) AS payment_records,
-            SUM(ISNULL(P.invoice_count, 0)) AS uploaded_invoices,
-            SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%' THEN {EXCEL_ENROLLMENT_NET_AMOUNT} ELSE ISNULL(P.total_value, 0) END) AS total_value,
-            SUM(ISNULL(P.registered_value, 0)) AS registered_value,
-            SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%' THEN ISNULL(P.discount_value, 0) - ISNULL(P.excel_net_adjustment, 0) ELSE ISNULL(P.discount_value, 0) END) AS discount_value
-        FROM {complement_enrollments} AS E
-        LEFT JOIN AccountSummary AS P ON P.CorteEstudianteIdPrincipal = E.CorteEstudianteIdPrincipal
+            SUM(CASE WHEN payment_count > 0 THEN 1 ELSE 0 END) AS users_with_payments,
+            SUM(payment_count) AS payment_records,
+            SUM(invoice_count) AS uploaded_invoices,
+            SUM(total_value) AS total_value,
+            SUM(registered_value) AS registered_value,
+            SUM(discount_value) AS discount_value,
+            SUM(CASE
+                WHEN total_value - registered_value - discount_value > 0
+                THEN total_value - registered_value - discount_value
+                ELSE 0
+            END) AS pending_collection_value
+        FROM EffectiveSummary
         """,
         [],
     )
     row = rows[0] if rows else {}
+    total_value = _to_decimal(row.get('total_value'))
+    registered_value = _to_decimal(row.get('registered_value'))
+    discount_value = _to_decimal(row.get('discount_value'))
+    pending_collection_value = max(
+        Decimal('0.00'),
+        total_value - registered_value - discount_value,
+    ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     metrics = {
         'registered_users': int(row.get('registered_users') or 0),
         'users_with_payments': int(row.get('users_with_payments') or 0),
@@ -3005,9 +2962,10 @@ def _registered_payment_metrics(
             0,
             int(row.get('payment_records') or 0) - int(row.get('uploaded_invoices') or 0),
         ),
-        'total_value': str(row.get('total_value') or '0.00'),
-        'registered_value': str(row.get('registered_value') or '0.00'),
-        'discount_value': str(row.get('discount_value') or '0.00'),
+        'total_value': str(total_value),
+        'registered_value': str(registered_value),
+        'discount_value': str(discount_value),
+        'pending_collection_value': str(pending_collection_value),
     }
     cache_ttl = max(0, _safe_int(os.getenv('PAYMENTS_CACHE_TTL'), default=300))
     if cache_ttl:
@@ -3571,6 +3529,311 @@ def _serialize_json(value: Any) -> str:
         return str(value)
 
 
+def _resolve_student_enrollment_identity(*, nombre: str, cedula: str) -> dict[str, Any]:
+    student_identity = _find_existing_student_credentials(cedula)
+    if student_identity:
+        return _validate_reused_identity_in_microsoft365(student_identity, cedula=cedula)
+    teacher_identity = _find_existing_teacher_credentials(cedula)
+    if teacher_identity:
+        return _validate_reused_identity_in_microsoft365(teacher_identity, cedula=cedula)
+    office_identity = _find_existing_office365_student_identity(nombre=nombre, cedula=cedula)
+    if office_identity:
+        return office_identity
+    try:
+        generated_identity = build_intec_account_identity(nombre=nombre, cedula=cedula)
+    except Microsoft365ValidationError as exc:
+        raise PaymentGatewayError(str(exc)) from exc
+    return {
+        **generated_identity,
+        'credentials_reused': False,
+        'reused_student_credentials': False,
+        'reused_teacher_credentials': False,
+        'credential_source': 'NUEVA_CUENTA_ESTUDIANTE',
+    }
+
+
+def _validate_reused_identity_in_microsoft365(identity: dict[str, Any], *, cedula: str) -> dict[str, Any]:
+    email = _clean_text(identity.get('correo')).lower()
+    if not email.endswith('@intec.edu.ec'):
+        raise PaymentGatewayError(
+            'Las credenciales encontradas por cédula no tienen un correo institucional @intec.edu.ec.'
+        )
+    try:
+        office_user = find_microsoft365_user_by_email(email)
+    except Microsoft365Error as exc:
+        raise PaymentGatewayError(f'No fue posible validar el correo existente en Microsoft 365: {str(exc)}') from exc
+    if not office_user.get('exists'):
+        raise PaymentGatewayError(
+            f'La cédula tiene credenciales registradas con {email}, pero esa cuenta no existe en Microsoft 365. '
+            'Corrige la cuenta institucional antes de matricular.'
+        )
+    office_employee_id = re.sub(r'\D+', '', _clean_text(office_user.get('employee_id')))
+    normalized_cedula = re.sub(r'\D+', '', _clean_text(cedula))
+    if office_employee_id and office_employee_id != normalized_cedula:
+        raise PaymentGatewayError(
+            f'El correo {email} pertenece a otra cédula en Microsoft 365 y no puede reutilizarse.'
+        )
+    return {
+        **identity,
+        'correo': _clean_text(office_user.get('correo') or email).lower(),
+        'office365_reused': True,
+        'office365_read_only': True,
+        'office365_user_id': _clean_text(office_user.get('user_id')),
+    }
+
+
+def _find_existing_office365_student_identity(*, nombre: str, cedula: str) -> dict[str, Any] | None:
+    try:
+        local_identity = build_intec_account_identity(nombre=nombre, cedula=cedula)
+    except Microsoft365ValidationError as exc:
+        raise PaymentGatewayError(str(exc)) from exc
+    normalized_cedula = re.sub(r'\D+', '', _clean_text(cedula))
+    rows = _fetch_payment_rows(
+        """
+        SELECT correo FROM (
+            SELECT TOP (1) LTRIM(RTRIM(ISNULL(D.correo, ''))) AS correo
+            FROM dbo.DATOSDOCENTE D
+            WHERE REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.cedula_doc, ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+            ORDER BY D.codigo_doc DESC
+        ) docente
+        WHERE NULLIF(correo, '') IS NOT NULL
+        UNION ALL
+        SELECT correo FROM (
+            SELECT TOP (1) LTRIM(RTRIM(ISNULL(C.CorreoIntec, ''))) AS correo
+            FROM dbo.DATOS_ESTUD D
+            INNER JOIN dbo.CorreosEstudIntec C
+              ON CAST(C.codestud AS varchar(50)) = CAST(D.codigo_estud AS varchar(50))
+            WHERE (
+                REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.Cedula_Est, ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+                OR REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(CAST(D.Cedula AS varchar(50)), ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+            )
+            ORDER BY C.fecha DESC, D.codigo_estud DESC
+        ) estudiante
+        WHERE NULLIF(correo, '') IS NOT NULL
+        """,
+        [normalized_cedula, normalized_cedula, normalized_cedula],
+    )
+    candidates: list[tuple[str, bool]] = []
+    for row in rows:
+        candidate = _clean_text(row.get('correo')).lower()
+        if candidate.endswith('@intec.edu.ec') and all(email != candidate for email, _linked in candidates):
+            candidates.append((candidate, True))
+    generated_email = _clean_text(local_identity.get('correo')).lower()
+    if all(email != generated_email for email, _linked in candidates):
+        candidates.append((generated_email, False))
+
+    for candidate, linked_by_cedula in candidates:
+        try:
+            office_user = find_microsoft365_user_by_email(candidate)
+        except Microsoft365ValidationError:
+            continue
+        except Microsoft365Error as exc:
+            raise PaymentGatewayError(f'No fue posible validar Microsoft 365: {str(exc)}') from exc
+        if not office_user.get('exists'):
+            continue
+        office_employee_id = re.sub(r'\D+', '', _clean_text(office_user.get('employee_id')))
+        if office_employee_id and office_employee_id != normalized_cedula:
+            continue
+        if not linked_by_cedula:
+            expected_name = _normalized_office_identity_name(local_identity.get('display_name'))
+            office_name = _normalized_office_identity_name(office_user.get('display_name'))
+            if office_name and office_name != expected_name:
+                continue
+        return {
+            **local_identity,
+            'correo': _clean_text(office_user.get('correo') or candidate).lower(),
+            'credentials_reused': False,
+            'reused_student_credentials': False,
+            'reused_teacher_credentials': False,
+            'office365_reused': True,
+            'office365_read_only': True,
+            'office365_user_id': _clean_text(office_user.get('user_id')),
+            'credential_source': 'MICROSOFT365_EXISTENTE_SOLO_LECTURA',
+        }
+    return None
+
+
+def _normalized_office_identity_name(value: Any) -> str:
+    normalized = unicodedata.normalize('NFKD', _clean_text(value))
+    ascii_value = ''.join(character for character in normalized if not unicodedata.combining(character))
+    return ' '.join(ascii_value.upper().split())
+
+
+def _find_existing_student_credentials(cedula: Any) -> dict[str, Any] | None:
+    normalized_identity = re.sub(r'\D+', '', _clean_text(cedula))
+    if not normalized_identity:
+        return None
+    rows = _fetch_payment_rows(
+        """
+        SELECT TOP (1)
+            CAST(D.codigo_estud AS varchar(50)) AS codigo_estud,
+            LTRIM(RTRIM(C.CorreoIntec)) AS correo_intec,
+            C.Password AS password
+        FROM dbo.DATOS_ESTUD AS D
+        INNER JOIN dbo.CorreosEstudIntec AS C
+          ON CAST(C.codestud AS varchar(50)) = CAST(D.codigo_estud AS varchar(50))
+        WHERE (
+            REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.Cedula_Est, ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+            OR REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(CAST(D.Cedula AS varchar(50)), ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+        )
+          AND NULLIF(LTRIM(RTRIM(ISNULL(C.CorreoIntec, ''))), '') IS NOT NULL
+          AND NULLIF(ISNULL(C.Password, ''), '') IS NOT NULL
+        ORDER BY
+            CASE WHEN LTRIM(RTRIM(ISNULL(C.Estado, ''))) = 'A' THEN 0 ELSE 1 END,
+            C.fecha DESC,
+            C.Periodo DESC,
+            D.codigo_estud DESC
+        """,
+        [normalized_identity, normalized_identity],
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    return {
+        'correo': _clean_text(row.get('correo_intec')).lower(),
+        'password_temporal': str(row.get('password') or ''),
+        'credentials_reused': True,
+        'reused_student_credentials': True,
+        'reused_teacher_credentials': False,
+        'credential_source': 'CORREOS_ESTUD_INTEC',
+        'codigo_estud': _clean_text(row.get('codigo_estud')),
+    }
+
+
+def _find_existing_teacher_credentials(cedula: Any) -> dict[str, Any] | None:
+    normalized_identity = re.sub(r'\D+', '', _clean_text(cedula))
+    if not normalized_identity:
+        return None
+    rows = _fetch_payment_rows(
+        """
+        SELECT
+            CAST(D.codigo_doc AS varchar(50)) AS codigo_doc,
+            CAST(U.Codigo_Usuario AS varchar(50)) AS codigo_usuario,
+            LTRIM(RTRIM(U.login)) AS login,
+            U.password AS password,
+            LTRIM(RTRIM(ISNULL(D.correo, ''))) AS correo_docente
+        FROM dbo.DATOSDOCENTE AS D
+        INNER JOIN dbo.USUARIOS AS U
+          ON REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(U.cedula, ''))), '-', ''), ' ', ''), '.', ''), ',', '')
+           = REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.cedula_doc, ''))), '-', ''), ' ', ''), '.', ''), ',', '')
+        WHERE REPLACE(REPLACE(REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(D.cedula_doc, ''))), '-', ''), ' ', ''), '.', ''), ',', '') = %s
+          AND CAST(U.tipo_usuario AS varchar(20)) = %s
+          AND NULLIF(LTRIM(RTRIM(ISNULL(U.login, ''))), '') IS NOT NULL
+          AND NULLIF(ISNULL(U.password, ''), '') IS NOT NULL
+        ORDER BY U.Codigo_Usuario DESC, D.codigo_doc DESC
+        """,
+        [normalized_identity, str(_safe_int(os.getenv('TEACHER_USER_TYPE'), default=DEFAULT_TEACHER_USER_TYPE))],
+    )
+    if not rows:
+        return None
+    identities: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        login = _clean_text(row.get('login')).lower()
+        password = str(row.get('password') or '')
+        if login and password:
+            identities.setdefault((login, password), row)
+    if not identities:
+        return None
+    if len(identities) > 1:
+        raise PaymentGatewayError(
+            'La cédula del docente tiene más de una credencial registrada. '
+            'Corrige la duplicidad en USUARIOS antes de matricularlo como estudiante.'
+        )
+    (login, password), row = next(iter(identities.items()))
+    return {
+        'correo': login,
+        'password_temporal': password,
+        'credentials_reused': True,
+        'reused_student_credentials': False,
+        'reused_teacher_credentials': True,
+        'credential_source': 'USUARIOS_DOCENTE',
+        'codigo_doc': _clean_text(row.get('codigo_doc')),
+        'codigo_usuario': _clean_text(row.get('codigo_usuario')),
+    }
+
+
+def _provision_or_reuse_student_credentials(
+    *,
+    identity: dict[str, Any],
+    nombre: str,
+    cedula: str,
+    recipient_email: str,
+    course_name: str,
+    official_record: dict[str, Any],
+    require_microsoft365: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    reused = bool(
+        identity.get('credentials_reused')
+        or identity.get('reused_student_credentials')
+        or identity.get('reused_teacher_credentials')
+        or identity.get('office365_reused')
+    )
+    microsoft365_result: dict[str, Any]
+    if reused:
+        microsoft365_result = {
+            'ok': True,
+            'created': False,
+            'reused': True,
+            'read_only': bool(identity.get('office365_read_only')),
+            'message': 'Cuenta y credenciales existentes reutilizadas; no se creó ni modificó Microsoft 365.',
+            'user': {
+                'correo': identity.get('correo'),
+                'codigo_estud': identity.get('codigo_estud'),
+                'codigo_doc': identity.get('codigo_doc'),
+                'codigo_usuario': identity.get('codigo_usuario'),
+            },
+        }
+    else:
+        try:
+            microsoft365_user = create_microsoft365_user(
+                {'nombre_completo': nombre, 'cedula': cedula}
+            )
+        except Microsoft365Error as exc:
+            if require_microsoft365:
+                raise PaymentGatewayError(f'No fue posible crear el usuario Microsoft 365: {str(exc)}') from exc
+            return (
+                {'ok': False, 'created': False, 'reused': False, 'message': str(exc)},
+                {'sent': False, 'message': 'No se enviaron credenciales porque Microsoft 365 no respondió.'},
+            )
+        resolved_email = _clean_text(microsoft365_user.get('correo') or identity.get('correo'))
+        if resolved_email:
+            identity['correo'] = resolved_email
+        microsoft365_result = {
+            'ok': True,
+            'created': True,
+            'reused': False,
+            'message': 'Usuario Microsoft 365 creado y licenciado correctamente.',
+            'user': microsoft365_user,
+        }
+
+    if official_record:
+        _update_official_intec_credentials(
+            codigo_estud=official_record['codigo_estud'],
+            correo_intec=identity['correo'],
+            password_temporal=identity['password_temporal'],
+        )
+    try:
+        welcome_email_result = _send_intec_welcome_email(
+            recipient_email=recipient_email,
+            recipient_name=nombre,
+            intec_email=identity['correo'],
+            password=identity['password_temporal'],
+            course_name=course_name,
+            credentials_reused=reused,
+            credential_source=_clean_text(identity.get('credential_source')),
+        )
+        if welcome_email_result.get('sent') and official_record:
+            _mark_correos_estud_intec_sent(official_record['codigo_estud'])
+    except PaymentGatewayError as exc:
+        action = 'reutilizadas' if reused else 'creadas'
+        welcome_email_result = {
+            'sent': False,
+            'message': f'Credenciales {action}, pero no fue posible enviarlas: {str(exc)}',
+        }
+    microsoft365_result['welcome_email'] = welcome_email_result
+    return microsoft365_result, welcome_email_result
+
+
 def _upsert_official_inscription_records(
     cedula: str,
     nombre: str,
@@ -3591,11 +3854,12 @@ def _upsert_official_inscription_records(
     create_payment_record: bool = True,
     continuing_education_charge: Any = None,
     enrollment_origin: str = '',
+    credential_identity: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    try:
-        intec_account = build_intec_account_identity(nombre=nombre, cedula=cedula)
-    except Microsoft365ValidationError as exc:
-        raise PaymentGatewayError(str(exc)) from exc
+    intec_account = credential_identity or _resolve_student_enrollment_identity(
+        nombre=nombre,
+        cedula=cedula,
+    )
 
     pensum_template = _get_pensum_subject_template(cod_anio_basica, codigo_materia)
 
@@ -3613,6 +3877,13 @@ def _upsert_official_inscription_records(
             correo_intec=intec_account['correo'],
         )
 
+        credential_description = descripcion
+        if intec_account.get('credentials_reused') or intec_account.get('reused_teacher_credentials'):
+            source_label = 'estudiantiles' if intec_account.get('reused_student_credentials') else 'docentes'
+            credential_description = _trim_to_max(
+                f'{descripcion}; Credenciales {source_label} reutilizadas por coincidencia exacta de cédula.',
+                500,
+            )
         _upsert_correos_estud_intec(
             codigo_estud=codigo_estud,
             nombre=nombre,
@@ -3620,7 +3891,7 @@ def _upsert_official_inscription_records(
             correo_intec=intec_account['correo'],
             password_temporal=intec_account['password_temporal'],
             codigo_periodo=codigo_periodo,
-            descripcion=descripcion,
+            descripcion=credential_description,
         )
 
         existing_materia = _get_existing_official_materia(
@@ -4738,12 +5009,33 @@ def _send_intec_welcome_email(
     intec_email: str,
     password: str,
     course_name: str,
+    credentials_reused: bool = False,
+    credential_source: str = '',
 ) -> dict[str, Any]:
     recipient_label = recipient_name or recipient_email
     safe_recipient_label = escape(recipient_label)
     safe_intec_email = escape(intec_email)
     safe_password = escape(password)
     safe_course_name = escape(course_name or 'el curso seleccionado')
+    office365_read_only = credential_source == 'MICROSOFT365_EXISTENTE_SOLO_LECTURA'
+    password_label = 'Contraseña del dashboard' if office365_read_only else 'Contraseña'
+    if office365_read_only:
+        account_message = (
+            'Tu correo existente de Microsoft 365 fue vinculado sin modificar su contraseña, atributos ni licencias. '
+            'La contraseña mostrada corresponde únicamente al dashboard INTEC.'
+        )
+    elif credentials_reused and credential_source == 'USUARIOS_DOCENTE':
+        account_message = (
+            'Tu cuenta docente existente fue vinculada a tu matrícula como estudiante. '
+            'Debes utilizar las mismas credenciales que ya tienes registradas.'
+        )
+    elif credentials_reused:
+        account_message = (
+            'Tu cuenta estudiantil existente fue vinculada a esta matrícula. '
+            'Debes utilizar las mismas credenciales que ya tienes registradas.'
+        )
+    else:
+        account_message = 'Tu cuenta institucional ha sido creada correctamente.'
     logo_attachment = _build_intec_logo_attachment()
     logo_html = ''
     if logo_attachment:
@@ -4772,13 +5064,13 @@ def _send_intec_welcome_email(
               <td style="padding:26px 28px;color:#111827;">
                 <p style="margin:0 0 12px 0;font-size:16px;">Hola {safe_recipient_label},</p>
                 <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Te damos la bienvenida al Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento INTEC. Has sido matriculado en el curso <strong>{safe_course_name}</strong>, en el cual continuarás con tu preparación profesional para lograr tu éxito.</p>
-                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">Tu cuenta institucional ha sido creada correctamente.</p>
+                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.6;color:#374151;">{account_message}</p>
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 18px 0;border:1px solid #e5e7eb;border-radius:10px;">
                   <tr>
                     <td style="padding:14px 16px;font-size:14px;color:#111827;"><strong>Usuario:</strong> {safe_intec_email}</td>
                   </tr>
                   <tr>
-                    <td style="padding:14px 16px;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;"><strong>Contraseña:</strong> {safe_password}</td>
+                    <td style="padding:14px 16px;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;"><strong>{password_label}:</strong> {safe_password}</td>
                   </tr>
                 </table>
                 <p style="margin:0;font-size:13px;line-height:1.6;color:#6b7280;">Conserva estas credenciales en un lugar seguro y no las compartas con terceros.</p>

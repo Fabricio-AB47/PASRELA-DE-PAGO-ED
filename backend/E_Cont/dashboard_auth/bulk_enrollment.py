@@ -360,6 +360,7 @@ def _process_matriculation_payload(
     result = create_mass_matriculation_and_credentials(payload)
     welcome_email_result = result.get('welcome_email_result', {})
     welcome_email_sent = bool(welcome_email_result.get('sent'))
+    credentials_reused = bool(result.get('microsoft365', {}).get('reused'))
     official_record = result.get('official_sync', {}).get('record') or {}
     certificate_payload = build_certificate_payload(payload, result, source=certificate_source)
     certificate_record = create_stored_certificate_record(certificate_payload)
@@ -388,11 +389,16 @@ def _process_matriculation_payload(
         'welcome_email_sent': welcome_email_sent,
         'welcome_email_message': str(welcome_email_result.get('message') or ''),
         'microsoft365_ok': bool(result.get('microsoft365', {}).get('ok')),
+        'credentials_reused': credentials_reused,
         'certificate': certificate_record,
         'certificate_email_sent': bool(certificate_email_result.get('sent')),
         'certificate_email_message': str(certificate_email_result.get('message') or ''),
         'message': (
-            'Procesado correctamente.'
+            (
+                'Procesado correctamente. Se reutilizaron las credenciales institucionales existentes.'
+                if credentials_reused
+                else 'Procesado correctamente.'
+            )
             if welcome_email_sent
             else str(welcome_email_result.get('message') or 'Procesado, pero la bienvenida quedó pendiente.')
         ),

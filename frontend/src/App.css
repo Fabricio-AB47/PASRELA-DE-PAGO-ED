@@ -327,6 +327,36 @@ textarea {
   margin-top: 22px;
 }
 
+.role-selection-box {
+  margin: 4px 0 18px;
+  padding: 16px;
+  border: 1px solid rgba(var(--fintec-rojo-rgb), 0.2);
+  border-radius: 18px;
+  background: rgba(var(--fintec-celeste-rgb), 0.12);
+}
+
+.role-selection-box strong,
+.role-selection-box p {
+  display: block;
+  margin: 0 0 8px;
+}
+
+.role-selection-box p {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.role-selection-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.role-selection-actions .ghost-button {
+  width: 100%;
+  min-height: 46px;
+}
+
 .secondary-link {
   margin-top: 18px;
   padding: 0;
@@ -1495,8 +1525,200 @@ textarea {
 
 .admin-schedule-selector-card {
   display: grid;
-  grid-template-columns: minmax(320px, 1.1fr) minmax(260px, 0.75fr) minmax(360px, 0.95fr);
+  grid-template-columns: minmax(320px, 0.9fr) minmax(520px, 1.4fr) minmax(360px, 0.9fr);
   align-items: end;
+}
+
+.course-main-teachers {
+  min-width: 0;
+}
+
+.course-main-teacher-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.course-main-teacher-list .student-selector-cell {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.14);
+  border-radius: 12px;
+  background: rgba(var(--fintec-celeste-rgb), 0.12);
+}
+
+.course-main-teacher-list .student-selector-cell > span,
+.course-main-teacher-list strong,
+.course-main-teacher-list small {
+  display: block;
+  min-width: 0;
+}
+
+.course-main-teacher-list strong {
+  overflow-wrap: anywhere;
+}
+
+.course-main-teacher-list small {
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.course-module-manager {
+  display: none;
+  gap: 18px;
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.course-module-tabs {
+  justify-content: flex-start;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.18);
+}
+
+.course-module-tabs button {
+  flex: 0 0 auto;
+  min-width: 112px;
+  text-transform: uppercase;
+}
+
+.course-module-tabs button small {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.68rem;
+  opacity: 0.78;
+}
+
+.course-module-tabs .course-module-add {
+  min-width: 54px;
+  font-size: 1.55rem;
+  color: var(--fintec-rojo);
+}
+
+.course-module-form {
+  align-items: start;
+}
+
+.admin-schedule-panel .schedule-form-grid.course-module-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-schedule-panel .course-module-form .full-span {
+  grid-column: 1 / -1;
+}
+
+.admin-schedule-panel .course-module-teachers {
+  grid-column: 1 / -1;
+}
+
+.course-module-bulk-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.2);
+}
+
+.course-module-bulk-selector > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.course-module-bulk-selector > div:first-child span {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.course-module-bulk-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  width: 100%;
+  gap: 12px;
+}
+
+.course-module-bulk-option {
+  display: grid;
+  gap: 7px;
+  min-width: 190px;
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.14);
+  border-radius: 12px;
+  background: var(--fintec-blanco);
+}
+
+.course-module-teacher-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.course-module-teacher-heading > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.course-module-teacher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.course-module-bulk-option select {
+  width: 100%;
+  min-height: 38px;
+}
+
+.course-module-teacher-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  max-height: 210px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.16);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.08);
+}
+
+.course-module-teacher-list .student-selector-cell {
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--fintec-blanco);
+}
+
+@media (max-width: 1200px) {
+  .course-module-bulk-options,
+  .course-module-teacher-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-schedule-panel .schedule-form-grid.course-module-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .course-module-bulk-options,
+  .course-module-teacher-list,
+  .admin-schedule-panel .schedule-form-grid.course-module-form {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-schedule-panel .course-module-form .full-span,
+  .admin-schedule-panel .course-module-teachers {
+    grid-column: auto;
+  }
 }
 
 .admin-schedule-teacher-warning {
@@ -1543,6 +1765,157 @@ textarea {
   padding: 10px;
 }
 
+.schedule-module-editor {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.14);
+  border-radius: 16px;
+  background: rgba(var(--fintec-celeste-rgb), 0.12);
+}
+
+.schedule-module-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.schedule-database-status {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(156, 91, 0, 0.2);
+  border-radius: 14px;
+  background: rgba(255, 184, 77, 0.14);
+  color: #754500;
+}
+
+.schedule-database-status.is-registered {
+  border-color: rgba(24, 126, 67, 0.22);
+  background: rgba(24, 126, 67, 0.1);
+  color: #126236;
+}
+
+.schedule-database-status span {
+  color: inherit;
+  font-size: 0.88rem;
+}
+
+.schedule-notice-backdrop {
+  background: rgba(var(--fintec-gris-oscuro-rgb), 0.52);
+  backdrop-filter: blur(3px);
+}
+
+.schedule-notice-modal {
+  width: min(520px, calc(100vw - 32px));
+  justify-items: center;
+  padding: 30px;
+  border-radius: 22px;
+  text-align: center;
+}
+
+.schedule-notice-icon {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(24, 126, 67, 0.12);
+  color: #187e43;
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.schedule-notice-modal.is-warning .schedule-notice-icon {
+  background: rgba(180, 105, 0, 0.14);
+  color: #9a5a00;
+}
+
+.schedule-notice-modal.is-error .schedule-notice-icon {
+  background: rgba(var(--fintec-rojo-rgb), 0.12);
+  color: var(--fintec-rojo);
+}
+
+.schedule-notice-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-notice-copy p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+
+.schedule-notice-action {
+  width: 100%;
+}
+
+.schedule-module-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.16);
+  border-top: 4px solid rgba(var(--fintec-gris-oscuro-rgb), 0.3);
+  border-radius: 14px;
+  background: var(--fintec-blanco);
+  opacity: 0.68;
+}
+
+.schedule-module-card.is-selected {
+  opacity: 1;
+  box-shadow: 0 8px 20px rgba(var(--fintec-gris-oscuro-rgb), 0.08);
+}
+
+.schedule-module-card > span,
+.schedule-module-card > small {
+  color: var(--text-soft);
+}
+
+.schedule-module-card > small {
+  min-height: 34px;
+  line-height: 1.4;
+}
+
+.schedule-registered-label {
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(24, 126, 67, 0.12);
+  color: #187e43;
+  font-size: 0.78rem;
+}
+
+.schedule-module-card .field {
+  margin: 0;
+}
+
+.schedule-module-date-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.schedule-module-date-fields input {
+  min-width: 0;
+}
+
+.schedule-module-card.module-tone-1 { border-top-color: #9b0e0e; }
+.schedule-module-card.module-tone-2 { border-top-color: #0f6f8f; }
+.schedule-module-card.module-tone-3 { border-top-color: #8a5a00; }
+.schedule-module-card.module-tone-4 { border-top-color: #4f3c8f; }
+
+.schedule-module-assignment-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(var(--fintec-celeste-rgb), 0.24);
+  color: var(--text-strong);
+  font-size: 0.86rem;
+}
+
 .admin-schedule-editor-card .schedule-calendar-panel {
   grid-row: 1 / span 2;
 }
@@ -1555,6 +1928,10 @@ textarea {
 .admin-schedule-panel .schedule-form-grid {
   grid-template-columns: minmax(220px, 1.35fr) minmax(150px, 0.9fr) minmax(130px, 0.75fr) minmax(130px, 0.75fr);
   gap: 8px;
+}
+
+.admin-schedule-editor-card .schedule-form-grid {
+  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(150px, 0.8fr));
 }
 
 .admin-schedule-panel .field span {
@@ -3688,6 +4065,31 @@ textarea {
   color: var(--fintec-blanco);
 }
 
+@media (max-width: 1200px) {
+  .schedule-module-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .schedule-module-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-module-date-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.schedule-calendar-day.is-module-date:not(.is-selected) {
+  border-width: 2px;
+}
+
+.schedule-calendar-day.module-date-1:not(.is-selected) { border-color: #9b0e0e; background: rgba(155, 14, 14, 0.08); }
+.schedule-calendar-day.module-date-2:not(.is-selected) { border-color: #0f6f8f; background: rgba(15, 111, 143, 0.09); }
+.schedule-calendar-day.module-date-3:not(.is-selected) { border-color: #8a5a00; background: rgba(138, 90, 0, 0.09); }
+.schedule-calendar-day.module-date-4:not(.is-selected) { border-color: #4f3c8f; background: rgba(79, 60, 143, 0.09); }
+
 .schedule-calendar-day:disabled {
   cursor: not-allowed;
   opacity: 0.4;
@@ -4756,6 +5158,28 @@ textarea {
   margin-top: 14px;
 }
 
+.admin-teams-panel .teams-control-card {
+  margin-bottom: 18px;
+}
+
+.admin-teams-panel .teams-control-search {
+  grid-template-columns: minmax(220px, 0.9fr) minmax(320px, 1.5fr) auto;
+  align-items: end;
+  gap: 14px;
+}
+
+.admin-teams-panel .teams-control-action {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 250px;
+}
+
+.admin-teams-panel .teams-control-action .compact-button {
+  width: 100%;
+  min-height: 52px;
+  white-space: normal;
+}
+
 .admin-teams-panel .form-hint {
   margin: 14px 0 0;
   color: var(--text-soft);
@@ -4763,9 +5187,62 @@ textarea {
   line-height: 1.5;
 }
 
-.admin-teams-panel textarea {
-  min-height: 74px;
+.admin-teams-panel .teams-owner-field {
+  padding: 16px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.12);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(var(--fintec-celeste-rgb), 0.1), var(--fintec-blanco));
+}
+
+.admin-teams-panel .teams-owner-field > span {
+  margin-bottom: 10px;
+  color: var(--fintec-rojo);
+  font-weight: 700;
+}
+
+.admin-teams-panel .teams-owner-field textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 104px;
+  box-sizing: border-box;
+  padding: 15px 17px;
+  border: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.2);
+  border-radius: 16px;
+  background: var(--fintec-blanco);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 0.96rem;
+  line-height: 1.5;
+  box-shadow: inset 0 1px 0 rgba(var(--fintec-blanco-rgb), 0.72);
   resize: vertical;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.admin-teams-panel .teams-owner-field textarea::placeholder {
+  color: var(--text-soft);
+}
+
+.admin-teams-panel .teams-owner-field textarea:hover {
+  border-color: rgba(var(--fintec-rojo-rgb), 0.36);
+}
+
+.admin-teams-panel .teams-owner-field textarea:focus-visible {
+  outline: none;
+  border-color: var(--fintec-rojo);
+  box-shadow: 0 0 0 3px rgba(var(--fintec-rojo-rgb), 0.12);
+}
+
+.admin-teams-panel .teams-owner-field small {
+  display: block;
+  margin-top: 9px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.admin-teams-panel .teams-owner-field small strong {
+  color: var(--fintec-rojo);
 }
 
 .teams-roster-preview {
@@ -4791,6 +5268,55 @@ textarea {
   max-height: 280px;
   margin-top: 12px;
   overflow: auto;
+}
+
+.teams-roster-table {
+  width: 100%;
+  min-width: 820px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.teams-roster-table th,
+.teams-roster-table td {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(var(--fintec-gris-oscuro-rgb), 0.1);
+}
+
+.teams-roster-table th:nth-child(1) { width: 30%; }
+.teams-roster-table th:nth-child(2) { width: 16%; }
+.teams-roster-table th:nth-child(3) { width: 30%; }
+.teams-roster-table th:nth-child(4) { width: 24%; }
+
+.team-institutional-email {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+  font-weight: 650;
+}
+
+.team-account-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.team-account-status.is-ready {
+  color: #17633a;
+  background: #dff4e7;
+}
+
+.team-account-status.is-missing {
+  color: #8f1d18;
+  background: #f8e3e1;
 }
 
 @media (max-width: 1100px) {
@@ -4825,6 +5351,14 @@ textarea {
 
   .admin-teams-panel .compact-meta {
     grid-template-columns: 1fr;
+  }
+
+  .admin-teams-panel .teams-control-search {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-teams-panel .teams-control-action {
+    min-width: 0;
   }
 
   .student-migration-wide {
