@@ -3,17 +3,22 @@ import { readResponsePayload } from '../shared.js'
 import { adminFetch } from './api.js'
 
 const numberFormatter = new Intl.NumberFormat('es-EC')
+const WEEKDAYS = [
+  { id: 1, label: 'Lunes' },
+  { id: 2, label: 'Martes' },
+  { id: 3, label: 'Miércoles' },
+  { id: 4, label: 'Jueves' },
+  { id: 5, label: 'Viernes' },
+]
 
 export default function StudentSchedulePanel() {
   const [dashboard, setDashboard] = useState(null)
-  const [selectedCourseId, setSelectedCourseId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const courses = useMemo(() => dashboard?.courses || [], [dashboard?.courses])
-  const selectedCourse = useMemo(
-    () => courses.find((course) => String(course.corte_id) === String(selectedCourseId)) || null,
-    [courses, selectedCourseId],
-  )
+  const weeklySchedule = useMemo(() => buildWeeklySchedule(courses), [courses])
+  const scheduleRows = useMemo(() => buildScheduleRows(weeklySchedule), [weeklySchedule])
+  const schedulePeriod = useMemo(() => buildSchedulePeriod(courses), [courses])
 
   useEffect(() => {
     let isMounted = true
@@ -33,9 +38,7 @@ export default function StudentSchedulePanel() {
           return
         }
 
-        const loadedCourses = payload.dashboard.courses || []
         setDashboard(payload.dashboard)
-        setSelectedCourseId(loadedCourses[0]?.corte_id || '')
       } catch (loadError) {
         if (isMounted) {
           setError(loadError.message)
@@ -108,105 +111,72 @@ export default function StudentSchedulePanel() {
 
       <article className="module-card teacher-panel-card">
         {courses.length ? (
-          <>
-            <label className="field">
-              <span>Materia</span>
-              <select value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)}>
-                {courses.map((course) => (
-                  <option key={course.corte_id} value={course.corte_id}>
-                    {course.materia} - {course.nombre_corte || course.codigo_periodo || 'Sin período'}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {selectedCourse ? (
-              <div className="schedule-list-panel">
-                <div className="module-card-header">
-                  <div>
-                    <h4>{selectedCourse.materia}</h4>
-                    <p>
-                      {selectedCourse.nombre_corte || selectedCourse.codigo_periodo || 'Sin período'} · Docente:{' '}
-                      {selectedCourse.docente || 'Sin docente asignado'}
-                    </p>
-                  </div>
+          <div className="student-weekly-schedule">
+            <div className="module-card-header student-weekly-schedule-header">
+              <div>
+                <h4>Horario semanal</h4>
+                <p>Materias organizadas de lunes a viernes, sin horarios duplicados.</p>
+              </div>
+              <div className="student-schedule-period" aria-label="Vigencia general del horario">
+                <div>
+                  <span>Fecha de inicio</span>
+                  <strong>{formatDate(schedulePeriod.start)}</strong>
                 </div>
-
-                <div className="schedule-summary-grid" aria-label="Datos de la materia">
-                  <div>
-                    <span>Estado matrícula</span>
-                    <strong>{selectedCourse.estado_matricula || '-'}</strong>
-                  </div>
-                  <div>
-                    <span>Inicio</span>
-                    <strong>{selectedCourse.fecha_inicio || '-'}</strong>
-                  </div>
-                  <div>
-                    <span>Fin</span>
-                    <strong>{selectedCourse.fecha_fin || '-'}</strong>
-                  </div>
-                  <div>
-                    <span>Horarios</span>
-                    <strong>{formatNumber(selectedCourse.schedules?.length)}</strong>
-                  </div>
-                </div>
-
-                <div className="admin-table-wrap">
-                  <table className="admin-table schedule-table">
-                    <thead>
-                      <tr>
-                        <th>Día</th>
-                        <th>Hora</th>
-                        <th>Modalidad</th>
-                        <th>Aula</th>
-                        <th>Sesiones</th>
-                        <th>Enlace</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedCourse.schedules?.length ? (
-                        selectedCourse.schedules.map((schedule) => (
-                          <tr key={schedule.horario_id}>
-                            <td>{schedule.dia_semana_label || '-'}</td>
-                            <td>
-                              <strong>{schedule.hora_inicio || '-'}</strong>
-                              <span>{schedule.hora_fin || '-'}</span>
-                            </td>
-                            <td>{schedule.modalidad || '-'}</td>
-                            <td>{schedule.aula || '-'}</td>
-                            <td>
-                              <strong>{formatNumber(schedule.total_sesiones)}</strong>
-                              <span>
-                                {schedule.primera_sesion || '-'} / {schedule.ultima_sesion || '-'}
-                              </span>
-                            </td>
-                            <td>
-                              {schedule.enlace_virtual ? (
-                                <a
-                                  className="ghost-button compact-button table-action-button"
-                                  href={schedule.enlace_virtual}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  Abrir
-                                </a>
-                              ) : (
-                                '-'
-                              )}
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan="6">El docente aún no ha cargado horario para esta materia.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                <div>
+                  <span>Fecha final</span>
+                  <strong>{formatDate(schedulePeriod.end)}</strong>
                 </div>
               </div>
-            ) : null}
-          </>
+            </div>
+
+            <div className="student-weekly-table-wrap">
+              <table className="student-weekly-table">
+                <colgroup>
+                  <col className="student-weekly-time-column" />
+                  {WEEKDAYS.map((day) => <col key={day.id} />)}
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Horario</th>
+                    {WEEKDAYS.map((day) => <th key={day.id}>{day.label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {scheduleRows.length ? scheduleRows.map((row) => (
+                    <tr key={row.key}>
+                      <th className="student-weekly-time" scope="row">
+                        <strong>{row.hora_inicio || '-'}</strong>
+                        <span>a {row.hora_fin || '-'}</span>
+                      </th>
+                      {WEEKDAYS.map((day) => (
+                        <td key={day.id}>
+                          <div className="student-weekly-day">
+                            {row.days[day.id].length ? row.days[day.id].map((item) => (
+                              <article key={item.key} className="student-schedule-subject">
+                                <strong>{item.materia}</strong>
+                                <span>{item.nombre_corte || 'Sin cohorte'}</span>
+                                <span>Docente: {item.docente || 'Sin asignar'}</span>
+                                <span>{[item.modalidad, item.aula].filter(Boolean).join(' · ') || 'Modalidad pendiente'}</span>
+                                {item.enlace_virtual ? (
+                                  <a href={item.enlace_virtual} target="_blank" rel="noreferrer">Abrir clase</a>
+                                ) : null}
+                              </article>
+                            )) : <span className="student-weekly-empty">—</span>}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td className="student-weekly-empty-row" colSpan={WEEKDAYS.length + 1}>
+                        No existen horarios de lunes a viernes registrados.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
           <p className="teacher-panel-empty">No tienes materias matriculadas con horario disponible.</p>
         )}
@@ -217,4 +187,89 @@ export default function StudentSchedulePanel() {
 
 function formatNumber(value) {
   return numberFormatter.format(Number(value || 0))
+}
+
+function buildWeeklySchedule(courses) {
+  const schedule = Object.fromEntries(WEEKDAYS.map((day) => [day.id, []]))
+  const seen = new Set()
+
+  courses.forEach((course) => {
+    ;(course.schedules || []).forEach((item) => {
+      const day = Number(item.dia_semana)
+      if (!schedule[day]) return
+
+      const key = [
+        course.corte_id,
+        course.materia,
+        day,
+        item.hora_inicio,
+        item.hora_fin,
+        item.modalidad,
+        item.aula,
+      ].map((value) => String(value || '').trim().toLowerCase()).join('|')
+      if (seen.has(key)) return
+      seen.add(key)
+
+      schedule[day].push({
+        key,
+        materia: course.materia,
+        nombre_corte: course.nombre_corte || course.codigo_periodo,
+        docente: course.docente,
+        hora_inicio: item.hora_inicio,
+        hora_fin: item.hora_fin,
+        modalidad: item.modalidad,
+        aula: item.aula,
+        enlace_virtual: item.enlace_virtual,
+      })
+    })
+  })
+
+  Object.values(schedule).forEach((items) => {
+    items.sort((left, right) => (
+      String(left.hora_inicio || '').localeCompare(String(right.hora_inicio || ''))
+      || String(left.materia || '').localeCompare(String(right.materia || ''))
+    ))
+  })
+  return schedule
+}
+
+function buildSchedulePeriod(courses) {
+  const starts = courses.flatMap((course) => {
+    const sessionStarts = (course.schedules || []).map((item) => item.primera_sesion).filter(Boolean)
+    return sessionStarts.length ? sessionStarts : [course.fecha_inicio].filter(Boolean)
+  }).sort()
+  const ends = courses.flatMap((course) => {
+    const sessionEnds = (course.schedules || []).map((item) => item.ultima_sesion).filter(Boolean)
+    return sessionEnds.length ? sessionEnds : [course.fecha_fin].filter(Boolean)
+  }).sort()
+  return { start: starts[0] || '', end: ends.at(-1) || '' }
+}
+
+function buildScheduleRows(weeklySchedule) {
+  const rows = new Map()
+  WEEKDAYS.forEach((day) => {
+    ;(weeklySchedule[day.id] || []).forEach((item) => {
+      const key = `${item.hora_inicio || ''}|${item.hora_fin || ''}`
+      if (!rows.has(key)) {
+        rows.set(key, {
+          key,
+          hora_inicio: item.hora_inicio,
+          hora_fin: item.hora_fin,
+          days: Object.fromEntries(WEEKDAYS.map((weekday) => [weekday.id, []])),
+        })
+      }
+      rows.get(key).days[day.id].push(item)
+    })
+  })
+  return Array.from(rows.values()).sort((left, right) => (
+    String(left.hora_inicio || '').localeCompare(String(right.hora_inicio || ''))
+    || String(left.hora_fin || '').localeCompare(String(right.hora_fin || ''))
+  ))
+}
+
+function formatDate(value) {
+  if (!value) return 'fecha pendiente'
+  const normalized = String(value).slice(0, 10)
+  const [year, month, day] = normalized.split('-')
+  return year && month && day ? `${day}/${month}/${year}` : value
 }
