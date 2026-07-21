@@ -6,8 +6,8 @@ function exportRow(person) {
     nombre: person?.nombre || person?.nombres || '',
     correo_personal: person?.correo_personal || '',
     correo_intec: person?.correo_intec || person?.login || '',
-    telefono: person?.telefono || '',
-    movil: person?.movil || '',
+    telefono: person?.telefono || person?.Telefono || person?.telefono_celular || person?.numero_telefono || '',
+    movil: person?.movil || person?.Movil || person?.celular || person?.numero_celular || '',
   }
 }
 

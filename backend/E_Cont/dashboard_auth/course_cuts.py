@@ -801,13 +801,17 @@ def list_enrolled_students(corte_id: Any, *, search: str = '', limit: Any = 300)
             'continuing_education': complement_status,
         }
 
+    enrollment_rows = _fetch_complement_enrollment_rows(
+        normalized_corte_id,
+        search=search,
+        limit=limit,
+    )
+    primary_contacts = _fetch_primary_student_contact_index(
+        row.get('CodigoEstud') for row in enrollment_rows
+    )
     students = [
-        _normalize_enrolled_student(row)
-        for row in _fetch_complement_enrollment_rows(
-            normalized_corte_id,
-            search=search,
-            limit=limit,
-        )
+        _normalize_enrolled_student(_with_primary_student_contact(row, primary_contacts))
+        for row in enrollment_rows
     ]
     return {
         'cut': cut,
@@ -4194,6 +4198,46 @@ def _fetch_complement_enrollment_rows(corte_id: int, *, search: Any = '', limit:
         """,
         params,
     )
+
+
+def _fetch_primary_student_contact_index(codes: Any) -> dict[str, dict[str, Any]]:
+    normalized_codes = sorted({
+        _clean_text(code)
+        for code in codes
+        if _clean_text(code)
+    })
+    if not normalized_codes:
+        return {}
+
+    placeholders = ', '.join(['%s'] * len(normalized_codes))
+    rows = _fetch_all(
+        f"""
+        SELECT
+            LTRIM(RTRIM(CAST(DE.[codigo_estud] AS varchar(50)))) AS [CodigoEstud],
+            LTRIM(RTRIM(ISNULL(DE.[telefono], ''))) AS [Telefono],
+            LTRIM(RTRIM(ISNULL(DE.[movil], ''))) AS [Movil]
+        FROM dbo.[DATOS_ESTUD] DE
+        WHERE LTRIM(RTRIM(CAST(DE.[codigo_estud] AS varchar(50)))) IN ({placeholders})
+        """,
+        normalized_codes,
+    )
+    return {
+        _clean_text(row.get('CodigoEstud')): row
+        for row in rows
+        if _clean_text(row.get('CodigoEstud'))
+    }
+
+
+def _with_primary_student_contact(
+    row: dict[str, Any],
+    contact_index: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    contact = contact_index.get(_clean_text(row.get('CodigoEstud'))) or {}
+    return {
+        **row,
+        'Telefono': _clean_text(row.get('Telefono')) or _clean_text(contact.get('Telefono')),
+        'Movil': _clean_text(row.get('Movil')) or _clean_text(contact.get('Movil')),
+    }
 
 
 def _normalize_enrolled_student(row: dict[str, Any]) -> dict[str, Any]:

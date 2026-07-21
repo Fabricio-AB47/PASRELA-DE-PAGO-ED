@@ -27,6 +27,8 @@ class PeopleListExportTests(SimpleTestCase):
         self.assertEqual(filename, 'listado-estudiantes.xls')
         self.assertIn('MARÍA PÉREZ', text)
         self.assertIn('maria.perez@intec.edu.ec', text)
+        self.assertIn('072000000', text)
+        self.assertIn('0990000000', text)
 
     def test_builds_pdf(self):
         content, content_type, filename = build_people_list_export({**self.payload, 'format': 'pdf'})

@@ -10,11 +10,34 @@ from dashboard_auth.course_cuts import (
     _resolve_schedule_module,
     _schedule_database_modality,
     _sync_student_to_complement,
+    _with_primary_student_contact,
     update_course_cut,
 )
 
 
 class CourseModuleTests(TestCase):
+    def test_primary_contact_completes_missing_complement_phones(self):
+        row = {'CodigoEstud': '1954', 'Telefono': '', 'Movil': ''}
+        contacts = {
+            '1954': {'Telefono': '072000000', 'Movil': '0990000000'},
+        }
+
+        merged = _with_primary_student_contact(row, contacts)
+
+        self.assertEqual(merged['Telefono'], '072000000')
+        self.assertEqual(merged['Movil'], '0990000000')
+
+    def test_complement_contact_is_not_overwritten_when_present(self):
+        row = {'CodigoEstud': '1954', 'Telefono': '022222222', 'Movil': '0988888888'}
+        contacts = {
+            '1954': {'Telefono': '072000000', 'Movil': '0990000000'},
+        }
+
+        merged = _with_primary_student_contact(row, contacts)
+
+        self.assertEqual(merged['Telefono'], '022222222')
+        self.assertEqual(merged['Movil'], '0988888888')
+
     def test_additional_owners_accept_only_institutional_accounts(self):
         self.assertEqual(
             _normalize_additional_owner_emails(['Coordinador@intec.edu.ec']),
