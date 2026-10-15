@@ -7,6 +7,13 @@ export const DASHBOARD_ROUTES = [
     description: 'Selecciona una opción para administrar procesos institucionales.',
   },
   {
+    id: 'course-mail',
+    hash: '#course-mail',
+    label: 'Correos de cursos',
+    title: 'Correos de cursos',
+    description: 'Envía avisos independientes de aprobación, reprobación y valores pendientes.',
+  },
+  {
     id: 'academic',
     hash: '#academic',
     aliases: ['#admin-academic'],
@@ -172,7 +179,7 @@ export const DASHBOARD_ROUTES = [
 const TEACHER_ADMIN_ROUTE_IDS = new Set(['teacher-entry', 'teacher-enrollment'])
 const TEACHER_PANEL_ROUTE_IDS = new Set(['teacher-attendance', 'teacher-grades', 'teacher-schedule'])
 const STUDENT_PANEL_ROUTE_IDS = new Set(['student-schedule', 'student-grades'])
-const FINANCIAL_ROUTE_IDS = new Set(['home', 'enrolled-students', 'payments', 'payment-operations'])
+const FINANCIAL_ROUTE_IDS = new Set(['home', 'enrolled-students', 'payments', 'payment-operations', 'course-mail'])
 const STUDENT_UPDATE_ROLE_NAMES = new Set([
   'ADMINISTRADOR',
   'ACADEMICO',
@@ -194,6 +201,8 @@ export function visibleRoutesForUser(user) {
       (route) => !TEACHER_PANEL_ROUTE_IDS.has(route.id) && !STUDENT_PANEL_ROUTE_IDS.has(route.id),
     ).filter(
       (route) => route.id !== 'student-updates' || STUDENT_UPDATE_ROLE_NAMES.has(normalizedRoleName(user)),
+    ).filter(
+      (route) => route.id !== 'course-mail' || STUDENT_UPDATE_ROLE_NAMES.has(normalizedRoleName(user)),
     )
   }
   if (user?.category === 'teacher') {
@@ -222,5 +231,5 @@ export function routeFromHash(hash) {
 }
 
 export function routeById(routeId) {
-  return DASHBOARD_ROUTES.find((item) => item.id === routeId) || DASHBOARD_ROUTES[0]
+  return DASHBOARD_ROUTES.find((item) => item.id === routeId) || DASHBOARD_ROUTES.find((item) => item.id === 'home')
 }

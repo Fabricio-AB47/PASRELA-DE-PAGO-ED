@@ -1,4 +1,5 @@
 from django.urls import path
+from . import course_mail_views
 
 from .views import (
     admin_academic_catalogs_view,
@@ -81,6 +82,9 @@ from .views import (
 
 
 urlpatterns = [
+    path('admin/course-mail/students/', course_mail_views.students_view),
+    path('admin/course-mail/preview/', course_mail_views.preview_view),
+    path('admin/course-mail/send/', course_mail_views.send_view),
     path('health/', health_view, name='auth-health'),
     path('login/', login_view, name='auth-login'),
     path('notifications/', notifications_view, name='dashboard-notifications'),

@@ -15,6 +15,9 @@ SESSION_TOKEN_SALT = 'dashboard-auth-session'
 DEFAULT_SESSION_MAX_AGE_SECONDS = 2 * 60 * 60
 MAX_ADMIN_JSON_BODY_BYTES = int(os.getenv('MAX_ADMIN_JSON_BODY_BYTES') or str(8 * 1024 * 1024))
 FINANCIAL_ALLOWED_ADMIN_REQUESTS = {
+    ('GET', '/admin/course-mail/students/'),
+    ('POST', '/admin/course-mail/preview/'),
+    ('POST', '/admin/course-mail/send/'),
     ('GET', '/admin/course-cuts/'),
     ('GET', '/admin/enrolled-students/'),
     ('POST', '/admin/list-export/'),
@@ -30,6 +33,9 @@ FINANCIAL_ALLOWED_ADMIN_REQUESTS = {
     ('POST', '/admin/payment-cancel/'),
 }
 ACADEMIC_ALLOWED_ADMIN_REQUESTS = {
+    ('GET', '/admin/course-mail/students/'),
+    ('POST', '/admin/course-mail/preview/'),
+    ('POST', '/admin/course-mail/send/'),
     ('GET', '/admin/academic-catalogs/'),
     ('GET', '/admin/academic-enrollment/students/'),
     ('POST', '/admin/academic-enrollment/selected/'),
