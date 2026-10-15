@@ -2,20 +2,24 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.conf import settings
 from django.db import connection
 
 from .academic_rules import is_passing_grade
-from .course_cuts import list_enrolled_students
+from .course_cuts import _format_date_label, list_enrolled_students
+from .continuing_education import complement_database_name, connection_for_query
 from .inscription_certificate import (
     CERTIFICATE_STORAGE_DIR_NAME,
     build_inscription_certificate,
     create_stored_certificate_record,
     load_or_create_stored_certificate,
     load_signed_certificate_payload,
+    send_certificate_email,
 )
 
 
@@ -27,7 +31,11 @@ def list_admin_certificate_students(corte_id: Any, *, search: str = '', limit: A
     _ensure_certificate_link_table()
     result = list_enrolled_students(corte_id, search=search, limit=limit)
     links = _fetch_certificate_links(result['cut']['corte_id'])
-    students = [_attach_certificate_info(student, links) for student in result['students']]
+    payment_accounts = _certificate_payment_accounts(result['cut']['corte_id'])
+    students = [
+        _attach_certificate_info(student, links, payment_accounts)
+        for student in result['students']
+    ]
     metrics = {
         **result.get('metrics', {}),
         'certificados_generados': len([student for student in students if student.get('certificado')]),
@@ -59,9 +67,11 @@ def generate_admin_certificates(payload: dict[str, Any], *, user_login: str = ''
         raise AdminCertificateError('Selecciona al menos un estudiante para generar el certificado.')
 
     result = list_enrolled_students(corte_id, search='', limit=1000)
-    cut = result['cut']
+    cut = _enrich_certificate_course_details(result['cut'])
+    links = _fetch_certificate_links(corte_id)
+    payment_accounts = _certificate_payment_accounts(corte_id)
     students = [
-        student
+        _attach_certificate_info(student, links, payment_accounts)
         for student in result['students']
         if include_all or student.get('corte_estudiante_id') in selected_ids
     ]
@@ -69,20 +79,49 @@ def generate_admin_certificates(payload: dict[str, Any], *, user_login: str = ''
         raise AdminCertificateError('No se encontraron estudiantes válidos para generar certificados.')
 
     generated = 0
+    emails_sent = 0
+    email_errors = 0
     errors = 0
     results: list[dict[str, Any]] = []
     for student in students:
         try:
             certificate = _generate_student_certificate(cut, student, user_login=user_login)
             generated += 1
+            personal_email = _clean_text(student.get('correo_personal')).lower()
+            if personal_email:
+                try:
+                    email_result = send_certificate_email(
+                        recipient_email=personal_email,
+                        recipient_name=_clean_text(student.get('nombre')) or personal_email,
+                        certificate_record=certificate,
+                    )
+                    if email_result.get('sent'):
+                        emails_sent += 1
+                    else:
+                        email_errors += 1
+                except Exception as email_exc:
+                    email_errors += 1
+                    email_result = {'sent': False, 'message': str(email_exc)}
+            else:
+                email_errors += 1
+                email_result = {
+                    'sent': False,
+                    'message': 'El estudiante no tiene correo personal registrado.',
+                }
             results.append(
                 {
                     'ok': True,
                     'corte_estudiante_id': student.get('corte_estudiante_id'),
                     'codigo_estud': student.get('codigo_estud'),
                     'nombre': student.get('nombre'),
-                    'message': 'Certificado generado y adjuntado a la corte.',
+                    'message': (
+                        'Certificado generado y enviado al correo personal.'
+                        if email_result.get('sent')
+                        else 'Certificado generado; no fue posible enviarlo al correo personal.'
+                    ),
                     'certificate': certificate,
+                    'email': personal_email,
+                    'email_result': email_result,
                 }
             )
         except Exception as exc:
@@ -103,11 +142,52 @@ def generate_admin_certificates(payload: dict[str, Any], *, user_login: str = ''
         'summary': {
             'procesados': len(students),
             'generados': generated,
+            'respaldados': generated,
             'errores': errors,
+            'correos_enviados': emails_sent,
+            'errores_correo': email_errors,
         },
         'results': results,
         'updated': updated,
     }
+
+
+def download_admin_certificates_batch(
+    corte_id: Any,
+    corte_estudiante_ids: Any,
+) -> tuple[bytes, str, str]:
+    safe_corte_id = _safe_int(corte_id, default=0)
+    selected_ids = _selected_student_ids({'corte_estudiante_ids': corte_estudiante_ids})
+    if safe_corte_id <= 0 or not selected_ids:
+        raise AdminCertificateError('Debes seleccionar una corte y al menos un certificado generado.')
+
+    downloaded: list[tuple[bytes, str, str]] = []
+    for student_id in sorted(selected_ids, key=lambda value: _safe_int(value, default=0)):
+        try:
+            content, filename = download_admin_certificate(safe_corte_id, student_id)
+        except AdminCertificateError:
+            continue
+        downloaded.append((content, filename, student_id))
+
+    if not downloaded:
+        raise AdminCertificateError('No se encontraron certificados generados para descargar.')
+    if len(downloaded) == 1:
+        content, filename, _student_id = downloaded[0]
+        return content, filename, 'application/pdf'
+
+    output = BytesIO()
+    used_names: set[str] = set()
+    with ZipFile(output, mode='w', compression=ZIP_DEFLATED) as archive:
+        for content, filename, student_id in downloaded:
+            safe_name = Path(filename).name or f'certificado_{student_id}.pdf'
+            if safe_name in used_names:
+                stem = Path(safe_name).stem
+                suffix = Path(safe_name).suffix or '.pdf'
+                safe_name = f'{stem}_{student_id}{suffix}'
+            used_names.add(safe_name)
+            archive.writestr(safe_name, content)
+
+    return output.getvalue(), f'certificados_corte_{safe_corte_id}.zip', 'application/zip'
 
 
 def download_admin_certificate(corte_id: Any, corte_estudiante_id: Any) -> tuple[bytes, str]:
@@ -147,7 +227,7 @@ def download_admin_certificate(corte_id: Any, corte_estudiante_id: Any) -> tuple
 def _generate_student_certificate(cut: dict[str, Any], student: dict[str, Any], *, user_login: str) -> dict[str, Any]:
     if not _is_passing_grade(student.get('nota_final')):
         raise AdminCertificateError('El estudiante no tiene nota aprobatoria para generar certificado.')
-    if not _student_payment_is_complete(student):
+    if not bool(student.get('pago_completo')):
         raise AdminCertificateError('El estudiante debe completar el pago total antes de generar el certificado.')
 
     payload = _certificate_payload_from_student(cut, student, user_login=user_login)
@@ -204,7 +284,7 @@ def _rebuild_admin_certificate_file(
         return None
 
     payload = _certificate_payload_from_student(
-        result.get('cut') or {},
+        _enrich_certificate_course_details(result.get('cut') or {}),
         student,
         user_login=_clean_text(link.get('UsuarioRegistro')) or 'SISTEMA',
     )
@@ -265,6 +345,8 @@ def _certificate_payload_from_student(
         'numero_matricula': student.get('num_matricula'),
         'fecha_inscripcion': _first_non_empty(student.get('fecha_calificacion'), _today_label()),
         'fecha_inicio': _first_non_empty(cut.get('fecha_inicio'), student.get('fecha_inicio'), _today_label()),
+        'fecha_fin': _first_non_empty(cut.get('fecha_fin_curso'), cut.get('fecha_fin')),
+        'horas_curso': _first_non_empty(cut.get('horas_curso'), cut.get('horas')),
         'nombre': student.get('nombre'),
         'cedula': student.get('cedula'),
         'email': email,
@@ -284,6 +366,36 @@ def _certificate_payload_from_student(
     }
 
 
+def _enrich_certificate_course_details(cut: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(cut)
+    corte_id = _safe_int(cut.get('corte_id'), default=0)
+    if corte_id <= 0:
+        return enriched
+    db_name = complement_database_name()
+    try:
+        rows = _fetch_complement_all(
+            f"""
+            SELECT
+                MIN(FechaInicio) AS FechaInicioCurso,
+                MAX(COALESCE(FechaFinalizacion, FechaFin)) AS FechaFinCurso
+            FROM [{db_name}].[edu].[ModuloCorte]
+            WHERE CorteId = %s AND EstadoModulo = 'ACTIVO'
+            """,
+            [corte_id],
+        )
+    except Exception:
+        rows = []
+    timeline = rows[0] if rows else {}
+    start_date = _format_date_label(timeline.get('FechaInicioCurso'))
+    end_date = _format_date_label(timeline.get('FechaFinCurso'))
+    if start_date:
+        enriched['fecha_inicio'] = start_date
+    if end_date:
+        enriched['fecha_fin_curso'] = end_date
+    enriched['horas_curso'] = _first_non_empty(cut.get('horas_curso'), cut.get('horas'))
+    return enriched
+
+
 def _certificate_course_name(cut: dict[str, Any], student: dict[str, Any]) -> str:
     candidates = [
         student.get('nombre_curso'),
@@ -294,7 +406,7 @@ def _certificate_course_name(cut: dict[str, Any], student: dict[str, Any]) -> st
     ]
     cleaned = [_clean_text(candidate) for candidate in candidates if _clean_text(candidate)]
     if not cleaned:
-        return 'Curso de educación continua'
+        return 'Curso de Educación Continua'
     return max(cleaned, key=len)
 
 
@@ -308,14 +420,83 @@ def _strip_cut_prefix(value: Any) -> str:
     return text
 
 
-def _attach_certificate_info(student: dict[str, Any], links: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _attach_certificate_info(
+    student: dict[str, Any],
+    links: dict[str, dict[str, Any]],
+    payment_accounts: dict[tuple[str, str], dict[str, Any]],
+) -> dict[str, Any]:
     attached = dict(student)
     link = links.get(_clean_text(student.get('corte_estudiante_id')))
-    available = _is_passing_grade(student.get('nota_final'))
+    account = payment_accounts.get(
+        (_clean_text(student.get('codigo_estud')), _clean_text(student.get('corte_id'))),
+        {},
+    )
+    passed = _is_passing_grade(student.get('nota_final'))
+    payment_complete = bool(account.get('pago_completo'))
+    available = passed and payment_complete
+    attached.update(account)
+    attached.setdefault('total_curso', '0.00')
+    attached.setdefault('total_pagado', '0.00')
+    attached.setdefault('total_descuentos', '0.00')
+    attached.setdefault('saldo_pendiente', '0.00')
+    attached['pago_completo'] = payment_complete
+    attached['estado_financiero'] = 'PAGADO' if payment_complete else 'PENDIENTE'
     attached['certificado_disponible'] = available
     attached['certificado'] = _normalize_certificate_link(link) if link else None
-    attached['certificado_estado'] = 'Generado' if link else 'Disponible' if available else 'Pendiente'
+    if not passed:
+        unavailable_reason = 'Pendiente de aprobación'
+    elif not payment_complete:
+        unavailable_reason = 'Saldo pendiente'
+    else:
+        unavailable_reason = ''
+    attached['motivo_no_disponible'] = unavailable_reason
+    attached['certificado_estado'] = (
+        'Generado' if link and available
+        else 'Bloqueado: saldo pendiente' if link and not payment_complete
+        else 'Disponible' if available
+        else unavailable_reason or 'Pendiente'
+    )
     return attached
+
+
+def _certificate_payment_accounts(corte_id: Any) -> dict[tuple[str, str], dict[str, Any]]:
+    db_name = complement_database_name()
+    query = f"""
+        SELECT
+            CONVERT(varchar(50), E.CodigoEstud) AS CodigoEstud,
+            CONVERT(varchar(50), E.CorteId) AS CorteId,
+            MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(E.Observacion, '')))) LIKE N'matrícula masiva%%' THEN 1 ELSE 0 END) AS EsMatriculaExcel,
+            ISNULL(SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'DEBE' THEN M.Valor ELSE 0 END), 0) AS TotalCurso,
+            ISNULL(SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO' THEN M.Valor ELSE 0 END), 0) AS TotalPagado,
+            ISNULL(SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO' THEN M.Valor ELSE 0 END), 0) AS TotalDescuentos,
+            ISNULL(SUM(CASE WHEN M.EstadoMovimiento = 'ACTIVO' AND M.TipoMovimiento = 'HABER' AND UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO' AND UPPER(LTRIM(RTRIM(ISNULL(M.Concepto, '')))) LIKE 'AJUSTE VALOR NETO CURSO - EXCEL%%' THEN M.Valor ELSE 0 END), 0) AS AjusteExcel
+        FROM [{db_name}].[edu].[VW_MatriculaEstudianteCompleta] E
+        LEFT JOIN [{db_name}].[fin].[CuentaEstudiante] C ON C.EstudianteCorteId = E.EstudianteCorteId
+        LEFT JOIN [{db_name}].[fin].[MovimientoCuenta] M ON M.CuentaId = C.CuentaId
+        WHERE E.CorteId = %s
+        GROUP BY E.CodigoEstud, E.CorteId
+        """
+    rows = _fetch_complement_all(query, [_safe_int(corte_id, default=0)])
+    accounts: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        total = _to_decimal(row.get('TotalCurso'))
+        paid = _to_decimal(row.get('TotalPagado'))
+        discounts = _to_decimal(row.get('TotalDescuentos'))
+        if _safe_int(row.get('EsMatriculaExcel'), default=0) == 1:
+            total = Decimal('400.00')
+            discounts = max(Decimal('0.00'), discounts - _to_decimal(row.get('AjusteExcel')))
+        if total <= 0 and paid > 0:
+            total = paid
+        pending = max(Decimal('0.00'), total - paid - discounts)
+        payment_complete = total > 0 and pending <= 0
+        accounts[(_clean_text(row.get('CodigoEstud')), _clean_text(row.get('CorteId')))] = {
+            'total_curso': f'{total:.2f}',
+            'total_pagado': f'{paid:.2f}',
+            'total_descuentos': f'{discounts:.2f}',
+            'saldo_pendiente': f'{pending:.2f}',
+            'pago_completo': payment_complete,
+        }
+    return accounts
 
 
 def _normalize_certificate_link(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -478,6 +659,16 @@ def _fetch_all(query: str, params: list[Any] | None = None) -> list[dict[str, An
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+def _fetch_complement_all(query: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
+    safe_params = params or []
+    with connection_for_query(query, safe_params).cursor() as cursor:
+        cursor.execute(query, safe_params)
+        if cursor.description is None:
+            return []
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
 def _is_passing_grade(value: Any) -> bool:
     return is_passing_grade(value)
 
@@ -490,6 +681,13 @@ def _number_label(value: Any, *, suffix: str = '') -> str:
     except (InvalidOperation, TypeError, ValueError):
         return f'{_clean_text(value)}{suffix}'
     return f'{decimal_value}{suffix}'
+
+
+def _to_decimal(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value or '0')).quantize(Decimal('0.01'))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal('0.00')
 
 
 def _date_iso(value: Any) -> str:

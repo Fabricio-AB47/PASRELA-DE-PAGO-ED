@@ -21,6 +21,7 @@ export default function StudentGradesPanel() {
   const [previewingId, setPreviewingId] = useState('')
   const [previewCourse, setPreviewCourse] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
   const courses = useMemo(() => dashboard?.courses || [], [dashboard?.courses])
 
   useEffect(() => {
@@ -57,7 +58,7 @@ export default function StudentGradesPanel() {
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [reloadKey])
 
   useEffect(() => (
     () => {
@@ -163,6 +164,9 @@ export default function StudentGradesPanel() {
         <div>
           <h3>No se pudieron cargar las calificaciones</h3>
           <p>{error}</p>
+          <button type="button" className="ghost-button compact-button" onClick={() => setReloadKey((value) => value + 1)}>
+            Reintentar
+          </button>
         </div>
       </article>
     )
@@ -272,7 +276,7 @@ export default function StudentGradesPanel() {
                             disabled={sendingId === course.estudiante_corte_id}
                             onClick={() => handleDeliverCertificate(course)}
                           >
-                            {sendingId === course.estudiante_corte_id ? 'Procesando...' : 'Descargar y enviar por correo'}
+                            {sendingId === course.estudiante_corte_id ? 'Procesando...' : 'Descargar y enviar al correo personal'}
                           </button>
                         ) : null}
                         <span className={course.aprobado ? '' : 'is-pending'}>

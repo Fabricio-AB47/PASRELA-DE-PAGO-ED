@@ -3,9 +3,12 @@ from unittest.mock import patch
 
 from dashboard_auth.student_dashboard import (
     StudentDashboardError,
+    _build_student_certificate_payload,
     _normalize_grade_course,
     _student_certificate_course,
+    _student_certificate_email,
     preview_student_certificate,
+    send_student_certificate,
 )
 
 
@@ -25,6 +28,61 @@ def _grade_row(*, grade='10.00', charge='400.00', paid='400.00', discount='0.00'
 
 
 class StudentCertificateEligibilityTests(TestCase):
+    def test_certificate_delivery_uses_personal_email_instead_of_intec_email(self):
+        self.assertEqual(
+            _student_certificate_email(
+                {
+                    'correo_personal': 'Personal.Student@Example.com',
+                    'correo_intec': 'institucional@intec.edu.ec',
+                },
+                {
+                    'correo_personal': 'personal.course@example.com',
+                    'correo_intec': 'curso@intec.edu.ec',
+                },
+            ),
+            'personal.course@example.com',
+        )
+
+    def test_certificate_delivery_does_not_fall_back_to_intec_email(self):
+        self.assertEqual(
+            _student_certificate_email(
+                {'correo_intec': 'institucional@intec.edu.ec'},
+                {'correo_intec': 'curso@intec.edu.ec'},
+            ),
+            '',
+        )
+
+    @patch('dashboard_auth.student_dashboard.send_certificate_email')
+    @patch('dashboard_auth.student_dashboard.create_stored_certificate_record')
+    @patch('dashboard_auth.student_dashboard._student_certificate_course')
+    def test_send_certificate_targets_the_registered_personal_email(
+        self, certificate_course, create_record, send_email
+    ):
+        certificate_course.return_value = (
+            {
+                'codigo_estud': '1954',
+                'nombre': 'Estudiante Prueba',
+                'correo_personal': 'personal@example.com',
+                'correo_intec': 'institucional@intec.edu.ec',
+            },
+            {
+                **_normalize_grade_course(_grade_row()),
+                'correo_personal': 'personal@example.com',
+                'correo_intec': 'institucional@intec.edu.ec',
+            },
+        )
+        create_record.return_value = {'content': b'pdf'}
+        send_email.return_value = {'sent': True, 'message': 'Enviado.'}
+
+        result = send_student_certificate({'login': 'estudiante'}, '7')
+
+        self.assertTrue(result['sent'])
+        send_email.assert_called_once_with(
+            recipient_email='personal@example.com',
+            recipient_name='Estudiante Prueba',
+            certificate_record={'content': b'pdf'},
+        )
+
     def test_certificate_is_available_for_an_approved_course(self):
         course = _normalize_grade_course(_grade_row())
 
@@ -98,7 +156,10 @@ class StudentCertificateEligibilityTests(TestCase):
     @patch('dashboard_auth.student_dashboard._fetch_student_grade_row')
     @patch('dashboard_auth.student_dashboard._student_grades_status')
     @patch('dashboard_auth.student_dashboard._resolve_student_from_session')
-    def test_backend_allows_download_when_approved_with_incomplete_payment(self, resolve_student, status, fetch_row):
+    @patch('dashboard_auth.student_dashboard._student_certificate_course_details', return_value={})
+    def test_backend_allows_download_when_approved_with_incomplete_payment(
+        self, _course_details, resolve_student, status, fetch_row
+    ):
         resolve_student.return_value = {'codigo_estud': '1954', 'correo_personal': 'estudiante@example.com'}
         status.return_value = {'available': True, 'message': ''}
         fetch_row.return_value = _grade_row(paid='100.00')
@@ -109,3 +170,19 @@ class StudentCertificateEligibilityTests(TestCase):
         self.assertTrue(course['aprobado'])
         self.assertFalse(course['pago_completo'])
         self.assertTrue(course['certificado_disponible'])
+
+    def test_student_certificate_payload_includes_same_timeline_and_duration_as_template(self):
+        payload = _build_student_certificate_payload(
+            {'codigo_estud': '1954', 'nombre': 'Estudiante Prueba'},
+            {
+                **_normalize_grade_course(_grade_row()),
+                'fecha_inicio': '20 de julio de 2026',
+                'fecha_fin_curso': '10 de septiembre de 2026',
+                'horas_curso': '160',
+            },
+        )
+
+        self.assertEqual(payload['fecha_inicio'], '20 de julio de 2026')
+        self.assertEqual(payload['fecha_fin'], '10 de septiembre de 2026')
+        self.assertEqual(payload['horas_curso'], '160')
+        self.assertEqual(payload['certificate_template_type'], 'EDUCACION_CONTINUA')

@@ -119,6 +119,8 @@ export default function AdminPaymentsPanel() {
   const [isSavingPayment, setIsSavingPayment] = useState(false)
   const [invoiceUploadId, setInvoiceUploadId] = useState('')
   const [invoiceUploadError, setInvoiceUploadError] = useState('')
+  const [voucherUploadId, setVoucherUploadId] = useState('')
+  const [voucherUploadError, setVoucherUploadError] = useState('')
   const [invoiceEntryData, setInvoiceEntryData] = useState(null)
   const [invoiceEntryForm, setInvoiceEntryForm] = useState({ movimiento_id: '', numero_factura: '', file: null })
   const [invoiceEntryError, setInvoiceEntryError] = useState('')
@@ -137,6 +139,16 @@ export default function AdminPaymentsPanel() {
   })
   const [discountCorrectionError, setDiscountCorrectionError] = useState('')
   const [isSavingDiscountCorrection, setIsSavingDiscountCorrection] = useState(false)
+  const [paymentCorrectionPayment, setPaymentCorrectionPayment] = useState(null)
+  const [paymentCorrectionSource, setPaymentCorrectionSource] = useState(null)
+  const [paymentCorrectionForm, setPaymentCorrectionForm] = useState({
+    valor: '', forma_pago: 'TRANSFERENCIA', banco: '', numero_deposito: '',
+    fecha_deposito: '', numero_comprobante: '', motivo_correccion: '', observacion: '',
+  })
+  const [paymentCorrectionError, setPaymentCorrectionError] = useState('')
+  const [paymentCorrectionSuccess, setPaymentCorrectionSuccess] = useState('')
+  const [isSavingPaymentCorrection, setIsSavingPaymentCorrection] = useState(false)
+  const [isPreparingPaymentCorrection, setIsPreparingPaymentCorrection] = useState(false)
   const [paymentEntryForm, setPaymentEntryForm] = useState({
     valor: '',
     forma_pago: 'VOUCHER',
@@ -170,6 +182,8 @@ export default function AdminPaymentsPanel() {
       )
       : 0
   )
+  const failedAllDigitalPayments = (paymentsResult?.payment_links || [])
+    .filter((payment) => payment.has_provider_error)
 
   const loadRegisteredPayments = useCallback(async ({ page = 1, query = '', status = 'all' } = {}) => {
     setIsLoadingPayments(true)
@@ -450,6 +464,114 @@ export default function AdminPaymentsPanel() {
     }
   }
 
+  function preparePaymentCorrection(payment, source = null) {
+    setPaymentCorrectionPayment(payment)
+    setPaymentCorrectionSource(source)
+    setPaymentCorrectionError('')
+    setPaymentCorrectionSuccess('')
+    setPaymentCorrectionForm({
+      valor: String(source?.amount || payment.valor_registrado || ''),
+      forma_pago: payment.forma_pago === 'ALLDIGITAL' ? 'TRANSFERENCIA' : (payment.forma_pago || 'TRANSFERENCIA'),
+      banco: payment.banco || '',
+      numero_deposito: payment.numero_deposito || '',
+      fecha_deposito: payment.fecha_deposito || payment.fecha_pago || new Date().toISOString().slice(0, 10),
+      numero_comprobante: payment.referencia || '',
+      motivo_correccion: '',
+      observacion: '',
+    })
+    setActivePaymentModal('correct-payment')
+  }
+
+  function openPaymentCorrection(payment) {
+    preparePaymentCorrection(payment)
+  }
+
+  async function openAllDigitalPaymentCorrection(transaction) {
+    if (!transaction?.codigo_estud) {
+      setPaymentsError('La transacción no está vinculada a un estudiante y no puede corregirse todavía.')
+      return
+    }
+    setIsPreparingPaymentCorrection(true)
+    setPaymentsError('')
+    setPaymentCorrectionError('')
+    try {
+      const params = new URLSearchParams({ codigo_estud: transaction.codigo_estud })
+      const response = await adminFetch(`/api/auth/admin/payments/?${params.toString()}`)
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok || !payload.result) {
+        throw new Error(payload?.message ?? `No fue posible cargar el movimiento (${response.status}).`)
+      }
+      const transactionId = String(transaction.provider_transaction_id || '').trim()
+      const payments = payload.result.payments || []
+      const payment = payments.find((item) => (
+        Number(item.pago_corregible || 0) === 1
+        && String(item.forma_pago || '').trim().toUpperCase() === 'ALLDIGITAL'
+        && transactionId
+        && [item.numero_deposito, item.referencia].some((value) => String(value || '').trim() === transactionId)
+      )) || payments.find((item) => (
+        Number(item.pago_corregible || 0) === 1
+        && String(item.forma_pago || '').trim().toUpperCase() === 'ALLDIGITAL'
+      ))
+      if (!payment) {
+        throw new Error('No se encontró un movimiento AllDigital activo que pueda corregirse para este estudiante.')
+      }
+      setSelectedPaymentUser(payload.result)
+      setSelectedTransaction(transaction)
+      preparePaymentCorrection(payment, transaction)
+    } catch (error) {
+      setPaymentsError(error.message)
+    } finally {
+      setIsPreparingPaymentCorrection(false)
+    }
+  }
+
+  function handlePaymentCorrectionChange(event) {
+    const { name, value } = event.target
+    setPaymentCorrectionForm((current) => ({ ...current, [name]: value }))
+  }
+
+  async function handlePaymentCorrectionSubmit(event) {
+    event.preventDefault()
+    const correctedValue = Number(paymentCorrectionForm.valor || 0)
+    if (!Number.isFinite(correctedValue) || correctedValue <= 0) {
+      setPaymentCorrectionError('Ingresa un valor corregido mayor que cero.')
+      return
+    }
+    setIsSavingPaymentCorrection(true)
+    setPaymentCorrectionError('')
+    try {
+      const response = await adminFetch('/api/auth/admin/payments/correct/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...paymentCorrectionForm,
+          movimiento_id: paymentCorrectionPayment.num,
+          inscription_payment_id: paymentCorrectionSource?.inscription_payment_id || '',
+          provider_transaction_id: paymentCorrectionSource?.provider_transaction_id || '',
+        }),
+      })
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok) {
+        throw new Error(payload?.message ?? `No fue posible corregir el pago (${response.status}).`)
+      }
+      const student = selectedPaymentUser?.student
+      setPaymentCorrectionSuccess(payload.message || 'Pago corregido y saldo recalculado.')
+      setPaymentCorrectionPayment(null)
+      setPaymentCorrectionSource(null)
+      if (student) await openPaymentDetail(student)
+      else setActivePaymentModal(null)
+      await loadRegisteredPayments({
+        page: paymentsResult?.pagination?.page || 1,
+        query: paymentsQuery,
+        status: paymentStatus,
+      })
+    } catch (error) {
+      setPaymentCorrectionError(error.message)
+    } finally {
+      setIsSavingPaymentCorrection(false)
+    }
+  }
+
   async function uploadPaymentInvoice(payment, file) {
     if (!file || !selectedPaymentUser?.student) return
     const movementId = String(payment?.num || '')
@@ -482,6 +604,44 @@ export default function AdminPaymentsPanel() {
       setInvoiceUploadError(error.message)
     } finally {
       setInvoiceUploadId('')
+    }
+  }
+
+  async function uploadPaymentVoucher(payment, file) {
+    if (!file || !selectedPaymentUser?.student) return
+    const movementId = String(payment?.num || '')
+    setVoucherUploadId(movementId)
+    setVoucherUploadError('')
+    try {
+      const voucherBase64 = await fileAsDataUrl(file)
+      const response = await adminFetch('/api/auth/admin/payments/voucher/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          movimiento_id: movementId,
+          voucher_base64: voucherBase64,
+          voucher_name: file.name,
+          numero_comprobante: payment.referencia || '',
+          numero_deposito: payment.numero_deposito || '',
+          fecha_deposito: payment.fecha_deposito || payment.fecha_pago || '',
+        }),
+      })
+      const payload = await readResponsePayload(response)
+      if (!payload || !response.ok || !payload.ok) {
+        throw new Error(payload?.message ?? `No fue posible guardar el comprobante (${response.status}).`)
+      }
+      await Promise.all([
+        openPaymentDetail(selectedPaymentUser.student),
+        loadRegisteredPayments({
+          page: paymentsResult?.pagination?.page || 1,
+          query: paymentsQuery,
+          status: paymentStatus,
+        }),
+      ])
+    } catch (error) {
+      setVoucherUploadError(error.message)
+    } finally {
+      setVoucherUploadId('')
     }
   }
 
@@ -673,7 +833,7 @@ export default function AdminPaymentsPanel() {
           <label className="field">
             <span>Estado del pago</span>
             <select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}>
-              <option value="all">Generados y pagados</option>
+              <option value="all">Todos los estados</option>
               <option value="with_payments">Pagados</option>
               <option value="without_payments">Generados sin pago</option>
             </select>
@@ -708,6 +868,49 @@ export default function AdminPaymentsPanel() {
         </button>
       </nav>
 
+      {failedAllDigitalPayments.length ? (
+        <article className="module-card course-cut-card all-digital-corrections-card">
+          <div className="module-card-header">
+            <div>
+              <h4>Correcciones de pagos con error en AllDigital</h4>
+              <p>Selecciona una operación para reemplazar el movimiento AllDigital por una transferencia, depósito, efectivo o voucher, conservando la trazabilidad.</p>
+            </div>
+            <span className="cut-status-badge is-unavailable">{failedAllDigitalPayments.length} por corregir</span>
+          </div>
+          <div className="admin-table-wrap">
+            <table className="admin-table course-cut-table payment-users-table">
+              <thead>
+                <tr><th>Estudiante</th><th>Transacción</th><th>Valor</th><th>Estado</th><th>Acción</th></tr>
+              </thead>
+              <tbody>
+                {failedAllDigitalPayments.map((payment) => (
+                  <tr key={`correction-${payment.inscription_payment_id}`}>
+                    <td><strong>{payment.nombre || '-'}</strong><span>{payment.cedula || '-'} · Código {payment.codigo_estud || 'no vinculado'}</span></td>
+                    <td>{payment.provider_transaction_id || '-'}<span>Solicitud #{payment.inscription_payment_id}</span></td>
+                    <td>{formatMoney(payment.amount)}</td>
+                    <td><span className="cut-status-badge is-unavailable">{payment.display_status || 'CON ERROR'}</span></td>
+                    <td>
+                      {isAdministrator && payment.codigo_estud ? (
+                        <button
+                          type="button"
+                          className="submit-button compact-button"
+                          disabled={isPreparingPaymentCorrection}
+                          onClick={() => openAllDigitalPaymentCorrection(payment)}
+                        >
+                          {isPreparingPaymentCorrection ? 'Cargando...' : 'Corregir tipo de pago'}
+                        </button>
+                      ) : (
+                        <span>{payment.codigo_estud ? 'Solo administrador' : 'Estudiante no vinculado'}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      ) : null}
+
       {paymentWorkspace === 'links' ? (
         <div className="payment-workspace payment-link-workspace">
       {paymentsResult?.payment_link_metrics ? (
@@ -723,6 +926,10 @@ export default function AdminPaymentsPanel() {
           <div>
             <span>Generados sin pago</span>
             <strong>{paymentsResult.payment_link_metrics.generated_pending_links}</strong>
+          </div>
+          <div>
+            <span>Con error en AllDigital</span>
+            <strong>{paymentsResult.payment_link_metrics.provider_error_links || 0}</strong>
           </div>
           <div>
             <span>Valor generado</span>
@@ -775,7 +982,12 @@ export default function AdminPaymentsPanel() {
                       <span>{paymentLink.cedula || '-'} · {paymentLink.email || 'Sin correo'}</span>
                     </td>
                     <td>{paymentLink.matricula || '-'}<span>Solicitud #{paymentLink.inscription_payment_id}</span></td>
-                    <td>{formatMoney(paymentLink.amount)}<span>Pagado: {formatMoney(paymentLink.registered_value)}</span></td>
+                    <td>
+                      {formatMoney(paymentLink.amount)}
+                      <span>
+                        {paymentLink.has_provider_error ? 'Registro académico por revisar' : 'Pagado'}: {formatMoney(paymentLink.registered_value)}
+                      </span>
+                    </td>
                     <td>
                       <span className={`cut-status-badge ${paymentLink.is_paid ? 'is-open' : 'is-unavailable'}`}>
                         {paymentLink.display_status}
@@ -803,6 +1015,15 @@ export default function AdminPaymentsPanel() {
                             onClick={() => openTransactionDetails(paymentLink)}
                           >
                             Detalles de transacción
+                          </button>
+                        ) : null}
+                        {isAdministrator && paymentLink.has_provider_error && paymentLink.codigo_estud ? (
+                          <button
+                            type="button"
+                            className="ghost-button compact-button"
+                            onClick={() => openAllDigitalPaymentCorrection(paymentLink)}
+                          >
+                            Corregir tipo de pago
                           </button>
                         ) : null}
                         <button type="button" className="ghost-button compact-button" onClick={() => openStudentProfile(paymentLink)}>
@@ -888,6 +1109,7 @@ export default function AdminPaymentsPanel() {
           </div>
         </div>
         {discountSuccess ? <p className="status-message success payment-discount-success">{discountSuccess}</p> : null}
+        {paymentCorrectionSuccess ? <p className="status-message success payment-discount-success">{paymentCorrectionSuccess}</p> : null}
         <div className="admin-table-wrap">
           <table className="admin-table course-cut-table payment-users-table">
             <thead>
@@ -1030,6 +1252,7 @@ export default function AdminPaymentsPanel() {
             <div className="career-modal-body">
               <dl className="identity-meta">
                 <div><dt>Estado</dt><dd>{selectedTransaction.display_status}</dd></div>
+                <div><dt>Canal detectado</dt><dd>{selectedTransaction.provider_channel || 'API AllDigital'}</dd></div>
                 <div><dt>ID transacción</dt><dd>{selectedTransaction.provider_transaction_id || '-'}</dd></div>
                 <div><dt>Valor generado</dt><dd>{formatMoney(selectedTransaction.amount)}</dd></div>
                 <div><dt>Valor pagado</dt><dd>{formatMoney(selectedTransaction.registered_value)}</dd></div>
@@ -1040,6 +1263,11 @@ export default function AdminPaymentsPanel() {
                 <div><dt>Comprobante</dt><dd>{selectedTransaction.receipt_status || 'PENDIENTE'}</dd></div>
               </dl>
               <div className="module-card"><strong>Concepto</strong><p>{selectedTransaction.description || '-'}</p></div>
+              {selectedTransaction.has_provider_error ? (
+                <div className="status-message error">
+                  AllDigital reportó esta operación con error. No se contabiliza como pago confirmado aunque exista un registro académico relacionado.
+                </div>
+              ) : null}
               <div className="table-actions-stack">
                 {!selectedTransaction.is_paid && selectedTransaction.payment_link ? (
                   <button
@@ -1053,6 +1281,11 @@ export default function AdminPaymentsPanel() {
                   </button>
                 ) : null}
                 {selectedTransaction.receipt_web_url ? <a className="ghost-button compact-button" href={selectedTransaction.receipt_web_url} target="_blank" rel="noreferrer">Abrir comprobante PDF</a> : null}
+                {isAdministrator && selectedTransaction.has_provider_error && selectedTransaction.codigo_estud ? (
+                  <button type="button" className="submit-button compact-button" onClick={() => openAllDigitalPaymentCorrection(selectedTransaction)}>
+                    Corregir tipo de pago
+                  </button>
+                ) : null}
                 {selectedTransaction.is_paid ? (
                   <button
                     type="button"
@@ -1338,6 +1571,43 @@ export default function AdminPaymentsPanel() {
         </div>
       ) : null}
 
+      {activePaymentModal === 'correct-payment' && paymentCorrectionPayment && selectedPaymentUser ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="career-modal payment-modal payment-entry-modal" role="dialog" aria-modal="true" aria-labelledby="correct-payment-title">
+            <div className="career-modal-header">
+              <div>
+                <h4 id="correct-payment-title">Corregir movimiento de pago</h4>
+                <p>{selectedPaymentUser.student?.nombre || 'Estudiante'} · Movimiento {paymentCorrectionPayment.num}</p>
+              </div>
+              <button type="button" className="ghost-button compact-button" onClick={() => setActivePaymentModal('detail')}>Cerrar</button>
+            </div>
+            <div className="career-modal-body">
+              <div className="payment-entry-context">
+                <div><span>Forma actual</span><strong>{paymentCorrectionPayment.forma_pago || '-'}</strong></div>
+                <div><span>Valor actual</span><strong>{formatMoney(paymentCorrectionPayment.valor_registrado)}</strong></div>
+                <div><span>Valor del curso</span><strong>{formatMoney(selectedPaymentUser.summary?.total_value)}</strong></div>
+                <div><span>Saldo actual</span><strong>{formatMoney(selectedPaymentUser.summary?.pending_balance)}</strong></div>
+              </div>
+              <form className="auth-form payment-entry-form" onSubmit={handlePaymentCorrectionSubmit}>
+                <div className="lookup-grid payment-entry-grid">
+                  <label className="field"><span>Valor corregido *</span><input name="valor" type="number" min="0.01" step="0.01" required value={paymentCorrectionForm.valor} onChange={handlePaymentCorrectionChange} /></label>
+                  <label className="field"><span>Forma de pago corregida *</span><select name="forma_pago" required value={paymentCorrectionForm.forma_pago} onChange={handlePaymentCorrectionChange}><option value="TRANSFERENCIA">Transferencia</option><option value="DEPOSITO">Depósito</option><option value="EFECTIVO">Efectivo</option><option value="VOUCHER">Voucher</option></select></label>
+                  <label className="field"><span>Banco o cooperativa</span><input name="banco" maxLength="100" value={paymentCorrectionForm.banco} onChange={handlePaymentCorrectionChange} placeholder="Entidad financiera" /></label>
+                  <label className="field"><span>Número de depósito / referencia</span><input name="numero_deposito" maxLength="100" value={paymentCorrectionForm.numero_deposito} onChange={handlePaymentCorrectionChange} /></label>
+                  <label className="field"><span>Fecha del pago</span><input name="fecha_deposito" type="date" value={paymentCorrectionForm.fecha_deposito} onChange={handlePaymentCorrectionChange} /></label>
+                  <label className="field"><span>Número de comprobante</span><input name="numero_comprobante" maxLength="100" value={paymentCorrectionForm.numero_comprobante} onChange={handlePaymentCorrectionChange} /></label>
+                  <label className="field full-span"><span>Motivo de la corrección *</span><textarea name="motivo_correccion" maxLength="300" rows="3" required value={paymentCorrectionForm.motivo_correccion} onChange={handlePaymentCorrectionChange} placeholder="Explica el error detectado en la pasarela o en el registro" /></label>
+                  <label className="field full-span"><span>Observaciones</span><textarea name="observacion" maxLength="300" rows="3" value={paymentCorrectionForm.observacion} onChange={handlePaymentCorrectionChange} /></label>
+                </div>
+                {paymentCorrectionError ? <p className="form-error">{paymentCorrectionError}</p> : null}
+                <div className="discount-warning">El movimiento original quedará anulado y se creará uno corregido relacionado. Los totales pagado, pendiente y estado de la cuenta se recalcularán automáticamente.</div>
+                <button type="submit" className="submit-button payment-entry-submit" disabled={isSavingPaymentCorrection}>{isSavingPaymentCorrection ? 'Corrigiendo...' : 'Guardar corrección del pago'}</button>
+              </form>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {activePaymentModal === 'detail' ? (
         <div className="modal-backdrop" role="presentation">
           <section className="career-modal payment-detail-modal" role="dialog" aria-modal="true" aria-labelledby="payment-detail-title">
@@ -1363,6 +1633,7 @@ export default function AdminPaymentsPanel() {
                 </div>
               ) : null}
               {invoiceUploadError ? <p className="form-error">{invoiceUploadError}</p> : null}
+              {voucherUploadError ? <p className="form-error">{voucherUploadError}</p> : null}
               <div className="admin-table-wrap">
                 <table className="admin-table payment-detail-table">
                   <thead>
@@ -1381,11 +1652,31 @@ export default function AdminPaymentsPanel() {
                           <td>{payment.codigo_periodo || '-'}</td>
                           <td>{formatMoney(payment.valor)}</td>
                           <td>{formatMoney(payment.valor_registrado)}</td>
-                          <td><span className={`cut-status-badge ${payment.estado_cuenta === 'PAGADO' ? 'is-open' : 'is-unavailable'}`}>{payment.estado_cuenta || 'PENDIENTE'}</span></td>
+                          <td>
+                            <span className={`cut-status-badge ${payment.estado_movimiento === 'ACTIVO' ? 'is-open' : 'is-unavailable'}`}>{payment.estado_movimiento || '-'}</span>
+                            <span>Cuenta: {payment.estado_cuenta || 'PENDIENTE'}</span>
+                          </td>
                           <td>
                             {payment.banco || '-'}
                             <span>{payment.referencia || payment.numero_deposito || ''}</span>
                             {payment.url_deposito ? <a href={payment.url_deposito} target="_blank" rel="noreferrer">Abrir comprobante</a> : null}
+                            {Number(payment.pago_corregible || 0) === 1 ? (
+                              <label className="ghost-button compact-button invoice-upload-button">
+                                {voucherUploadId === String(payment.num)
+                                  ? 'Subiendo...'
+                                  : payment.url_deposito ? 'Reemplazar comprobante' : 'Subir comprobante'}
+                                <input
+                                  type="file"
+                                  accept="application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg"
+                                  disabled={voucherUploadId === String(payment.num)}
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0]
+                                    event.target.value = ''
+                                    uploadPaymentVoucher(payment, file)
+                                  }}
+                                />
+                              </label>
+                            ) : null}
                           </td>
                           <td>
                             {payment.estado_factura === 'NO_APLICA' ? (
@@ -1416,7 +1707,11 @@ export default function AdminPaymentsPanel() {
                             <td>
                               {Number(payment.descuento_corregible || 0) === 1 ? (
                                 <button type="button" className="ghost-button compact-button" onClick={() => openDiscountCorrection(payment)}>
-                                  Corregir
+                                  Corregir beneficio
+                                </button>
+                              ) : Number(payment.pago_corregible || 0) === 1 ? (
+                                <button type="button" className="ghost-button compact-button" onClick={() => openPaymentCorrection(payment)}>
+                                  Corregir pago
                                 </button>
                               ) : <span>No aplica</span>}
                             </td>

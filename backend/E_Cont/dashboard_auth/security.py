@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from django.core.cache import cache
 from django.core import signing
+from django.db import connection
 from django.http import JsonResponse
 
 
@@ -132,6 +133,11 @@ def require_dashboard_session(view_func: Callable) -> Callable:
             return _auth_response('Sesión inválida. Inicia sesión nuevamente.', 401)
         if str(session_user.get('category') or '').lower() not in {'staff', 'teacher', 'student'}:
             return _auth_response('No tienes permisos para consultar notificaciones.', 403)
+        if (
+            str(session_user.get('category') or '').lower() == 'student'
+            and not _student_session_has_active_access(session_user)
+        ):
+            return _auth_response('Tu acceso al sistema académico está desactivado.', 403)
         request_validation_error = _validate_admin_request_shape(request)
         if request_validation_error:
             return request_validation_error
@@ -298,6 +304,9 @@ def require_student_session(view_func: Callable) -> Callable:
         if str(session_user.get('category') or '').lower() != 'student':
             return _auth_response('No tienes permisos para consultar información estudiantil.', 403)
 
+        if not _student_session_has_active_access(session_user):
+            return _auth_response('Tu acceso al sistema académico está desactivado.', 403)
+
         request_validation_error = _validate_admin_request_shape(request)
         if request_validation_error:
             return request_validation_error
@@ -305,6 +314,41 @@ def require_student_session(view_func: Callable) -> Callable:
         return view_func(request, *args, **kwargs)
 
     return wrapped
+
+
+def _student_session_has_active_access(session_user: dict[str, Any]) -> bool:
+    identifiers = {
+        str(session_user.get('login') or '').strip().lower(),
+        str(session_user.get('email') or '').strip().lower(),
+    }
+    identifiers.discard('')
+    if not identifiers:
+        return False
+
+    placeholders = ', '.join(['%s'] * len(identifiers))
+    params = sorted(identifiers)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT TOP (1) 1
+                FROM dbo.CorreosEstudIntec
+                WHERE (
+                    LOWER(LTRIM(RTRIM(ISNULL(CorreoIntec, '')))) IN ({placeholders})
+                    OR LOWER(LTRIM(RTRIM(ISNULL(CorreoPersonal, '')))) IN ({placeholders})
+                    OR LOWER(LTRIM(RTRIM(CAST(codestud AS varchar(50))))) IN ({placeholders})
+                )
+                  AND (
+                    LOWER(LTRIM(RTRIM(ISNULL(Estado, '')))) IN ('a', 'd')
+                    OR LOWER(LTRIM(RTRIM(ISNULL(Estado, '')))) LIKE 'activo%%'
+                    OR LOWER(LTRIM(RTRIM(ISNULL(Estado, '')))) LIKE 'e continua%%'
+                  )
+                """,
+                [*params, *params, *params],
+            )
+            return cursor.fetchone() is not None
+    except Exception:
+        return False
 
 
 def _extract_session_token(request) -> str:

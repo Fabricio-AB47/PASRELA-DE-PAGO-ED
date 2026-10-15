@@ -79,9 +79,19 @@ CONTINUING_EDUCATION_DISCOUNT_TYPES = {
     'DESCUENTO_REFERIDO',
     'OTRO',
 }
+CONTINUING_EDUCATION_MANUAL_PAYMENT_METHODS = {
+    'TRANSFERENCIA',
+    'DEPOSITO',
+    'EFECTIVO',
+    'VOUCHER',
+}
 PAID_PROVIDER_STATUSES = {'PAGADA', 'PAGADO', 'APROBADA', 'APROBADO', 'COMPLETADA', 'COMPLETADO'}
 TERMINAL_PROVIDER_STATUSES = PAID_PROVIDER_STATUSES | {
-    'ANULADA', 'ANULADO', 'ELIMINADA', 'ELIMINADO', 'ERROR', 'RECHAZADA', 'RECHAZADO',
+    'ANULADA', 'ANULADO', 'ELIMINADA', 'ELIMINADO', 'ERROR', 'CON ERROR', 'CON_ERROR',
+    'FALLIDA', 'FALLIDO', 'RECHAZADA', 'RECHAZADO',
+}
+PROVIDER_ERROR_STATUSES = {
+    'ERROR', 'CON ERROR', 'CON_ERROR', 'FALLIDA', 'FALLIDO', 'RECHAZADA', 'RECHAZADO',
 }
 
 
@@ -563,7 +573,7 @@ def _pending_all_digital_candidates(limit: int) -> list[dict[str, str]]:
         FROM dbo.INSCRIPCION_SOLICITUD_PAGO AS I
         WHERE NULLIF(JSON_VALUE(I.ProviderResponse, '$.provider.data.id'), '') IS NOT NULL
           AND UPPER(LTRIM(RTRIM(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), 'GENERADA'))))
-              NOT IN ('PAGADA','PAGADO','APROBADA','APROBADO','COMPLETADA','COMPLETADO','ANULADA','ANULADO','ELIMINADA','ELIMINADO','ERROR','RECHAZADA','RECHAZADO')
+              NOT IN ('PAGADA','PAGADO','APROBADA','APROBADO','COMPLETADA','COMPLETADO','ANULADA','ANULADO','ELIMINADA','ELIMINADO','ERROR','CON ERROR','CON_ERROR','FALLIDA','FALLIDO','RECHAZADA','RECHAZADO')
         ORDER BY I.CreadoEn ASC, I.Id ASC
         """,
         [],
@@ -584,7 +594,7 @@ def _pending_all_digital_candidates(limit: int) -> list[dict[str, str]]:
             WHERE TransaccionId IS NOT NULL
               AND AplicadoEn IS NULL
               AND UPPER(LTRIM(RTRIM(Estado)))
-                  NOT IN ('ANULADA','ANULADO','ELIMINADA','ELIMINADO','ERROR','RECHAZADA','RECHAZADO')
+                  NOT IN ('ANULADA','ANULADO','ELIMINADA','ELIMINADO','ERROR','CON ERROR','CON_ERROR','FALLIDA','FALLIDO','RECHAZADA','RECHAZADO')
             ORDER BY CreadoEn ASC, Id ASC
             """,
             [],
@@ -718,16 +728,18 @@ def list_financial_payment_operations(cedula: Any) -> dict[str, Any]:
             'FINANCIERO' AS origin
         FROM dbo.FIN_SOLICITUD_PAGO_TARJETA
         WHERE LTRIM(RTRIM(Cedula)) = %s
-          AND UPPER(LTRIM(RTRIM(Estado))) NOT IN ('ANULADA', 'ANULADO', 'ELIMINADA', 'ELIMINADO', 'ERROR')
+          AND UPPER(LTRIM(RTRIM(Estado))) NOT IN ('ANULADA', 'ANULADO', 'ELIMINADA', 'ELIMINADO')
         ORDER BY CreadoEn DESC, Id DESC
         """,
         [clean_identity],
     )
     for row in financial_links:
+        provider_error = _is_provider_error_status(row.get('provider_status'))
         row['amount'] = str(row.get('amount') or '0.00')
-        row['is_paid'] = _clean_text(row.get('provider_status')).lower() in {
+        row['is_paid'] = not provider_error and _clean_text(row.get('provider_status')).lower() in {
             'pagada', 'pagado', 'aprobada', 'aprobado', 'completada', 'completado'
         }
+        row['has_provider_error'] = provider_error
 
     transactions = [*financial_links, *original_links]
     for enrollment in enrollments:
@@ -736,6 +748,7 @@ def list_financial_payment_operations(cedula: Any) -> dict[str, Any]:
                 _to_decimal(item.get('amount'))
                 for item in transactions
                 if not item.get('is_paid')
+                and not item.get('has_provider_error')
                 and _clean_text(item.get('corte_id')) == _clean_text(enrollment.get('corte_id'))
             ),
             Decimal('0.00'),
@@ -765,7 +778,7 @@ def search_payment_links_for_operations(search: Any = '') -> dict[str, Any]:
         for row in payment_data.get('payment_links', [])
     ]
     _ensure_financial_card_payment_table()
-    where_sql = "UPPER(LTRIM(RTRIM(Estado))) NOT IN ('ANULADA', 'ANULADO', 'ELIMINADA', 'ELIMINADO', 'ERROR')"
+    where_sql = "UPPER(LTRIM(RTRIM(Estado))) NOT IN ('ANULADA', 'ANULADO', 'ELIMINADA', 'ELIMINADO')"
     params: list[Any] = []
     if clean_search:
         where_sql += """
@@ -803,10 +816,12 @@ def search_payment_links_for_operations(search: Any = '') -> dict[str, Any]:
     )
     for row in financial_links:
         status = _clean_text(row.get('provider_status'))
+        provider_error = _is_provider_error_status(status)
         row['amount'] = str(row.get('amount') or '0.00')
-        row['is_paid'] = status.lower() in {
+        row['is_paid'] = not provider_error and status.lower() in {
             'pagada', 'pagado', 'aprobada', 'aprobado', 'completada', 'completado'
         }
+        row['has_provider_error'] = provider_error
         row['display_status'] = 'PAGO CONFIRMADO' if row['is_paid'] else (status or 'GENERADA')
 
     transactions = sorted(
@@ -1532,6 +1547,12 @@ def get_registered_user_payment_detail(codigo_estud: Any, *, cuenta_id: Any = ''
                     THEN 1 ELSE 0
                 END AS descuento_corregible,
                 CASE
+                    WHEN M.EstadoMovimiento = 'ACTIVO'
+                     AND M.TipoMovimiento = 'HABER'
+                     AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO'
+                    THEN 1 ELSE 0
+                END AS pago_corregible,
+                CASE
                     WHEN M.TipoMovimiento <> 'HABER' OR UPPER(ISNULL(M.FormaPago, '')) = 'DESCUENTO' THEN 'NO_APLICA'
                     WHEN F.FacturaMovimientoId IS NULL OR F.EstadoFactura <> 'SUBIDA' THEN 'PENDIENTE'
                     ELSE 'SUBIDA'
@@ -2194,6 +2215,245 @@ def correct_continuing_education_discount(payload: dict[str, Any], *, user_login
     }
 
 
+def correct_continuing_education_payment(payload: dict[str, Any], *, user_login: str) -> dict[str, Any]:
+    """Replace an active payment while retaining the original movement as an audit record."""
+    _ensure_continuing_education_payments_available()
+    movement_id = _clean_text(payload.get('movimiento_id') or payload.get('movement_id'))
+    if not movement_id.isdigit():
+        raise PaymentGatewayError('Debes seleccionar un pago válido para corregir.')
+
+    value = _to_decimal(payload.get('valor'))
+    if value <= 0:
+        raise PaymentGatewayError('El valor corregido debe ser mayor a cero.')
+    if value > Decimal('99999999.99'):
+        raise PaymentGatewayError('El valor corregido supera el máximo permitido.')
+
+    payment_method = _trim_to_max(payload.get('forma_pago'), 50).upper()
+    if payment_method not in CONTINUING_EDUCATION_MANUAL_PAYMENT_METHODS:
+        raise PaymentGatewayError('La forma de pago corregida no es válida.')
+    correction_reason = _trim_to_max(payload.get('motivo_correccion'), 300)
+    if not correction_reason:
+        raise PaymentGatewayError('Debes indicar el motivo de la corrección.')
+
+    deposit_date = _clean_text(payload.get('fecha_deposito'))
+    if deposit_date:
+        try:
+            datetime.strptime(deposit_date, '%Y-%m-%d')
+        except ValueError as exc:
+            raise PaymentGatewayError('La fecha del pago no es válida.') from exc
+
+    movements_table = _continuing_education_object('fin', 'MovimientoCuenta')
+    accounts_table = _continuing_education_object('fin', 'CuentaEstudiante')
+    invoices_table = _continuing_education_object('fin', 'FacturaMovimiento')
+    original_rows = _fetch_payment_rows(
+        f"""
+        SELECT TOP (1)
+            M.MovimientoId, M.CuentaId, M.Valor AS ValorOriginal,
+            M.FormaPago AS FormaPagoOriginal, M.FechaDeposito AS FechaDepositoOriginal,
+            M.Banco AS BancoOriginal, M.NumeroDeposito AS NumeroDepositoOriginal,
+            M.NumeroComprobante AS NumeroComprobanteOriginal,
+            M.UrlComprobante AS UrlComprobanteOriginal,
+            M.NombreArchivoComprobante AS NombreArchivoComprobanteOriginal,
+            M.HashComprobante AS HashComprobanteOriginal,
+            C.CorteId, CONVERT(varchar(50), C.CodigoEstud) AS CodigoEstud,
+            ISNULL(SUM(CASE
+                WHEN A.EstadoMovimiento = 'ACTIVO' AND A.TipoMovimiento = 'DEBE'
+                THEN A.Valor ELSE 0 END), 0) AS ValorCurso,
+            ISNULL(SUM(CASE
+                WHEN A.EstadoMovimiento = 'ACTIVO' AND A.TipoMovimiento = 'HABER'
+                 AND UPPER(ISNULL(A.FormaPago, '')) <> 'DESCUENTO'
+                 AND A.MovimientoId <> M.MovimientoId
+                THEN A.Valor ELSE 0 END), 0) AS OtrosPagos,
+            ISNULL(SUM(CASE
+                WHEN A.EstadoMovimiento = 'ACTIVO' AND A.TipoMovimiento = 'HABER'
+                 AND UPPER(ISNULL(A.FormaPago, '')) = 'DESCUENTO'
+                THEN A.Valor ELSE 0 END), 0) AS Descuentos
+        FROM {movements_table} AS M
+        INNER JOIN {accounts_table} AS C ON C.CuentaId = M.CuentaId
+        LEFT JOIN {movements_table} AS A ON A.CuentaId = C.CuentaId
+        WHERE M.MovimientoId = %s
+          AND M.EstadoMovimiento = 'ACTIVO'
+          AND M.TipoMovimiento = 'HABER'
+          AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO'
+        GROUP BY M.MovimientoId, M.CuentaId, M.Valor, M.FormaPago,
+            M.FechaDeposito, M.Banco, M.NumeroDeposito, M.NumeroComprobante,
+            M.UrlComprobante, M.NombreArchivoComprobante, M.HashComprobante,
+            C.CorteId, C.CodigoEstud
+        """,
+        [movement_id],
+    )
+    if not original_rows:
+        raise PaymentGatewayError('El pago seleccionado no está activo o ya fue corregido.')
+
+    original = original_rows[0]
+    maximum_value = max(
+        Decimal('0.00'),
+        _to_decimal(original.get('ValorCurso'))
+        - _to_decimal(original.get('OtrosPagos'))
+        - _to_decimal(original.get('Descuentos')),
+    )
+    if value > maximum_value:
+        raise PaymentGatewayError(
+            f'El valor corregido no puede superar el saldo cubrible de USD {maximum_value:.2f}.'
+        )
+
+    bank = _trim_to_max(payload.get('banco'), 100)
+    deposit_number = _trim_to_max(payload.get('numero_deposito'), 100)
+    receipt_number = _trim_to_max(payload.get('numero_comprobante'), 100)
+    user = _trim_to_max(user_login or 'SISTEMA', 50)
+    observation = _trim_to_max(
+        (
+            f'CORRECCIÓN DEL MOVIMIENTO {movement_id}; '
+            f'FORMA ANTERIOR={_clean_text(original.get("FormaPagoOriginal"))}; '
+            f'VALOR ANTERIOR={_to_decimal(original.get("ValorOriginal")):.2f}; '
+            f'MOTIVO={correction_reason}. {_clean_text(payload.get("observacion"))}'
+        ),
+        500,
+    )
+    correction_rows = _fetch_payment_rows(
+        f"""
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+        UPDATE {movements_table}
+        SET EstadoMovimiento = 'ANULADO', UsuarioAnulacion = %s,
+            FechaAnulacion = sysdatetime(), MotivoAnulacion = %s
+        WHERE MovimientoId = %s AND EstadoMovimiento = 'ACTIVO'
+          AND TipoMovimiento = 'HABER' AND UPPER(ISNULL(FormaPago, '')) <> 'DESCUENTO';
+        IF @@ROWCOUNT = 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+            THROW 53161, 'El pago ya fue corregido o anulado.', 1;
+        END;
+        INSERT INTO {movements_table} (
+            CuentaId, TipoMovimiento, Concepto, Valor, FormaPago,
+            Banco, NumeroDeposito, FechaDeposito, NumeroComprobante,
+            UrlComprobante, NombreArchivoComprobante, HashComprobante,
+            MovimientoRelacionadoId, EstadoMovimiento, UsuarioRegistro, Observacion
+        )
+        VALUES (%s, 'HABER', 'PAGO / ABONO CORREGIDO', %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVO', %s, %s);
+        DECLARE @NuevoMovimientoId int = SCOPE_IDENTITY();
+        UPDATE {invoices_table}
+        SET MovimientoId = @NuevoMovimientoId, FechaModifica = sysdatetime(), UsuarioModifica = %s
+        WHERE MovimientoId = %s;
+        COMMIT TRANSACTION;
+        SELECT CONVERT(varchar(50), MovimientoId) AS movimiento_id,
+            CONVERT(varchar(50), MovimientoRelacionadoId) AS movimiento_relacionado_id,
+            Concepto AS detalle, Valor AS valor, FormaPago AS forma_pago,
+            EstadoMovimiento AS estado_movimiento
+        FROM {movements_table} WHERE MovimientoId = @NuevoMovimientoId;
+        """,
+        [
+            user, correction_reason, movement_id,
+            original.get('CuentaId'), value, payment_method, bank, deposit_number,
+            deposit_date or None, receipt_number,
+            original.get('UrlComprobanteOriginal'),
+            original.get('NombreArchivoComprobanteOriginal'),
+            original.get('HashComprobanteOriginal'),
+            movement_id, user, observation,
+            user, movement_id,
+        ],
+    )
+    cache.delete(f'dashboard:continuing-education-payment-metrics:v7-global-pending:{complement_database_name()}')
+    replacement = correction_rows[0] if correction_rows else {}
+    all_digital_tracking = _mark_all_digital_payment_manually_corrected(
+        inscription_payment_id=payload.get('inscription_payment_id'),
+        provider_transaction_id=payload.get('provider_transaction_id'),
+        codigo_estud=original.get('CodigoEstud'),
+        replacement=replacement,
+        payment_method=payment_method,
+        value=value,
+        user_login=user,
+    )
+    create_notification_safely(
+        event_key=f'payment-corrected:{movement_id}:{replacement.get("movimiento_id")}',
+        notification_type='PAYMENT_CORRECTED',
+        title='Pago corregido',
+        message=f'El pago fue corregido a {payment_method} por USD {value:.2f}.',
+        recipient_category='staff', recipient_role='ADMINISTRADOR', route='#payments',
+        data={
+            'codigo_estud': _clean_text(original.get('CodigoEstud')),
+            'original_movement_id': movement_id,
+            'replacement_movement_id': replacement.get('movimiento_id'),
+            'payment_method': payment_method,
+            'value': str(value),
+        },
+    )
+    return {
+        'ok': True,
+        'database': complement_database_name(),
+        'original_movement_id': movement_id,
+        'replacement': replacement,
+        'payment_method': payment_method,
+        'value': str(value),
+        'all_digital_tracking': all_digital_tracking,
+    }
+
+
+def _mark_all_digital_payment_manually_corrected(
+    *,
+    inscription_payment_id: Any,
+    provider_transaction_id: Any,
+    codigo_estud: Any,
+    replacement: dict[str, Any],
+    payment_method: str,
+    value: Decimal,
+    user_login: str,
+) -> dict[str, Any]:
+    request_id = _clean_text(inscription_payment_id)
+    transaction_id = _clean_text(provider_transaction_id)
+    student_code = _clean_text(codigo_estud)
+    movement_id = _clean_text(replacement.get('movimiento_id'))
+    if not request_id.isdigit() or not movement_id:
+        return {'updated': False, 'reason': 'SIN_SOLICITUD_ALLDIGITAL'}
+
+    correction = json.dumps({
+        'movement_id': movement_id,
+        'payment_method': payment_method,
+        'value': str(value),
+        'corrected_at': datetime.now().isoformat(timespec='seconds'),
+        'corrected_by': _clean_text(user_login),
+    }, ensure_ascii=False)
+    transaction_filter = (
+        "AND JSON_VALUE(I.ProviderResponse, '$.provider.data.id') = %s"
+        if transaction_id else ''
+    )
+    params: list[Any] = [correction, request_id, student_code, student_code]
+    if transaction_id:
+        params.append(transaction_id)
+    try:
+        rows = _fetch_payment_rows(
+            f"""
+            UPDATE I
+            SET ProviderResponse = JSON_MODIFY(
+                CASE WHEN ISJSON(I.ProviderResponse) = 1 THEN I.ProviderResponse ELSE '{{}}' END,
+                '$.manual_payment_correction', JSON_QUERY(%s)
+            )
+            OUTPUT CONVERT(varchar(50), inserted.Id) AS inscription_payment_id
+            FROM dbo.INSCRIPCION_SOLICITUD_PAGO AS I
+            WHERE I.Id = %s
+              AND (
+                    JSON_VALUE(I.ProviderResponse, '$.official_sync.record.codigo_estud') = %s
+                    OR EXISTS (
+                        SELECT 1 FROM dbo.DATOS_ESTUD AS D
+                        WHERE D.codigo_estud = %s
+                          AND LTRIM(RTRIM(CONVERT(varchar(50), D.Cedula_Est))) = LTRIM(RTRIM(I.Cedula))
+                    )
+              )
+              {transaction_filter}
+            """,
+            params,
+        )
+    except Exception:
+        logger.exception('Could not link manual payment correction to AllDigital request %s.', request_id)
+        return {'updated': False, 'reason': 'ERROR_ACTUALIZANDO_TRAZABILIDAD'}
+    return {
+        'updated': bool(rows),
+        'inscription_payment_id': request_id if rows else '',
+        'movement_id': movement_id,
+    }
+
+
 def _calculate_percentage_discount(
     *,
     percentage: Decimal,
@@ -2306,6 +2566,103 @@ def upload_continuing_education_invoice(payload: dict[str, Any], *, user_login: 
             'file_name': invoice['file_name'],
             'location': invoice.get('folder_path', ''),
             'web_url': invoice.get('web_url', ''),
+        },
+    }
+
+
+def upload_continuing_education_payment_voucher(
+    payload: dict[str, Any], *, user_login: str
+) -> dict[str, Any]:
+    """Attach or replace the receipt of an already registered active payment."""
+    _ensure_continuing_education_payments_available()
+    movement_id = _clean_text(payload.get('movimiento_id') or payload.get('movement_id'))
+    if not movement_id.isdigit():
+        raise PaymentGatewayError('Debes seleccionar un movimiento de pago válido.')
+    if not _clean_text(payload.get('voucher_base64')):
+        raise PaymentGatewayError('Debes adjuntar el comprobante del pago.')
+
+    movements_table = _continuing_education_object('fin', 'MovimientoCuenta')
+    accounts_table = _continuing_education_object('fin', 'CuentaEstudiante')
+    enrollments_view = _continuing_education_object('edu', 'VW_MatriculaEstudianteCompleta')
+    cuts_view = _continuing_education_object('edu', 'VW_CorteCursoDetalle')
+    rows = _fetch_payment_rows(
+        f"""
+        SELECT TOP (1)
+            M.MovimientoId AS movimiento_id,
+            CONVERT(varchar(50), C.CodigoEstud) AS codigo_estud,
+            LTRIM(RTRIM(E.ApellidosNombre)) AS nombre_estudiante,
+            LTRIM(RTRIM(CC.NombreCursoMateria)) AS nombre_curso,
+            LTRIM(RTRIM(CC.NombreCorte)) AS nombre_corte,
+            LTRIM(RTRIM(M.NumeroDeposito)) AS numero_deposito,
+            LTRIM(RTRIM(M.NumeroComprobante)) AS numero_comprobante,
+            CONVERT(varchar(10), M.FechaDeposito, 23) AS fecha_deposito
+        FROM {movements_table} AS M
+        INNER JOIN {accounts_table} AS C ON C.CuentaId = M.CuentaId
+        INNER JOIN {enrollments_view} AS E ON E.EstudianteCorteId = C.EstudianteCorteId
+        INNER JOIN {cuts_view} AS CC ON CC.CorteId = C.CorteId
+        WHERE M.MovimientoId = %s
+          AND M.EstadoMovimiento = 'ACTIVO'
+          AND M.TipoMovimiento = 'HABER'
+          AND UPPER(ISNULL(M.FormaPago, '')) <> 'DESCUENTO'
+        """,
+        [movement_id],
+    )
+    if not rows:
+        raise PaymentGatewayError(
+            'El movimiento no corresponde a un pago activo que pueda recibir un comprobante.'
+        )
+
+    payment = rows[0]
+    voucher_payload = {
+        **payload,
+        'numero_comprobante': (
+            _clean_text(payload.get('numero_comprobante'))
+            or _clean_text(payment.get('numero_comprobante'))
+        ),
+        'numero_deposito': (
+            _clean_text(payload.get('numero_deposito'))
+            or _clean_text(payment.get('numero_deposito'))
+        ),
+        'fecha_deposito': (
+            _clean_text(payload.get('fecha_deposito'))
+            or _clean_text(payment.get('fecha_deposito'))
+        ),
+    }
+    voucher = _store_continuing_education_voucher(
+        voucher_payload,
+        codigo_estud=_clean_text(payment.get('codigo_estud')),
+        course_name=_clean_text(payment.get('nombre_curso')),
+        cut_name=_clean_text(payment.get('nombre_corte')),
+        student_name=_clean_text(payment.get('nombre_estudiante')),
+    )
+    result_rows = _fetch_payment_rows(
+        f"""
+        UPDATE {movements_table}
+        SET UrlComprobante = %s,
+            NombreArchivoComprobante = %s,
+            HashComprobante = %s
+        OUTPUT
+            CONVERT(varchar(50), inserted.MovimientoId) AS movimiento_id,
+            inserted.UrlComprobante AS url_deposito,
+            inserted.NombreArchivoComprobante AS nombre_comprobante
+        WHERE MovimientoId = %s
+          AND EstadoMovimiento = 'ACTIVO'
+          AND TipoMovimiento = 'HABER'
+          AND UPPER(ISNULL(FormaPago, '')) <> 'DESCUENTO';
+        """,
+        [voucher['relative_path'], voucher['file_name'], voucher['sha256'], movement_id],
+    )
+    if not result_rows:
+        raise PaymentGatewayError('El pago dejó de estar activo antes de guardar el comprobante.')
+    return {
+        'ok': True,
+        'database': complement_database_name(),
+        'payment': result_rows[0],
+        'voucher': {
+            'file_name': voucher['file_name'],
+            'stored': bool(voucher['relative_path']),
+            'location': voucher.get('folder_path', ''),
+            'web_url': voucher.get('web_url', ''),
         },
     }
 
@@ -2433,11 +2790,105 @@ def _fetch_payment_rows(query: str, params: list[Any]) -> list[dict[str, Any]]:
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+def _enrich_detected_manual_payment_corrections(rows: list[dict[str, Any]]) -> None:
+    """Recover correction metadata from the financial audit link when JSON tracking is absent."""
+    candidates: list[tuple[str, str]] = []
+    for row in rows:
+        if _clean_text(row.get('manual_correction_movement_id')):
+            continue
+        if not _is_provider_error_status(row.get('provider_status')):
+            continue
+        student_code = _clean_text(row.get('codigo_estud'))
+        transaction_id = _clean_text(row.get('provider_transaction_id'))
+        if student_code and transaction_id:
+            candidates.append((student_code, transaction_id))
+    if not candidates:
+        return
+
+    unique_candidates = list(dict.fromkeys(candidates))
+    conditions: list[str] = []
+    params: list[Any] = []
+    for student_code, transaction_id in unique_candidates:
+        conditions.append(
+            """
+            (
+                CONVERT(varchar(50), Account.CodigoEstud) = %s
+                AND (
+                    NULLIF(LTRIM(RTRIM(Original.NumeroDeposito)), '') = %s
+                    OR NULLIF(LTRIM(RTRIM(Original.NumeroComprobante)), '') = %s
+                )
+            )
+            """
+        )
+        params.extend([student_code, transaction_id, transaction_id])
+
+    movements_table = _continuing_education_object('fin', 'MovimientoCuenta')
+    accounts_table = _continuing_education_object('fin', 'CuentaEstudiante')
+    detected = _fetch_payment_rows(
+        f"""
+        SELECT
+            CONVERT(varchar(50), Account.CodigoEstud) AS codigo_estud,
+            NULLIF(LTRIM(RTRIM(Original.NumeroDeposito)), '') AS numero_deposito,
+            NULLIF(LTRIM(RTRIM(Original.NumeroComprobante)), '') AS numero_comprobante,
+            CONVERT(varchar(50), Replacement.MovimientoId) AS movement_id,
+            LTRIM(RTRIM(Replacement.FormaPago)) AS payment_method,
+            Replacement.Valor AS value,
+            CONVERT(varchar(19), Replacement.FechaMovimiento, 120) AS corrected_at,
+            CONVERT(varchar(10), COALESCE(Replacement.FechaDeposito, Replacement.FechaMovimiento), 23) AS paid_at
+        FROM {movements_table} AS Original
+        INNER JOIN {accounts_table} AS Account ON Account.CuentaId = Original.CuentaId
+        INNER JOIN {movements_table} AS Replacement
+            ON Replacement.MovimientoRelacionadoId = Original.MovimientoId
+           AND Replacement.EstadoMovimiento = 'ACTIVO'
+           AND Replacement.TipoMovimiento = 'HABER'
+           AND UPPER(ISNULL(Replacement.FormaPago, '')) <> 'DESCUENTO'
+        WHERE Original.EstadoMovimiento = 'ANULADO'
+          AND Original.TipoMovimiento = 'HABER'
+          AND UPPER(ISNULL(Original.FormaPago, '')) = 'ALLDIGITAL'
+          AND ({' OR '.join(conditions)})
+        """,
+        params,
+    )
+    correction_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    candidate_keys = set(unique_candidates)
+    for item in detected:
+        student_code = _clean_text(item.get('codigo_estud'))
+        for reference_field in ('numero_deposito', 'numero_comprobante'):
+            key = (student_code, _clean_text(item.get(reference_field)))
+            if key in candidate_keys:
+                correction_by_key[key] = item
+    for row in rows:
+        key = (
+            _clean_text(row.get('codigo_estud')),
+            _clean_text(row.get('provider_transaction_id')),
+        )
+        correction = correction_by_key.get(key)
+        if not correction:
+            continue
+        row['manual_correction_movement_id'] = correction.get('movement_id')
+        row['manual_correction_payment_method'] = correction.get('payment_method')
+        row['manual_correction_value'] = correction.get('value')
+        row['manual_correction_date'] = correction.get('corrected_at')
+        row['payment_record_number'] = correction.get('movement_id')
+        row['registered_value'] = correction.get('value')
+        row['paid_at'] = correction.get('paid_at')
+        row['is_paid'] = 1
+
+
 def _list_generated_payment_links(search: str, payment_status: str) -> list[dict[str, Any]]:
     provider_status_expression = "LOWER(LTRIM(RTRIM(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), ''))))"
+    manual_correction_expression = "NULLIF(JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.movement_id'), '') IS NOT NULL"
+    raw_provider_error_expression = (
+        f"{provider_status_expression} IN "
+        "('error','con error','con_error','fallida','fallido','rechazada','rechazado')"
+    )
+    provider_error_expression = (
+        f"({raw_provider_error_expression} AND NOT ({manual_correction_expression}))"
+    )
     allowed_status_expression = (
         f"(PR.Num IS NOT NULL OR {provider_status_expression} IN "
-        "('generada','generado','pagada','pagado','aprobada','aprobado','completada','completado'))"
+        "('generada','generado','pagada','pagado','aprobada','aprobado','completada','completado',"
+        "'error','con error','con_error','fallida','fallido','rechazada','rechazado'))"
     )
     where_parts: list[str] = [allowed_status_expression]
     params: list[Any] = []
@@ -2453,11 +2904,11 @@ def _list_generated_payment_links(search: str, payment_status: str) -> list[dict
             """
         )
         params.extend([pattern] * 7)
-    paid_expression = f"(PR.Num IS NOT NULL OR {provider_status_expression} IN ('pagada','pagado','aprobada','aprobado','completada','completado'))"
-    if payment_status == 'with_payments':
-        where_parts.append(paid_expression)
-    elif payment_status == 'without_payments':
-        where_parts.append(f"PR.Num IS NULL AND {provider_status_expression} IN ('generada','generado')")
+    paid_expression = (
+        f"(({manual_correction_expression}) OR (NOT ({raw_provider_error_expression}) AND "
+        f"(PR.Num IS NOT NULL OR {provider_status_expression} IN "
+        "('pagada','pagado','aprobada','aprobado','completada','completado'))))"
+    )
     where_sql = 'WHERE ' + ' AND '.join(where_parts) if where_parts else ''
 
     rows = _fetch_payment_rows(
@@ -2481,6 +2932,11 @@ def _list_generated_payment_links(search: str, payment_status: str) -> list[dict
             CONVERT(varchar(19), I.CreadoEn, 120) AS created_at,
             JSON_VALUE(I.ProviderResponse, '$.provider.data.id') AS provider_transaction_id,
             JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre') AS provider_status,
+            JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.movement_id') AS manual_correction_movement_id,
+            JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.payment_method') AS manual_correction_payment_method,
+            JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.value') AS manual_correction_value,
+            JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.corrected_at') AS manual_correction_date,
+            N'API ALLDIGITAL' AS provider_channel,
             COALESCE(NULLIF(JSON_VALUE(I.ProviderResponse, '$.official_sync.record.codigo_estud'), ''), DS.codigo_estud) AS codigo_estud,
             COALESCE(
                 NULLIF(JSON_VALUE(I.ProviderResponse, '$.official_sync.record.materia_corte'), ''),
@@ -2526,16 +2982,43 @@ def _list_generated_payment_links(search: str, payment_status: str) -> list[dict
         """,
         params,
     )
+    _enrich_detected_manual_payment_corrections(rows)
     payments = [
         {
             **{key: _clean_text(value) for key, value in row.items()},
             'amount': str(row.get('amount') or '0.00'),
             'registered_value': str(row.get('registered_value') or '0.00'),
-            'is_paid': bool(row.get('is_paid')),
-            'display_status': 'PAGO CONFIRMADO' if row.get('is_paid') else (_clean_text(row.get('provider_status')) or 'GENERADO').upper(),
+            'is_paid': (
+                bool(_clean_text(row.get('manual_correction_movement_id')))
+                or (
+                    bool(row.get('is_paid'))
+                    and not _is_provider_error_status(row.get('provider_status'))
+                )
+            ),
+            'has_provider_error': (
+                _is_provider_error_status(row.get('provider_status'))
+                and not _clean_text(row.get('manual_correction_movement_id'))
+            ),
+            'provider_had_error': _is_provider_error_status(row.get('provider_status')),
+            'manual_payment_corrected': bool(_clean_text(row.get('manual_correction_movement_id'))),
+            'display_status': (
+                f"CORREGIDO - {_clean_text(row.get('manual_correction_payment_method')) or 'PAGO MANUAL'}"
+                if _clean_text(row.get('manual_correction_movement_id'))
+                else 'PAGO CONFIRMADO'
+                if bool(row.get('is_paid')) and not _is_provider_error_status(row.get('provider_status'))
+                else (_clean_text(row.get('provider_status')) or 'GENERADO').upper()
+            ),
         }
         for row in rows
     ]
+    if payment_status == 'with_payments':
+        payments = [payment for payment in payments if payment['is_paid']]
+    elif payment_status == 'without_payments':
+        payments = [
+            payment for payment in payments
+            if not payment['is_paid']
+            and _clean_text(payment.get('provider_status')).lower() in {'generada', 'generado'}
+        ]
     for payment in payments:
         if payment['is_paid']:
             _ensure_all_digital_payment_receipt(payment)
@@ -2764,10 +3247,18 @@ def _generated_payment_link_metrics() -> dict[str, Any]:
         """
         SELECT
             COUNT(*) AS generated_links,
-            SUM(CASE WHEN PR.Num IS NOT NULL OR LOWER(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), '')) IN ('pagada','pagado','aprobada','aprobado','completada','completado') THEN 1 ELSE 0 END) AS paid_links,
+            SUM(CASE WHEN NULLIF(JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.movement_id'), '') IS NOT NULL
+                       OR (LOWER(LTRIM(RTRIM(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), '')))) NOT IN ('error','con error','con_error','fallida','fallido','rechazada','rechazado') AND (PR.Num IS NOT NULL OR LOWER(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), '')) IN ('pagada','pagado','aprobada','aprobado','completada','completado')))
+                     THEN 1 ELSE 0 END) AS paid_links,
             SUM(CASE WHEN PR.Num IS NULL AND LOWER(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), '')) IN ('generada','generado') THEN 1 ELSE 0 END) AS generated_pending_links,
+            SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), '')))) IN ('error','con error','con_error','fallida','fallido','rechazada','rechazado')
+                       AND NULLIF(JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.movement_id'), '') IS NULL
+                     THEN 1 ELSE 0 END) AS provider_error_links,
             SUM(ISNULL(TRY_CONVERT(decimal(18,2), I.Monto), 0)) AS generated_value,
-            SUM(CASE WHEN PR.Num IS NOT NULL THEN ISNULL(PR.ValorRegistrado, 0)
+            SUM(CASE WHEN NULLIF(JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.movement_id'), '') IS NOT NULL
+                     THEN ISNULL(TRY_CONVERT(decimal(18,2), JSON_VALUE(I.ProviderResponse, '$.manual_payment_correction.value')), 0)
+                     WHEN LOWER(LTRIM(RTRIM(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), '')))) IN ('error','con error','con_error','fallida','fallido','rechazada','rechazado') THEN 0
+                     WHEN PR.Num IS NOT NULL THEN ISNULL(PR.ValorRegistrado, 0)
                      WHEN LOWER(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), '')) IN ('pagada','pagado','aprobada','aprobado','completada','completado')
                      THEN ISNULL(TRY_CONVERT(decimal(18,2), I.Monto), 0) ELSE 0 END) AS paid_value
         FROM dbo.INSCRIPCION_SOLICITUD_PAGO AS I
@@ -2784,7 +3275,7 @@ def _generated_payment_link_metrics() -> dict[str, Any]:
         ) AS PR
         WHERE PR.Num IS NOT NULL
            OR LOWER(LTRIM(RTRIM(ISNULL(JSON_VALUE(I.ProviderResponse, '$.provider.data.estado.nombre'), ''))))
-              IN ('generada','generado','pagada','pagado','aprobada','aprobado','completada','completado')
+              IN ('generada','generado','pagada','pagado','aprobada','aprobado','completada','completado','error','con error','con_error','fallida','fallido','rechazada','rechazado')
         """,
         [],
     )
@@ -2793,6 +3284,7 @@ def _generated_payment_link_metrics() -> dict[str, Any]:
         'generated_links': int(row.get('generated_links') or 0),
         'paid_links': int(row.get('paid_links') or 0),
         'generated_pending_links': int(row.get('generated_pending_links') or 0),
+        'provider_error_links': int(row.get('provider_error_links') or 0),
         'generated_value': str(row.get('generated_value') or '0.00'),
         'paid_value': str(row.get('paid_value') or '0.00'),
     }
@@ -5413,6 +5905,13 @@ def _extract_provider_status(provider_response: Any) -> str:
         if value:
             return value
     return _clean_text(provider_response.get('status')).upper()
+
+
+def _is_provider_error_status(value: Any) -> bool:
+    normalized = unicodedata.normalize('NFD', _clean_text(value).upper())
+    normalized = ''.join(character for character in normalized if unicodedata.category(character) != 'Mn')
+    normalized = re.sub(r'[\s_-]+', ' ', normalized).strip()
+    return normalized in {'ERROR', 'CON ERROR', 'FALLIDA', 'FALLIDO', 'RECHAZADA', 'RECHAZADO'}
 
 
 def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str], expect_json: bool = True) -> dict[str, Any]:

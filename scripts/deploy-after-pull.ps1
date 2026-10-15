@@ -122,9 +122,14 @@ Copy-Item -Path (Join-Path $frontendDir 'web.config') -Destination (Join-Path $t
 
 try {
     Import-Module WebAdministration -ErrorAction Stop
-    $poolName = (Get-Item 'IIS:\Sites\ed_continua').applicationPool
-    Restart-WebAppPool -Name $poolName
-    Write-Step "Application pool reiniciado: $poolName"
+    $siteNames = @('pasarela_backend', 'ed_continua')
+    $poolNames = $siteNames |
+        ForEach-Object { (Get-Item "IIS:\Sites\$_").applicationPool } |
+        Select-Object -Unique
+    foreach ($poolName in $poolNames) {
+        Restart-WebAppPool -Name $poolName
+        Write-Step "Application pool reiniciado: $poolName"
+    }
 }
 catch {
     Write-Step "No se pudo reiniciar IIS automaticamente: $($_.Exception.Message)"

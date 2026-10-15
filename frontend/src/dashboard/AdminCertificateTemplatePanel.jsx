@@ -5,6 +5,7 @@ import { adminFetch } from './api.js'
 const MAX_LOCAL_LOGO_SIZE = 2 * 1024 * 1024
 const MAX_LOCAL_BACKGROUND_SIZE = 6 * 1024 * 1024
 const numberFormatter = new Intl.NumberFormat('es-EC')
+const moneyFormatter = new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' })
 const TEMPLATE_TYPE_OPTIONS = [
   { value: 'EDUCACION_CONTINUA', label: 'Educación continua' },
   { value: 'REGULAR', label: 'Regular' },
@@ -247,7 +248,7 @@ export default function AdminCertificateTemplatePanel() {
 
   async function handleGenerateCertificates() {
     if (!selectedCutId || !selectedStudentIds.length) {
-      setError('Selecciona una cohorte y al menos un estudiante aprobado.')
+      setError('Selecciona una cohorte y al menos un estudiante aprobado con saldo pagado.')
       return
     }
 
@@ -273,7 +274,44 @@ export default function AdminCertificateTemplatePanel() {
       setCertificateResult(payload.result.updated)
       setSelectedStudentIds([])
       const summary = payload.result.summary || {}
-      setMessage(`Certificados generados: ${formatNumber(summary.generados)}. Errores: ${formatNumber(summary.errores)}.`)
+      const generatedStudentIds = (payload.result.results || [])
+        .filter((result) => result.ok)
+        .map((result) => result.corte_estudiante_id)
+        .filter(Boolean)
+      let downloadCompleted = false
+      if (generatedStudentIds.length) {
+        const downloadResponse = await adminFetch('/api/auth/admin/certificates/download-batch/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            corte_id: selectedCutId,
+            corte_estudiante_ids: generatedStudentIds,
+          }),
+        })
+        if (!downloadResponse.ok) {
+          const downloadPayload = await readResponsePayload(downloadResponse)
+          throw new Error(
+            `Los certificados fueron generados y respaldados, pero no se pudieron descargar: ${downloadPayload?.message || downloadResponse.status}`,
+          )
+        }
+        await downloadBlobResponse(
+          downloadResponse,
+          generatedStudentIds.length === 1
+            ? `certificado_${generatedStudentIds[0]}.pdf`
+            : `certificados_corte_${selectedCutId}.zip`,
+        )
+        downloadCompleted = true
+      }
+      setMessage(
+        `Certificados generados: ${formatNumber(summary.generados)}. `
+        + `Respaldados en la carpeta de cada estudiante: ${formatNumber(summary.respaldados)}. `
+        + `Enviados al correo personal: ${formatNumber(summary.correos_enviados)}. `
+        + `Descarga: ${downloadCompleted ? 'completada' : 'sin archivos'}. `
+        + `Errores de generación: ${formatNumber(summary.errores)}. `
+        + `Errores de correo: ${formatNumber(summary.errores_correo)}.`,
+      )
     } catch (generateError) {
       setError(generateError.message)
     } finally {
@@ -403,7 +441,7 @@ export default function AdminCertificateTemplatePanel() {
   }
 
   async function handleSave(event) {
-    event.preventDefault()
+    event?.preventDefault()
     setIsSaving(true)
     setError('')
     setMessage('')
@@ -482,7 +520,7 @@ export default function AdminCertificateTemplatePanel() {
         <div className="module-card-header">
           <div>
             <h4>Certificado por cohorte</h4>
-            <p>Genera y adjunta el certificado al estudiante matriculado en la cohorte seleccionada.</p>
+            <p>Genera y descarga el certificado, lo respalda en la carpeta de cada estudiante y lo envía a su correo personal registrado. Solo aplica a estudiantes aprobados y sin saldo pendiente.</p>
           </div>
           <button
             type="button"
@@ -564,6 +602,8 @@ export default function AdminCertificateTemplatePanel() {
                 <th>Cédula</th>
                 <th>Nota</th>
                 <th>Asistencia</th>
+                <th>Estado financiero</th>
+                <th>Correo personal</th>
                 <th>Certificado</th>
                 <th>Acción</th>
               </tr>
@@ -571,7 +611,7 @@ export default function AdminCertificateTemplatePanel() {
             <tbody>
               {isLoadingStudents ? (
                 <tr>
-                  <td colSpan="7">Cargando estudiantes...</td>
+                  <td colSpan="9">Cargando estudiantes...</td>
                 </tr>
               ) : students.length ? (
                 students.map((student) => (
@@ -592,8 +632,13 @@ export default function AdminCertificateTemplatePanel() {
                     <td>{formatDecimal(student.nota_final)}</td>
                     <td>{student.porcentaje_asistencia !== null ? `${formatDecimal(student.porcentaje_asistencia)}%` : '-'}</td>
                     <td>
+                      <strong>{student.estado_financiero || 'PENDIENTE'}</strong>
+                      <span>Saldo: {formatMoney(student.saldo_pendiente)}</span>
+                    </td>
+                    <td>{student.correo_personal || 'Sin correo personal'}</td>
+                    <td>
                       <strong>{student.certificado_estado || '-'}</strong>
-                      <span>{student.certificado?.numero_certificado || '-'}</span>
+                      <span>{student.certificado?.numero_certificado || student.motivo_no_disponible || '-'}</span>
                     </td>
                     <td>
                       {student.certificado ? (
@@ -613,7 +658,7 @@ export default function AdminCertificateTemplatePanel() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="7">No hay estudiantes matriculados para la cohorte seleccionada.</td>
+                  <td colSpan="9">No hay estudiantes matriculados para la cohorte seleccionada.</td>
                 </tr>
               )}
             </tbody>
@@ -833,8 +878,8 @@ export default function AdminCertificateTemplatePanel() {
           <button type="submit" className="submit-button compact-button" disabled={isSaving}>
             {isSaving ? 'Guardando...' : 'Guardar plantilla'}
           </button>
-          <button type="button" className="ghost-button compact-button" onClick={() => loadPreview(selectedCutId)} disabled={isSaving || isPreviewLoading}>
-            {isPreviewLoading ? 'Generando...' : 'Previsualizar'}
+          <button type="button" className="ghost-button compact-button" onClick={() => handleSave()} disabled={isSaving || isPreviewLoading}>
+            {isSaving || isPreviewLoading ? 'Actualizando...' : 'Guardar y actualizar previsualización'}
           </button>
         </div>
         {message ? <p className="form-success" role="status">{message}</p> : null}
@@ -845,11 +890,11 @@ export default function AdminCertificateTemplatePanel() {
         <div className="module-card-header">
           <div>
             <h4>Previsualización</h4>
-            <p>Vista PDF con la plantilla vigente.</p>
+            <p>Vista PDF actualizada de la plantilla vigente.</p>
           </div>
         </div>
         {previewUrl ? (
-          <iframe className="certificate-preview-frame" src={previewUrl} title="Previsualización de certificado" />
+          <iframe className="certificate-preview-frame" src={previewUrl} title="Previsualización PDF actualizada del certificado" />
         ) : (
           <p className="teacher-panel-empty">No hay previsualización generada.</p>
         )}
@@ -928,4 +973,9 @@ function formatDecimal(value) {
     return '-'
   }
   return numberFormatter.format(Number(value))
+}
+
+function formatMoney(value) {
+  const amount = Number(value || 0)
+  return moneyFormatter.format(Number.isFinite(amount) ? amount : 0)
 }

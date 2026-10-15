@@ -185,7 +185,19 @@ def save_certificate_template_config(payload: dict[str, Any], *, user_login: str
 def build_certificate_template_preview(corte_id: Any = '') -> tuple[bytes, str]:
     from .inscription_certificate import build_inscription_certificate
 
-    payload = {
+    content, _filename = build_inscription_certificate(_certificate_template_preview_payload(corte_id))
+    return content, 'previsualizacion_certificado.pdf'
+
+
+def build_certificate_template_preview_image(corte_id: Any = '') -> tuple[bytes, str]:
+    from .inscription_certificate import build_inscription_certificate_preview_image
+
+    content, _filename = build_inscription_certificate_preview_image(_certificate_template_preview_payload(corte_id))
+    return content, 'previsualizacion_certificado.png'
+
+
+def _certificate_template_preview_payload(corte_id: Any = '') -> dict[str, Any]:
+    return {
         'source': 'preview_admin',
         'tipo_certificado': 'APROBACION',
         'certificate_type': 'APROBACION',
@@ -197,6 +209,8 @@ def build_certificate_template_preview(corte_id: Any = '') -> tuple[bytes, str]:
         'codigo_estud': '0000',
         'fecha_inscripcion': '10 de julio de 2026',
         'fecha_inicio': '20 de julio de 2026',
+        'fecha_fin': '10 de septiembre de 2026',
+        'horas_curso': '160',
         'nombre': 'ESTUDIANTE DE PRUEBA',
         'cedula': '0000000000',
         'email': 'estudiante@intec.edu.ec',
@@ -212,8 +226,6 @@ def build_certificate_template_preview(corte_id: Any = '') -> tuple[bytes, str]:
         'nota_final': '10.00',
         'porcentaje_asistencia': '100.00%',
     }
-    content, _filename = build_inscription_certificate(payload)
-    return content, 'previsualizacion_certificado.pdf'
 
 
 def certificate_template_use_default_logo(corte_id: Any = '') -> bool:

@@ -1,10 +1,35 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from dashboard_auth.continuing_education import connection_for_query, ensure_student_course_charge
+from dashboard_auth.continuing_education import (
+    configure_cut_in_complement,
+    connection_for_query,
+    ensure_student_course_charge,
+)
 
 
 class ComplementConnectionRoutingTests(TestCase):
+    @patch('dashboard_auth.continuing_education._fetch_all')
+    @patch('dashboard_auth.continuing_education._fetch_primary_one')
+    @patch('dashboard_auth.continuing_education.is_complement_available', return_value=True)
+    @patch('dashboard_auth.continuing_education.complement_version', return_value='v5')
+    def test_cut_capacity_covers_all_official_active_students(
+        self,
+        _version,
+        _available,
+        fetch_primary,
+        fetch_all,
+    ):
+        fetch_primary.return_value = {
+            'CupoEsperado': None,
+            'TotalEstudiantesActivos': 52,
+        }
+        fetch_all.return_value = [{'CorteId': 1, 'CupoMaximo': 52}]
+
+        configure_cut_in_complement(1, cupo_maximo=50)
+
+        self.assertEqual(fetch_all.call_args.args[1][5], 52)
+
     @patch('dashboard_auth.continuing_education.complement_connection')
     def test_routes_qualified_complement_query_to_db1_alias(self, complement_connection):
         marker = object()

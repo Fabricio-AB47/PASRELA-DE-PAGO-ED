@@ -698,13 +698,16 @@ def _student_certificate_course(
         raise StudentDashboardError('No se encontró la matrícula seleccionada para tu usuario.')
 
     course = _normalize_grade_course(row)
+    course.update(_student_certificate_course_details(course))
     if require_approved and not course['aprobado']:
         raise StudentDashboardError(
             'El certificado estará disponible cuando la nota final esté entre 7.00 y 10.00.'
         )
 
     if require_email and not _student_certificate_email(student, course):
-        raise StudentDashboardError('No se encontró un correo válido para enviar el certificado.')
+        raise StudentDashboardError(
+            'No se encontró un correo personal registrado para enviar el certificado.'
+        )
 
     return student, course
 
@@ -712,6 +715,7 @@ def _student_certificate_course(
 def _build_student_certificate_payload(student: dict[str, Any], course: dict[str, Any]) -> dict[str, Any]:
     return {
         'source': 'dashboard_estudiante',
+        'certificate_template_type': 'EDUCACION_CONTINUA',
         'tipo_certificado': 'APROBACION',
         'certificate_type': 'APROBACION',
         'nombre_materia': course.get('materia'),
@@ -720,6 +724,8 @@ def _build_student_certificate_payload(student: dict[str, Any], course: dict[str
         'codigo_estud': course.get('codigo_estud') or student.get('codigo_estud'),
         'fecha_inscripcion': course.get('fecha_calificacion') or course.get('fecha_matricula'),
         'fecha_inicio': course.get('fecha_inicio'),
+        'fecha_fin': course.get('fecha_fin_curso') or course.get('fecha_fin'),
+        'horas_curso': course.get('horas_curso') or course.get('horas'),
         'nombre': course.get('nombre') or student.get('nombre'),
         'cedula': course.get('cedula'),
         'email': _student_certificate_email(student, course) or 'vista.previa@intec.edu.ec',
@@ -735,11 +741,61 @@ def _build_student_certificate_payload(student: dict[str, Any], course: dict[str
     }
 
 
+def _student_certificate_course_details(course: dict[str, Any]) -> dict[str, Any]:
+    """Use the same cohort dates and duration shown by the administrative certificate."""
+    corte_id = _clean_text(course.get('corte_id'))
+    if not corte_id.isdigit():
+        return {}
+
+    details: dict[str, Any] = {}
+    try:
+        from .course_cuts import _fetch_cut_by_id
+
+        cut = _fetch_cut_by_id(corte_id) or {}
+    except Exception:
+        cut = {}
+
+    if cut.get('fecha_inicio'):
+        details['fecha_inicio'] = cut['fecha_inicio']
+    if cut.get('fecha_fin'):
+        details['fecha_fin'] = cut['fecha_fin']
+    if cut.get('horas'):
+        details['horas_curso'] = cut['horas']
+
+    try:
+        rows = _fetch_all(
+            f"""
+            SELECT
+                MIN(FechaInicio) AS FechaInicioCurso,
+                MAX(COALESCE(FechaFinalizacion, FechaFin)) AS FechaFinCurso
+            FROM [{complement_database_name()}].[edu].[ModuloCorte]
+            WHERE CorteId = %s AND EstadoModulo = 'ACTIVO'
+            """,
+            [int(corte_id)],
+        )
+    except Exception:
+        rows = []
+
+    timeline = rows[0] if rows else {}
+    if timeline.get('FechaInicioCurso'):
+        details['fecha_inicio'] = _certificate_date_label(timeline['FechaInicioCurso'])
+    if timeline.get('FechaFinCurso'):
+        details['fecha_fin_curso'] = _certificate_date_label(timeline['FechaFinCurso'])
+    return details
+
+
+def _certificate_date_label(value: Any) -> str:
+    try:
+        from .course_cuts import _format_date_label
+
+        return _format_date_label(value)
+    except Exception:
+        return _date_iso(value)
+
+
 def _student_certificate_email(student: dict[str, Any], course: dict[str, Any]) -> str:
     return _clean_text(
-        course.get('correo_intec')
-        or student.get('correo_intec')
-        or course.get('correo_personal')
+        course.get('correo_personal')
         or student.get('correo_personal')
     ).lower()
 

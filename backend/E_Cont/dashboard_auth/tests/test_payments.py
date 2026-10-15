@@ -10,9 +10,12 @@ from dashboard_auth.payments import (
     _generated_payment_link_metrics,
     _fetch_payment_rows,
     _ensure_all_digital_payment_receipt,
+    _enrich_detected_manual_payment_corrections,
     _find_existing_student_credentials,
     _find_existing_teacher_credentials,
     _list_generated_payment_links,
+    _mark_all_digital_payment_manually_corrected,
+    _is_provider_error_status,
     _provision_or_reuse_student_credentials,
     _registered_payment_metrics,
     _resolve_student_enrollment_identity,
@@ -23,9 +26,11 @@ from dashboard_auth.payments import (
     PaymentGatewayError,
     admin_cancel_payment,
     admin_get_payment_info,
+    correct_continuing_education_payment,
     correct_continuing_education_discount,
     register_continuing_education_payment,
     reconcile_pending_all_digital_payments,
+    upload_continuing_education_payment_voucher,
 )
 from dashboard_auth.payment_receipt import build_all_digital_payment_receipt
 
@@ -301,6 +306,47 @@ class AutomaticPaymentReconciliationTests(TestCase):
 
 class GeneratedPaymentLinkTests(TestCase):
     @patch('dashboard_auth.payments._fetch_payment_rows')
+    def test_manual_correction_tracking_uses_existing_request_columns(self, fetch_rows):
+        fetch_rows.return_value = [{'inscription_payment_id': '4'}]
+
+        result = _mark_all_digital_payment_manually_corrected(
+            inscription_payment_id='4', provider_transaction_id='127100',
+            codigo_estud='2027', replacement={'movimiento_id': '111'},
+            payment_method='TRANSFERENCIA', value=Decimal('400.00'),
+            user_login='admin',
+        )
+
+        self.assertTrue(result['updated'])
+        tracking_sql = fetch_rows.call_args.args[0]
+        self.assertNotIn('ActualizadoEn', tracking_sql)
+
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    def test_recovers_missing_correction_tracking_from_related_financial_movement(self, fetch_rows):
+        fetch_rows.return_value = [{
+            'codigo_estud': '2027',
+            'numero_deposito': '127100',
+            'numero_comprobante': '1',
+            'movement_id': '111',
+            'payment_method': 'TRANSFERENCIA',
+            'value': Decimal('400.00'),
+            'corrected_at': '2026-10-14 11:09:46',
+            'paid_at': '2026-07-20',
+        }]
+        rows = [{
+            'codigo_estud': '2027',
+            'provider_transaction_id': '127100',
+            'provider_status': 'Con Error',
+            'manual_correction_movement_id': '',
+        }]
+
+        _enrich_detected_manual_payment_corrections(rows)
+
+        self.assertEqual(rows[0]['manual_correction_movement_id'], '111')
+        self.assertEqual(rows[0]['manual_correction_payment_method'], 'TRANSFERENCIA')
+        self.assertEqual(rows[0]['registered_value'], Decimal('400.00'))
+        self.assertEqual(rows[0]['is_paid'], 1)
+
+    @patch('dashboard_auth.payments._fetch_payment_rows')
     def test_marks_link_as_paid_when_it_has_a_registered_payment(self, fetch_rows):
         fetch_rows.return_value = [
             {
@@ -320,12 +366,58 @@ class GeneratedPaymentLinkTests(TestCase):
         self.assertIn("'generada'", fetch_rows.call_args.args[0])
 
     @patch('dashboard_auth.payments._fetch_payment_rows')
+    def test_provider_error_takes_precedence_over_registered_payment(self, fetch_rows):
+        fetch_rows.return_value = [{
+            'inscription_payment_id': '4',
+            'nombre': 'Estudiante',
+            'amount': '500.00',
+            'registered_value': '500.00',
+            'provider_status': 'Con Error',
+            'is_paid': 1,
+        }]
+
+        result = _list_generated_payment_links('', 'all')
+
+        self.assertFalse(result[0]['is_paid'])
+        self.assertTrue(result[0]['has_provider_error'])
+        self.assertEqual(result[0]['display_status'], 'CON ERROR')
+
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    def test_manual_correction_resolves_provider_error_in_payment_list(self, fetch_rows):
+        fetch_rows.return_value = [{
+            'inscription_payment_id': '4',
+            'nombre': 'Estudiante',
+            'amount': '500.00',
+            'registered_value': '500.00',
+            'provider_status': 'Con Error',
+            'manual_correction_movement_id': '80',
+            'manual_correction_payment_method': 'TRANSFERENCIA',
+            'manual_correction_value': '500.00',
+            'is_paid': 1,
+        }]
+
+        result = _list_generated_payment_links('', 'all')
+
+        self.assertTrue(result[0]['is_paid'])
+        self.assertFalse(result[0]['has_provider_error'])
+        self.assertTrue(result[0]['provider_had_error'])
+        self.assertTrue(result[0]['manual_payment_corrected'])
+        self.assertEqual(result[0]['display_status'], 'CORREGIDO - TRANSFERENCIA')
+
+    def test_recognizes_all_digital_error_status_variants(self):
+        self.assertTrue(_is_provider_error_status('Con Error'))
+        self.assertTrue(_is_provider_error_status('CON_ERROR'))
+        self.assertTrue(_is_provider_error_status('Fallida'))
+        self.assertFalse(_is_provider_error_status('Pagada'))
+
+    @patch('dashboard_auth.payments._fetch_payment_rows')
     def test_reports_generated_and_confirmed_link_totals(self, fetch_rows):
         fetch_rows.return_value = [
             {
                 'generated_links': 2,
                 'paid_links': 1,
                 'generated_pending_links': 1,
+                'provider_error_links': 1,
                 'generated_value': '980.00',
                 'paid_value': '500.00',
             }
@@ -337,6 +429,7 @@ class GeneratedPaymentLinkTests(TestCase):
                 'generated_links': 2,
                 'paid_links': 1,
                 'generated_pending_links': 1,
+                'provider_error_links': 1,
                 'generated_value': '980.00',
                 'paid_value': '500.00',
             },
@@ -524,6 +617,132 @@ class ContinuingEducationDiscountTests(TestCase):
         self.assertEqual(result['value'], '200.00')
         self.assertEqual(result['replacement']['movimiento_relacionado_id'], '10')
         self.assertIn("EstadoMovimiento = 'ANULADO'", fetch_rows.call_args_list[1].args[0])
+
+    @patch('dashboard_auth.payments._mark_all_digital_payment_manually_corrected')
+    @patch('dashboard_auth.payments.create_notification_safely')
+    @patch('dashboard_auth.payments.cache.delete')
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    @patch('dashboard_auth.payments._ensure_continuing_education_payments_available')
+    def test_corrects_gateway_payment_to_transfer_and_keeps_audit_link(
+        self, _ensure_available, fetch_rows, _cache_delete, _notify, mark_all_digital
+    ):
+        fetch_rows.side_effect = [
+            [{
+                'MovimientoId': 79,
+                'CuentaId': 36,
+                'CodigoEstud': '1001',
+                'ValorOriginal': Decimal('500.00'),
+                'FormaPagoOriginal': 'ALLDIGITAL',
+                'ValorCurso': Decimal('500.00'),
+                'OtrosPagos': Decimal('0.00'),
+                'Descuentos': Decimal('0.00'),
+            }],
+            [{
+                'movimiento_id': '80',
+                'movimiento_relacionado_id': '79',
+                'valor': Decimal('450.00'),
+                'forma_pago': 'TRANSFERENCIA',
+            }],
+        ]
+
+        result = correct_continuing_education_payment(
+            {
+                'movimiento_id': '79',
+                'valor': '450.00',
+                'forma_pago': 'TRANSFERENCIA',
+                'banco': 'BANCO DE PRUEBA',
+                'numero_deposito': 'ABC-123',
+                'fecha_deposito': '2026-10-14',
+                'inscription_payment_id': '4',
+                'provider_transaction_id': '127100',
+                'motivo_correccion': 'La pasarela reportó un pago incorrecto',
+            },
+            user_login='admin',
+        )
+
+        self.assertEqual(result['value'], '450.00')
+        self.assertEqual(result['payment_method'], 'TRANSFERENCIA')
+        self.assertEqual(result['replacement']['movimiento_relacionado_id'], '79')
+        correction_sql = fetch_rows.call_args_list[1].args[0]
+        self.assertIn("EstadoMovimiento = 'ANULADO'", correction_sql)
+        self.assertIn('UPDATE', correction_sql)
+        self.assertIn('FacturaMovimiento', correction_sql)
+        mark_all_digital.assert_called_once()
+        self.assertEqual(mark_all_digital.call_args.kwargs['inscription_payment_id'], '4')
+        self.assertEqual(mark_all_digital.call_args.kwargs['provider_transaction_id'], '127100')
+
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    @patch('dashboard_auth.payments._ensure_continuing_education_payments_available')
+    def test_rejects_payment_correction_above_available_course_value(
+        self, _ensure_available, fetch_rows
+    ):
+        fetch_rows.return_value = [{
+            'MovimientoId': 79,
+            'CuentaId': 36,
+            'ValorOriginal': Decimal('500.00'),
+            'FormaPagoOriginal': 'ALLDIGITAL',
+            'ValorCurso': Decimal('500.00'),
+            'OtrosPagos': Decimal('100.00'),
+            'Descuentos': Decimal('0.00'),
+        }]
+
+        with self.assertRaisesRegex(PaymentGatewayError, 'no puede superar'):
+            correct_continuing_education_payment(
+                {
+                    'movimiento_id': '79',
+                    'valor': '450.00',
+                    'forma_pago': 'TRANSFERENCIA',
+                    'motivo_correccion': 'Valor incorrecto',
+                },
+                user_login='admin',
+            )
+
+    @patch('dashboard_auth.payments._store_continuing_education_voucher')
+    @patch('dashboard_auth.payments._fetch_payment_rows')
+    @patch('dashboard_auth.payments._ensure_continuing_education_payments_available')
+    def test_uploads_voucher_after_payment_correction(
+        self, _ensure_available, fetch_rows, store_voucher
+    ):
+        fetch_rows.side_effect = [
+            [{
+                'movimiento_id': 80,
+                'codigo_estud': '1001',
+                'nombre_estudiante': 'ESTUDIANTE PRUEBA',
+                'nombre_curso': 'DIPLOMADO',
+                'nombre_corte': 'PRIMERA COHORTE',
+                'numero_deposito': 'ABC-123',
+                'numero_comprobante': '',
+                'fecha_deposito': '2026-10-14',
+            }],
+            [{
+                'movimiento_id': '80',
+                'url_deposito': 'https://example.test/comprobante',
+                'nombre_comprobante': 'comprobante.pdf',
+            }],
+        ]
+        store_voucher.return_value = {
+            'relative_path': 'https://example.test/comprobante',
+            'folder_path': 'CURSO/COHORTE/ESTUDIANTE',
+            'web_url': 'https://example.test/comprobante',
+            'file_name': 'comprobante.pdf',
+            'sha256': 'abc123',
+        }
+
+        result = upload_continuing_education_payment_voucher(
+            {
+                'movimiento_id': '80',
+                'voucher_base64': 'data:application/pdf;base64,JVBERi0=',
+                'voucher_name': 'comprobante.pdf',
+            },
+            user_login='admin',
+        )
+
+        self.assertTrue(result['voucher']['stored'])
+        self.assertEqual(result['payment']['movimiento_id'], '80')
+        update_sql = fetch_rows.call_args_list[1].args[0]
+        self.assertIn('UrlComprobante = %s', update_sql)
+        self.assertIn('NombreArchivoComprobante = %s', update_sql)
+        self.assertIn('HashComprobante = %s', update_sql)
 
 
 class ExcelEnrollmentValueTests(TestCase):

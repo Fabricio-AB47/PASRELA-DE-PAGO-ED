@@ -741,11 +741,14 @@ def sync_course_cut_students(payload: dict[str, Any], *, user_login: str = '') -
     for row in rows:
         student = _normalize_cut_student(row, {})
         try:
+            is_mass_enrollment = _clean_text(row.get('Observacion')).lower().startswith('matrícula masiva')
             sync_result = sync_student_enrollment_to_complement(
                 corte_id=corte_id,
                 codigo_estud=student['codigo_estud'],
                 usuario_registro=user_login or 'SISTEMA',
                 registrar_cargo_inicial=True,
+                valor_total_curso='400.00' if is_mass_enrollment else None,
+                origen_matricula='EXCEL' if is_mass_enrollment else '',
             )
             synced = bool(sync_result.get('synced'))
             synced_count += 1 if synced else 0
@@ -2281,6 +2284,7 @@ def _fetch_course_cut_student_rows(corte_id: int) -> list[dict[str, Any]]:
             CCE.FechaInicioEstudiante,
             CCE.EstadoParticipacion,
             CCE.EstadoRegistro,
+            CCE.Observacion,
             CCE.Cod_AnioBasica,
             CCE.CodigoPeriodo,
             CCE.CodigoMateria,

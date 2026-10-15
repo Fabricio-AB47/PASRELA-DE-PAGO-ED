@@ -1,9 +1,12 @@
+from unittest.mock import MagicMock, patch
+
 from django.test import RequestFactory, SimpleTestCase
 
 from dashboard_auth.security import (
     _financial_request_is_allowed,
     _staff_request_is_allowed,
     _staff_role_name,
+    _student_session_has_active_access,
 )
 
 
@@ -38,3 +41,38 @@ class FinancialDashboardAccessTests(SimpleTestCase):
         self.assertFalse(_staff_request_is_allowed(request, 'ACADEMICO'))
         self.assertFalse(_staff_request_is_allowed(request, 'SECRETARIA'))
         self.assertFalse(_staff_request_is_allowed(request, 'FINANCIERO'))
+
+
+class StudentSessionAccessTests(SimpleTestCase):
+    @patch('dashboard_auth.security.connection')
+    def test_rejects_an_inactive_student_session(self, database_connection):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = None
+        database_connection.cursor.return_value.__enter__.return_value = cursor
+
+        allowed = _student_session_has_active_access({
+            'login': 'estudiante@intec.edu.ec',
+            'email': 'estudiante@intec.edu.ec',
+        })
+
+        self.assertFalse(allowed)
+
+    @patch('dashboard_auth.security.connection')
+    def test_accepts_an_active_student_session(self, database_connection):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = (1,)
+        database_connection.cursor.return_value.__enter__.return_value = cursor
+
+        allowed = _student_session_has_active_access({
+            'login': 'estudiante@intec.edu.ec',
+            'email': 'estudiante@intec.edu.ec',
+        })
+
+        self.assertTrue(allowed)
+        query, params = cursor.execute.call_args.args
+        # django-mssql formats % placeholders before sending the query. Literal
+        # LIKE wildcards must therefore remain escaped as %% in the SQL source.
+        query % tuple('?' * len(params))
+        self.assertIn("LIKE 'activo%%'", query)
+        self.assertIn("LIKE 'e continua%%'", query)
+

@@ -23,11 +23,16 @@ from reportlab.lib.pagesizes import A4, landscape, letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont as ReportLabTTFont
 from reportlab.platypus import Flowable, Image as ReportLabImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.pdfgen import canvas as reportlab_canvas
 from PIL import Image, ImageDraw, ImageFont
 
 from .certificate_template import (
+    CERTIFICATE_BACKGROUND_DIR_NAME,
+    CERTIFICATE_TEMPLATE_DIR_NAME,
+    DEFAULT_BACKGROUND_FILE_NAME,
     MAX_COMPLEMENT_LOGOS,
     certificate_template_background_path,
     certificate_template_complement_logo_paths,
@@ -45,30 +50,44 @@ CERTIFICATE_PREVIEW_IMAGE_CONTENT_TYPE = 'image/png'
 CERTIFICATE_STORAGE_DIR_NAME = 'certificados_inscripcion'
 CERTIFICATE_INSTITUTION_NAME = 'Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento INTEC'
 CERTIFICATE_SIGNING_SALT = 'dashboard_auth.inscription_certificate'
-CERTIFICATE_VERSION = '2026-07-20-left-to-right-complement-logos-v34'
+CERTIFICATE_VERSION = '2026-10-15-unified-body-text-color-v89'
 DEFAULT_COURSE_START_DATE = '20 de julio de 2026'
 LOGO_FILE_NAME = 'Intec-Logowithslogangray.svg'
 EMAIL_LOGO_FILE_NAME = 'Intec-Logowithslogangray.png'
 EMAIL_LOGO_CONTENT_ID = 'intec-logo.png'
 SIGNATURE_FILE_NAME = 'firma veronica.jpeg'
+CERTIFICATE_FIXED_SIGNATORIES = (
+    'Ing. Verónica Cevallos Calderón Mgtr.',
+    'Ing. Jaime Roder Ortega Pereira, Mgs.',
+)
+CERTIFICATE_SIGNATURE_FOOTER_HEIGHT_RATIO = 0.255
+CERTIFICATE_REFERENCE_SHAPES_FILE_NAME = 'certificate_reference_shapes.png'
+CERTIFICATE_REFERENCE_LOGO_FILE_NAME = 'certificate_reference_intec_logo.png'
+CERTIFICATE_REFERENCE_SHAPES_WIDTH_RATIO = 0.501
+CERTIFICATE_HEADER_SHAPE_COLOR = '#F8F0EF'
+CERTIFICATE_HEADER_SHAPE_SHOULDER_X_RATIO = 0.386
+CERTIFICATE_HEADER_SHAPE_POINT_X_RATIO = 0.4725
+CERTIFICATE_HEADER_SHAPE_MIDDLE_Y_RATIO = 0.1057
+CERTIFICATE_HEADER_SHAPE_BOTTOM_Y_RATIO = 0.2114
+CERTIFICATE_HEADER_CLEAR_BOTTOM_Y_RATIO = 0.24
+CERTIFICATE_STUDENT_NAME_COLOR = '#111111'
+CERTIFICATE_ACHIEVEMENT_TEXT_COLOR = '#000000'
 CERTIFICATE_CODE_PREFIX = 'INTEC-VGA-CER'
 CERTIFICATE_CODE_PADDING = 3
 CERTIFICATE_VERIFICATION_PATH = '/api/auth/certificates/verify/'
 
 # Shared header geometry. Keeping these values proportional makes the generated
 # PDF and its PNG preview use the same composition at every output size.
-HEADER_TEXT_CENTER_X_RATIO = 0.245
-HEADER_DIVIDER_X_RATIO = 0.375
-HEADER_PRIMARY_LOGO_WIDTH_RATIO = 0.22
-HEADER_PRIMARY_LOGO_HEIGHT_RATIO = 0.105
-HEADER_PRIMARY_LOGO_TOP_RATIO = 0.055
-HEADER_COMPLEMENT_MARGIN_X_RATIO = 0.025
-# Los logos complementarios se reservan exclusivamente para el bloque blanco
-# derecho del encabezado. El área termina antes del margen de la página y
-# comienza después del logo institucional central para conservar la plantilla.
-HEADER_COMPLEMENT_AREA_WIDTH_RATIO = 0.30
-HEADER_COMPLEMENT_AREA_HEIGHT_RATIO = 0.20
-HEADER_COMPLEMENT_AREA_TOP_RATIO = 0.045
+HEADER_GROUP_LEFT_SHIFT_RATIO = 0.0
+HEADER_TEXT_RIGHT_X_RATIO = 0.462 - HEADER_GROUP_LEFT_SHIFT_RATIO
+HEADER_DIVIDER_X_RATIO = 0.484 - HEADER_GROUP_LEFT_SHIFT_RATIO
+HEADER_LOGO_GAP_RATIO = 0.025
+HEADER_LOGO_LEFT_MARGIN_RATIO = 0.018
+HEADER_LOGO_AREA_LEFT_RATIO = HEADER_DIVIDER_X_RATIO + HEADER_LOGO_LEFT_MARGIN_RATIO
+HEADER_LOGO_AREA_WIDTH_RATIO = 0.452
+HEADER_LOGO_COLUMN_GAP_RATIO = HEADER_LOGO_GAP_RATIO / HEADER_LOGO_AREA_WIDTH_RATIO
+HEADER_LOGO_AREA_HEIGHT_RATIO = 0.15
+HEADER_LOGO_AREA_TOP_RATIO = 0.034
 
 
 def build_certificate_payload(
@@ -141,6 +160,17 @@ def build_certificate_payload(
             payload.get('fecha_inicio'),
             DEFAULT_COURSE_START_DATE,
         ),
+        'fecha_fin': _first_non_empty(
+            official_record.get('fecha_fin'),
+            official_record.get('fecha_finalizacion'),
+            payload.get('fecha_fin'),
+        ),
+        'horas_curso': _first_non_empty(
+            official_record.get('horas_curso'),
+            official_record.get('horas'),
+            payload.get('horas_curso'),
+            payload.get('horas'),
+        ),
         'nombre': _clean_text(_first_non_empty(payload.get('nombre'), provider_payload.get('nombre'))),
         'cedula': _clean_text(_first_non_empty(payload.get('cedula'), provider_payload.get('cedula'))),
         'email': _clean_text(_first_non_empty(payload.get('email'), provider_payload.get('email'))),
@@ -182,16 +212,18 @@ def create_stored_certificate_record(payload: dict[str, Any]) -> dict[str, str]:
     certificate_payload = _ensure_certificate_verification_code(certificate_payload)
     content, filename = build_inscription_certificate(certificate_payload)
     stored_filename = _safe_filename(filename)
-    storage_path = _certificate_storage_dir() / stored_filename
+    stored_subpath = _certificate_storage_subpath(certificate_payload, stored_filename)
+    storage_path = _certificate_storage_dir() / stored_subpath
     storage_path.parent.mkdir(parents=True, exist_ok=True)
     storage_path.write_bytes(content)
-    stored_relative_path = f'{CERTIFICATE_STORAGE_DIR_NAME}/{stored_filename}'
+    stored_relative_path = (Path(CERTIFICATE_STORAGE_DIR_NAME) / stored_subpath).as_posix()
     registry_record = _register_certificate_generation(certificate_payload, stored_relative_path)
     certificate_payload.update(registry_record)
 
     signed_payload = {
         **certificate_payload,
         'stored_filename': stored_filename,
+        'stored_subpath': stored_subpath.as_posix(),
         'stored_relative_path': stored_relative_path,
         'stored_at': timezone.now().isoformat(),
         'certificate_version': CERTIFICATE_VERSION,
@@ -332,58 +364,60 @@ def build_inscription_certificate_preview_image(payload: dict[str, Any]) -> tupl
     certificate_payload = _ensure_certificate_code(_normalize_certificate_payload(payload))
     _validate_certificate_payload(certificate_payload)
     background_path = _certificate_background_path(certificate_payload)
-    if background_path and background_path.exists():
+    if _uses_reference_certificate_background(background_path):
+        image = _reference_certificate_canvas((2000, 1414))
+    elif background_path and background_path.exists():
         image = Image.open(background_path).convert('RGB')
     else:
         image = Image.new('RGB', (2000, 1414), 'white')
 
+    _apply_preview_fixed_signature_footer(image)
+
     draw = ImageDraw.Draw(image)
     width, height = image.size
     _draw_preview_certificate_header_logos(image, certificate_payload)
+    _draw_preview_reference_intro(image)
 
     student_name = _clean_text(certificate_payload.get('nombre')).upper()
-    student_identity = _student_identity_label(certificate_payload)
     course_name = _certificate_course_display_name(certificate_payload).upper()
     cut_name = _certificate_cut_display_name(certificate_payload, course_name)
-    template_type = certificate_template_type(certificate_payload.get('corte_id'))
-    descriptor = 'curso de educación continua' if template_type == 'EDUCACION_CONTINUA' else 'programa académico'
+    template_type = _certificate_template_type_for_payload(certificate_payload)
+    detail = _certificate_detail_label(template_type, cut_name)
 
     _draw_preview_centered_text(
         draw,
         student_name,
         center_x=width / 2,
-        y=height * 0.405,
+        y=height * 0.455,
         max_width=width * 0.64,
         font=_preview_font('bold', 40),
-        fill='#9B0E0E',
+        fill=CERTIFICATE_STUDENT_NAME_COLOR,
     )
-    if student_identity:
+
+    if template_type == 'EDUCACION_CONTINUA':
         _draw_preview_centered_text(
             draw,
-            student_identity,
+            _approval_certificate_narrative(certificate_payload),
             center_x=width / 2,
-            y=height * 0.447,
-            max_width=width * 0.58,
-            font=_preview_font('regular', 17),
-            fill='#333333',
+            y=height * 0.625,
+            max_width=width * 0.66,
+            font=_preview_font('italic', 30),
+            fill=CERTIFICATE_ACHIEVEMENT_TEXT_COLOR,
+            max_lines=None,
+        )
+    else:
+        _draw_preview_centered_text(
+            draw,
+            course_name,
+            center_x=width / 2,
+            y=height * 0.66,
+            max_width=width * 0.76,
+            font=_preview_font('bold', _preview_course_font_size(course_name)),
+            fill='#111111',
+            max_lines=None,
         )
 
-    _draw_preview_centered_text(
-        draw,
-        course_name,
-        center_x=width / 2,
-        y=height * 0.59,
-        max_width=width * 0.76,
-        font=_preview_font('bold', _preview_course_font_size(course_name)),
-        fill='#111111',
-        max_lines=None,
-    )
-
-    detail_parts = [descriptor]
-    if cut_name:
-        detail_parts.append(cut_name)
-    detail = ' · '.join(detail_parts)
-    if detail:
+    if detail and template_type != 'EDUCACION_CONTINUA':
         _draw_preview_centered_text(
             draw,
             detail,
@@ -391,19 +425,41 @@ def build_inscription_certificate_preview_image(payload: dict[str, Any]) -> tupl
             y=height * 0.705,
             max_width=width * 0.58,
             font=_preview_font('regular', 15),
-            fill='#555555',
+            fill=(
+                CERTIFICATE_ACHIEVEMENT_TEXT_COLOR
+                if template_type == 'EDUCACION_CONTINUA'
+                else '#555555'
+            ),
         )
 
-    meta = _approval_certificate_meta(certificate_payload)
-    if meta:
+    meta_lines = (
+        _approval_certificate_result_lines(certificate_payload)
+        if template_type == 'EDUCACION_CONTINUA'
+        else [
+            *_approval_certificate_meta_lines(certificate_payload),
+            *_approval_certificate_result_lines(certificate_payload),
+        ]
+    )
+    for index, meta in enumerate(meta_lines):
         _draw_preview_centered_text(
             draw,
             meta,
             center_x=width / 2,
-            y=height * 0.755,
-            max_width=width * 0.56,
-            font=_preview_font('regular', 14),
-            fill='#555555',
+            y=height * (
+                (0.685 + (index * 0.036))
+                if template_type == 'EDUCACION_CONTINUA'
+                else (0.715 + (index * 0.030))
+            ),
+            max_width=width * 0.66,
+            font=_preview_font(
+                'italic' if template_type == 'EDUCACION_CONTINUA' else 'regular',
+                30 if template_type == 'EDUCACION_CONTINUA' else 14,
+            ),
+            fill=(
+                CERTIFICATE_ACHIEVEMENT_TEXT_COLOR
+                if template_type == 'EDUCACION_CONTINUA'
+                else '#555555'
+            ),
         )
 
     certificate_code = _certificate_code(certificate_payload)
@@ -430,14 +486,19 @@ def load_or_create_stored_certificate(payload: dict[str, Any]) -> tuple[bytes, s
     _validate_certificate_payload(certificate_payload)
 
     filename = _safe_filename(certificate_payload.get('stored_filename') or build_certificate_filename(certificate_payload))
-    storage_path = _certificate_storage_dir() / filename
+    stored_subpath = _safe_certificate_storage_subpath(
+        certificate_payload.get('stored_subpath'),
+        filename,
+    )
+    storage_path = _certificate_storage_dir() / stored_subpath
     if storage_path.exists() and certificate_payload.get('certificate_version') == CERTIFICATE_VERSION:
         return storage_path.read_bytes(), filename
 
     certificate_payload = _ensure_certificate_code(certificate_payload)
     content, generated_filename = build_inscription_certificate(certificate_payload)
     filename = _safe_filename(generated_filename)
-    storage_path = _certificate_storage_dir() / filename
+    stored_subpath = _certificate_storage_subpath(certificate_payload, filename)
+    storage_path = _certificate_storage_dir() / stored_subpath
     storage_path.parent.mkdir(parents=True, exist_ok=True)
     storage_path.write_bytes(content)
     return content, filename
@@ -601,89 +662,112 @@ def _build_background_approval_certificate(payload: dict[str, Any]) -> tuple[byt
     pdf = reportlab_canvas.Canvas(output, pagesize=page_size)
     width, height = page_size
     background_path = _certificate_background_path(payload)
-    if background_path:
+    if _uses_reference_certificate_background(background_path):
+        _draw_pdf_reference_background(pdf, width, height)
+    elif background_path:
         pdf.drawImage(str(background_path), 0, 0, width=width, height=height, preserveAspectRatio=False, mask='auto')
 
+    _draw_pdf_fixed_signature_footer(pdf, width, height)
+
     _draw_certificate_header_logos(pdf, payload, width, height)
+    _draw_pdf_reference_intro(pdf, width, height)
     student_name = _clean_text(payload.get('nombre')).upper()
-    student_identity = _student_identity_label(payload)
     course_name = _certificate_course_display_name(payload).upper()
     cut_name = _certificate_cut_display_name(payload, course_name)
     certificate_code = _certificate_code(payload)
-    template_type = certificate_template_type(payload.get('corte_id'))
-    descriptor = 'curso de educación continua' if template_type == 'EDUCACION_CONTINUA' else 'programa académico'
+    template_type = _certificate_template_type_for_payload(payload)
+    detail = _certificate_detail_label(template_type, cut_name)
+    regular_font, bold_font = _certificate_pdf_fonts()
 
     _draw_centered_wrapped_text(
         pdf,
         student_name,
         center_x=width / 2,
-        y=height * 0.585,
+        y=height * 0.545,
         max_width=width * 0.64,
-        font_name='Helvetica-Bold',
+        font_name=bold_font,
         font_size=24,
         leading=28,
-        color=colors.HexColor('#9B0E0E'),
+        color=colors.HexColor(CERTIFICATE_STUDENT_NAME_COLOR),
     )
-    if student_identity:
+
+    if template_type == 'EDUCACION_CONTINUA':
+        italic_font, _bold_italic_font = _certificate_pdf_italic_fonts()
         _draw_centered_wrapped_text(
             pdf,
-            student_identity,
+            _approval_certificate_narrative(payload),
             center_x=width / 2,
-            y=height * 0.535,
-            max_width=width * 0.58,
-            font_name='Helvetica',
-            font_size=11,
-            leading=13,
-            color=colors.HexColor('#333333'),
+            y=height * 0.375,
+            max_width=width * 0.66,
+            font_name=italic_font,
+            font_size=15,
+            leading=18,
+            max_lines=None,
+            color=colors.HexColor(CERTIFICATE_ACHIEVEMENT_TEXT_COLOR),
+        )
+    else:
+        _draw_centered_wrapped_text(
+            pdf,
+            course_name,
+            center_x=width / 2,
+            y=height * 0.340,
+            max_width=width * 0.76,
+            font_name=bold_font,
+            font_size=_certificate_course_font_size(course_name),
+            leading=_certificate_course_leading(course_name),
+            max_lines=None,
+            color=colors.HexColor('#111111'),
         )
 
-    _draw_centered_wrapped_text(
-        pdf,
-        course_name,
-        center_x=width / 2,
-        y=height * 0.385,
-        max_width=width * 0.76,
-        font_name='Helvetica-Bold',
-        font_size=_certificate_course_font_size(course_name),
-        leading=_certificate_course_leading(course_name),
-        max_lines=None,
-        color=colors.HexColor('#111111'),
-    )
-
-    detail_parts = [descriptor]
-    if cut_name:
-        detail_parts.append(cut_name)
-    detail = ' · '.join(detail_parts)
-    if detail:
+    if detail and template_type != 'EDUCACION_CONTINUA':
         _draw_centered_wrapped_text(
             pdf,
             detail,
             center_x=width / 2,
             y=height * 0.315,
             max_width=width * 0.58,
-            font_name='Helvetica',
+            font_name=italic_font if template_type == 'EDUCACION_CONTINUA' else regular_font,
             font_size=10.5,
             leading=13,
-            color=colors.HexColor('#555555'),
+            color=colors.HexColor(
+                CERTIFICATE_ACHIEVEMENT_TEXT_COLOR
+                if template_type == 'EDUCACION_CONTINUA'
+                else '#555555'
+            ),
         )
 
-    meta = _approval_certificate_meta(payload)
-    if meta:
+    meta_lines = (
+        _approval_certificate_result_lines(payload)
+        if template_type == 'EDUCACION_CONTINUA'
+        else [
+            *_approval_certificate_meta_lines(payload),
+            *_approval_certificate_result_lines(payload),
+        ]
+    )
+    for index, meta in enumerate(meta_lines):
         _draw_centered_wrapped_text(
             pdf,
             meta,
             center_x=width / 2,
-            y=height * 0.265,
-            max_width=width * 0.56,
-            font_name='Helvetica',
-            font_size=9.5,
-            leading=12,
-            color=colors.HexColor('#555555'),
+            y=height * (
+                (0.315 - (index * 0.036))
+                if template_type == 'EDUCACION_CONTINUA'
+                else (0.285 - (index * 0.030))
+            ),
+            max_width=width * 0.66,
+            font_name=italic_font if template_type == 'EDUCACION_CONTINUA' else regular_font,
+            font_size=15 if template_type == 'EDUCACION_CONTINUA' else 9.5,
+            leading=18 if template_type == 'EDUCACION_CONTINUA' else 12,
+            color=colors.HexColor(
+                CERTIFICATE_ACHIEVEMENT_TEXT_COLOR
+                if template_type == 'EDUCACION_CONTINUA'
+                else '#555555'
+            ),
         )
 
     if certificate_code:
         pdf.setFillColor(colors.HexColor('#777777'))
-        pdf.setFont('Helvetica', 8)
+        pdf.setFont(regular_font, 8)
         pdf.drawCentredString(width / 2, 0.18 * inch, f'Certificado No. {certificate_code}')
 
     _draw_certificate_qr(pdf, payload, width, height)
@@ -695,9 +779,20 @@ def _build_background_approval_certificate(payload: dict[str, Any]) -> tuple[byt
 
 def _draw_certificate_header_logos(pdf, payload: dict[str, Any], width: float, height: float) -> None:
     _clear_pdf_embedded_default_logo(pdf, width, height)
-    if _should_draw_default_header_logo(payload):
-        _draw_pdf_primary_education_logo(pdf, payload, width, height)
-    _draw_cut_logos(pdf, payload, width, height)
+    use_default_logo = _should_draw_default_header_logo(payload)
+    if use_default_logo:
+        _draw_pdf_education_header_label(pdf, width, height)
+    logos = _certificate_header_logo_paths(payload, include_default=use_default_logo)
+    _draw_pdf_logo_grid(
+        pdf,
+        logos,
+        x=width * HEADER_LOGO_AREA_LEFT_RATIO,
+        area_top=height - (height * HEADER_LOGO_AREA_TOP_RATIO),
+        area_width=width * HEADER_LOGO_AREA_WIDTH_RATIO,
+        area_height=height * HEADER_LOGO_AREA_HEIGHT_RATIO,
+        horizontal='center',
+        transparent_first=use_default_logo,
+    )
 
 
 def _clear_pdf_embedded_default_logo(pdf, width: float, height: float) -> None:
@@ -707,83 +802,125 @@ def _clear_pdf_embedded_default_logo(pdf, width: float, height: float) -> None:
     pdf.restoreState()
 
 
-def _draw_pdf_primary_education_logo(pdf, payload: dict[str, Any], width: float, height: float) -> None:
-    logo_path = _email_logo_path()
-    if not logo_path:
-        return
-    logo_width = width * HEADER_PRIMARY_LOGO_WIDTH_RATIO
-    logo_height = height * HEADER_PRIMARY_LOGO_HEIGHT_RATIO
-    logo_x = (width - logo_width) / 2
-    logo_y = height - (height * HEADER_PRIMARY_LOGO_TOP_RATIO) - logo_height
-
+def _draw_pdf_education_header_label(pdf, width: float, height: float) -> None:
+    regular_font = _certificate_pdf_header_font()
     pdf.saveState()
     pdf.setFillColor(colors.HexColor('#777777'))
-    pdf.setFont('Helvetica', 15.5)
-    pdf.drawCentredString(width * HEADER_TEXT_CENTER_X_RATIO, height - 0.64 * inch, 'Escuela de Educación en')
-    pdf.drawCentredString(width * HEADER_TEXT_CENTER_X_RATIO, height - 0.93 * inch, 'Línea y Educación Continua')
+    pdf.setFont(regular_font, 20)
+    text_right_x = width * HEADER_TEXT_RIGHT_X_RATIO
+    pdf.drawRightString(text_right_x, height * 0.906, 'Escuela de Educación en')
+    pdf.drawRightString(text_right_x, height * 0.863, 'Línea y Educación Continua')
     pdf.setStrokeColor(colors.HexColor('#333333'))
-    pdf.setLineWidth(1.4)
+    pdf.setLineWidth(0.7)
     divider_x = width * HEADER_DIVIDER_X_RATIO
-    pdf.line(divider_x, height - 1.18 * inch, divider_x, height - 0.35 * inch)
+    pdf.line(divider_x, height * (1.0 - 0.167), divider_x, height * (1.0 - 0.038))
     pdf.restoreState()
 
-    _draw_image_fit_box(
+
+def _draw_pdf_reference_intro(pdf, width: float, height: float) -> None:
+    regular_font, _bold_font = _certificate_pdf_fonts()
+    italic_font, bold_italic_font = _certificate_pdf_italic_fonts()
+    _draw_pdf_centered_segments(
         pdf,
-        logo_path,
-        logo_x,
-        logo_y,
-        logo_width,
-        logo_height,
-        horizontal='center',
-        transparent_white=True,
+        [
+            ('El Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento ', italic_font),
+            ('INTEC', bold_italic_font),
+        ],
+        center_x=width / 2,
+        y=height * 0.695,
+        font_size=15.5,
+        color=colors.HexColor('#111111'),
     )
+    pdf.setFillColor(colors.HexColor('#111111'))
+    pdf.setFont(regular_font, 15.5)
+    pdf.drawCentredString(
+        width / 2,
+        height * 0.650,
+        'a través de la Escuela de Educación en Línea y Educación Continua',
+    )
+    pdf.drawCentredString(width / 2, height * 0.615, 'confiere el presente Certificado a')
 
 
-def _draw_cut_logos(pdf, payload: dict[str, Any], width: float, height: float) -> None:
-    logos = certificate_template_complement_logo_paths(payload.get('corte_id'))
-    if not logos:
-        return
-    margin_x = width * HEADER_COMPLEMENT_MARGIN_X_RATIO
-    area_width = width * HEADER_COMPLEMENT_AREA_WIDTH_RATIO
-    area_height = height * HEADER_COMPLEMENT_AREA_HEIGHT_RATIO
-    area_top = height - (height * HEADER_COMPLEMENT_AREA_TOP_RATIO)
-    _draw_pdf_logo_grid(
-        pdf,
-        logos[:MAX_COMPLEMENT_LOGOS],
-        x=width - margin_x - area_width,
-        area_top=area_top,
-        area_width=area_width,
-        area_height=area_height,
-        horizontal='center',
-    )
+def _draw_pdf_centered_segments(
+    pdf,
+    segments: list[tuple[str, str]],
+    *,
+    center_x: float,
+    y: float,
+    font_size: float,
+    color,
+) -> None:
+    total_width = sum(pdfmetrics.stringWidth(text, font_name, font_size) for text, font_name in segments)
+    cursor_x = center_x - (total_width / 2)
+    pdf.setFillColor(color)
+    for text, font_name in segments:
+        pdf.setFont(font_name, font_size)
+        pdf.drawString(cursor_x, y, text)
+        cursor_x += pdfmetrics.stringWidth(text, font_name, font_size)
 
 
 def _complement_logo_slots(count: int) -> list[tuple[float, float, float, float]]:
-    """Return normalized boxes with the main partner above smaller logos."""
-    total = min(max(count, 0), MAX_COMPLEMENT_LOGOS)
+    """Keep the principal logo at left and stack two secondary logos at right."""
+    total = min(max(count, 0), MAX_COMPLEMENT_LOGOS + 1)
     if total == 0:
         return []
-    if total == 1:
-        return [(0.0, 0.0, 1.0, 1.0)]
-
-    first_height = 0.56
+    column_gap = HEADER_LOGO_COLUMN_GAP_RATIO
     row_gap = 0.08
-    lower_y = first_height + row_gap
-    lower_height = 1.0 - lower_y
-    column_gap = 0.025
-    lower_capacity = max(1, MAX_COMPLEMENT_LOGOS - 1)
-    lower_width = (1.0 - (column_gap * (lower_capacity - 1))) / lower_capacity
-    slots = [(0.0, 0.0, 1.0, first_height)]
+    if total == 1:
+        return [(0.0, 0.0, 0.48, 1.0)]
+    if total == 3:
+        # Match the compact dimensions of the official INTEC header reference.
+        primary_width = 0.48
+        secondary_x = primary_width + column_gap
+        secondary_width = 1.0 - secondary_x
+        secondary_row_height = (1.0 - row_gap) / 2
+        # Both secondary logos use an identical visual-height box. This keeps
+        # a wide logo from looking smaller than the more compact logo below it.
+        secondary_height = 0.26
+        top_y = (secondary_row_height - secondary_height) / 2
+        bottom_y = secondary_row_height + row_gap + top_y
+        return [
+            (0.0, 0.0, primary_width, 1.0),
+            (secondary_x, top_y, secondary_width, secondary_height),
+            (secondary_x, bottom_y, secondary_width, secondary_height),
+        ]
+
+    columns = min(total, 3)
+    slot_width = (1.0 - (column_gap * (columns - 1))) / columns
+    if total <= 3:
+        return [
+            (index * (slot_width + column_gap), 0.0, slot_width, 1.0)
+            for index in range(total)
+        ]
+
+    slot_height = (1.0 - row_gap) / 2
+    slots = [
+        (index * (slot_width + column_gap), 0.0, slot_width, slot_height)
+        for index in range(3)
+    ]
+    lower_count = total - 3
+    lower_width = (lower_count * slot_width) + ((lower_count - 1) * column_gap)
+    lower_start = (1.0 - lower_width) / 2
     slots.extend(
         (
-            index * (lower_width + column_gap),
-            lower_y,
-            lower_width,
-            lower_height,
+            lower_start + (index * (slot_width + column_gap)),
+            slot_height + row_gap,
+            slot_width,
+            slot_height,
         )
-        for index in range(total - 1)
+        for index in range(lower_count)
     )
     return slots
+
+
+def _certificate_header_logo_paths(payload: dict[str, Any], *, include_default: bool) -> list[Path]:
+    logos: list[Path] = []
+    if include_default:
+        default_logo = _reference_intec_logo_path() or _email_logo_path()
+        if default_logo:
+            logos.append(default_logo)
+    logos.extend(certificate_template_complement_logo_paths(payload.get('corte_id'))[:MAX_COMPLEMENT_LOGOS])
+    return logos
 
 
 def _draw_pdf_logo_grid(
@@ -795,13 +932,14 @@ def _draw_pdf_logo_grid(
     area_width: float,
     area_height: float,
     horizontal: str,
+    transparent_first: bool = False,
 ) -> None:
     if not logos:
         return
-    for logo_path, (slot_x, slot_y, slot_width, slot_height) in zip(
+    for index, (logo_path, (slot_x, slot_y, slot_width, slot_height)) in enumerate(zip(
         logos,
         _complement_logo_slots(len(logos)),
-    ):
+    )):
         cell_x = x + (slot_x * area_width)
         cell_width = slot_width * area_width
         cell_height = slot_height * area_height
@@ -813,7 +951,10 @@ def _draw_pdf_logo_grid(
             cell_y,
             cell_width,
             cell_height,
-            horizontal=horizontal if slot_y == 0 else 'left',
+            horizontal=horizontal,
+            # All header assets are normalized so their invisible white borders
+            # do not alter the apparent spacing between logos.
+            transparent_white=True,
         )
 
 
@@ -866,9 +1007,60 @@ def _draw_certificate_qr(pdf, payload: dict[str, Any], width: float, height: flo
 
 def _draw_preview_certificate_header_logos(image: Image.Image, payload: dict[str, Any]) -> None:
     _clear_preview_embedded_default_logo(image)
-    if _should_draw_default_header_logo(payload):
-        _draw_preview_primary_education_logo(image, payload)
-    _draw_preview_complement_logos(image, payload)
+    use_default_logo = _should_draw_default_header_logo(payload)
+    if use_default_logo:
+        _draw_preview_education_header_label(image)
+    width, height = image.size
+    _paste_preview_logo_grid(
+        image,
+        _certificate_header_logo_paths(payload, include_default=use_default_logo),
+        x=int(width * HEADER_LOGO_AREA_LEFT_RATIO),
+        y=int(height * HEADER_LOGO_AREA_TOP_RATIO),
+        area_width=int(width * HEADER_LOGO_AREA_WIDTH_RATIO),
+        area_height=int(height * HEADER_LOGO_AREA_HEIGHT_RATIO),
+        horizontal='center',
+        transparent_first=use_default_logo,
+    )
+
+
+def _draw_preview_reference_intro(image: Image.Image) -> None:
+    draw = ImageDraw.Draw(image)
+    width, height = image.size
+    _draw_preview_centered_segments(
+        draw,
+        [
+            ('El Instituto Superior Tecnológico de Técnicas Empresariales y del Conocimiento ', _preview_font('italic', 31)),
+            ('INTEC', _preview_font('bold_italic', 31)),
+        ],
+        center_x=width / 2,
+        y=height * 0.285,
+        fill='#111111',
+    )
+    second_line = 'a través de la Escuela de Educación en Línea y Educación Continua'
+    regular_font = _preview_font('regular', 31)
+    draw.text((width / 2, height * 0.323), second_line, font=regular_font, fill='#111111', anchor='mm')
+    draw.text(
+        (width / 2, height * 0.356),
+        'confiere el presente Certificado a',
+        font=regular_font,
+        fill='#111111',
+        anchor='mm',
+    )
+
+
+def _draw_preview_centered_segments(
+    draw: ImageDraw.ImageDraw,
+    segments: list[tuple[str, ImageFont.ImageFont]],
+    *,
+    center_x: float,
+    y: float,
+    fill: str,
+) -> None:
+    widths = [draw.textlength(text, font=font) for text, font in segments]
+    cursor_x = center_x - (sum(widths) / 2)
+    for (text, font), text_width in zip(segments, widths):
+        draw.text((cursor_x, y), text, font=font, fill=fill, anchor='lm')
+        cursor_x += text_width
 
 
 def _draw_preview_certificate_qr(image: Image.Image, payload: dict[str, Any]) -> None:
@@ -895,71 +1087,35 @@ def _clear_preview_embedded_default_logo(image: Image.Image) -> None:
     )
 
 
-def _draw_preview_primary_education_logo(image: Image.Image, payload: dict[str, Any]) -> None:
-    logo_path = _email_logo_path()
-    if not logo_path:
-        return
+def _draw_preview_education_header_label(image: Image.Image) -> None:
     width, height = image.size
-    text_center_x = int(width * HEADER_TEXT_CENTER_X_RATIO)
+    text_right_x = int(width * HEADER_TEXT_RIGHT_X_RATIO)
     divider_x = int(width * HEADER_DIVIDER_X_RATIO)
-    logo_width = int(width * HEADER_PRIMARY_LOGO_WIDTH_RATIO)
-    logo_height = int(height * HEADER_PRIMARY_LOGO_HEIGHT_RATIO)
-    logo_x = (width - logo_width) // 2
-    logo_y = int(height * HEADER_PRIMARY_LOGO_TOP_RATIO)
 
     draw = ImageDraw.Draw(image)
-    font = _preview_font('regular', 42)
+    font = _preview_header_font(47)
     fill = '#777777'
-    for offset, line in enumerate(('Escuela de Educación en', 'Línea y Educación Continua')):
-        bbox = draw.textbbox((0, 0), line, font=font)
-        line_width = bbox[2] - bbox[0]
+    for y_ratio, line in zip(
+        (0.076, 0.118),
+        ('Escuela de Educación en', 'Línea y Educación Continua'),
+    ):
         draw.text(
-            (text_center_x - (line_width / 2), int(height * 0.07) + (offset * int(height * 0.044))),
+            (text_right_x, int(height * y_ratio)),
             line,
             font=font,
             fill=fill,
+            anchor='rt',
         )
 
     draw.line(
         (
             divider_x,
-            int(height * 0.055),
+            int(height * 0.038),
             divider_x,
-            int(height * 0.155),
+            int(height * 0.167),
         ),
         fill='#333333',
-        width=max(2, int(width * 0.002)),
-    )
-    _paste_preview_image_fit_box(
-        image,
-        logo_path,
-        logo_x,
-        logo_y,
-        logo_width,
-        logo_height,
-        horizontal='center',
-        transparent_white=True,
-    )
-
-
-def _draw_preview_complement_logos(image: Image.Image, payload: dict[str, Any]) -> None:
-    logo_paths = certificate_template_complement_logo_paths(payload.get('corte_id'))
-    if not logo_paths:
-        return
-
-    width, height = image.size
-    margin_x = int(width * HEADER_COMPLEMENT_MARGIN_X_RATIO)
-    area_width = int(width * HEADER_COMPLEMENT_AREA_WIDTH_RATIO)
-    area_height = int(height * HEADER_COMPLEMENT_AREA_HEIGHT_RATIO)
-    area_y = int(height * HEADER_COMPLEMENT_AREA_TOP_RATIO)
-    _paste_preview_logo_grid(
-        image,
-        logo_paths[:MAX_COMPLEMENT_LOGOS],
-        x=width - margin_x - area_width,
-        y=area_y,
-        area_width=area_width,
-        area_height=area_height,
-        horizontal='center',
+        width=max(1, int(width * 0.001)),
     )
 
 
@@ -972,13 +1128,14 @@ def _paste_preview_logo_grid(
     area_width: int,
     area_height: int,
     horizontal: str,
+    transparent_first: bool = False,
 ) -> None:
     if not logos:
         return
-    for logo_path, (slot_x, slot_y, slot_width, slot_height) in zip(
+    for index, (logo_path, (slot_x, slot_y, slot_width, slot_height)) in enumerate(zip(
         logos,
         _complement_logo_slots(len(logos)),
-    ):
+    )):
         cell_x = x + round(slot_x * area_width)
         cell_y = y + round(slot_y * area_height)
         cell_width = max(16, round(slot_width * area_width))
@@ -990,7 +1147,9 @@ def _paste_preview_logo_grid(
             cell_y,
             cell_width,
             cell_height,
-            horizontal=horizontal if slot_y == 0 else 'left',
+            horizontal=horizontal,
+            # Use the visible logo bounds for the same spacing in the preview.
+            transparent_white=True,
         )
 
 
@@ -1048,6 +1207,9 @@ def _transparent_white_pil_image(image: Image.Image) -> Image.Image:
         else:
             pixels.append((red, green, blue, alpha))
     converted.putdata(pixels)
+    visible_bounds = converted.getbbox()
+    if visible_bounds:
+        return converted.crop(visible_bounds)
     return converted
 
 
@@ -1190,10 +1352,22 @@ def _wrap_preview_text(
 
 
 def _preview_font(weight: str, size: int) -> ImageFont.ImageFont:
-    font_name = 'arialbd.ttf' if weight == 'bold' else 'arial.ttf'
+    font_names = {
+        'bold': 'verdanab.ttf',
+        'italic': 'verdanai.ttf',
+        'bold_italic': 'verdanaz.ttf',
+    }
+    font_name = font_names.get(weight, 'verdana.ttf')
+    is_bold = weight in {'bold', 'bold_italic'}
+    is_italic = weight in {'italic', 'bold_italic'}
+    dejavu_name = 'DejaVuSans'
+    if is_bold:
+        dejavu_name += '-Bold'
+    if is_italic:
+        dejavu_name += '-Oblique'
     candidates = [
         Path('C:/Windows/Fonts') / font_name,
-        Path('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' if weight == 'bold' else '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),
+        Path('/usr/share/fonts/truetype/dejavu') / f'{dejavu_name}.ttf',
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -1202,6 +1376,72 @@ def _preview_font(weight: str, size: int) -> ImageFont.ImageFont:
             except OSError:
                 continue
     return ImageFont.load_default()
+
+
+def _preview_header_font(size: int) -> ImageFont.ImageFont:
+    for candidate in (
+        Path('C:/Windows/Fonts/calibri.ttf'),
+        Path('/usr/share/fonts/truetype/carlito/Carlito-Regular.ttf'),
+        Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),
+    ):
+        if candidate.exists():
+            try:
+                return ImageFont.truetype(str(candidate), size=size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
+def _certificate_pdf_header_font() -> str:
+    font_name = 'CertificateCalibri'
+    font_path = Path('C:/Windows/Fonts/calibri.ttf')
+    if font_name in pdfmetrics.getRegisteredFontNames():
+        return font_name
+    if font_path.exists():
+        try:
+            pdfmetrics.registerFont(ReportLabTTFont(font_name, str(font_path)))
+            return font_name
+        except Exception:
+            pass
+    return _certificate_pdf_fonts()[0]
+
+
+def _certificate_pdf_fonts() -> tuple[str, str]:
+    font_specs = (
+        ('CertificateVerdana', Path('C:/Windows/Fonts/verdana.ttf')),
+        ('CertificateVerdana-Bold', Path('C:/Windows/Fonts/verdanab.ttf')),
+    )
+    registered = set(pdfmetrics.getRegisteredFontNames())
+    for font_name, font_path in font_specs:
+        if font_name in registered or not font_path.exists():
+            continue
+        try:
+            pdfmetrics.registerFont(ReportLabTTFont(font_name, str(font_path)))
+            registered.add(font_name)
+        except Exception:
+            return 'Helvetica', 'Helvetica-Bold'
+    if all(font_name in registered for font_name, _font_path in font_specs):
+        return font_specs[0][0], font_specs[1][0]
+    return 'Helvetica', 'Helvetica-Bold'
+
+
+def _certificate_pdf_italic_fonts() -> tuple[str, str]:
+    font_specs = (
+        ('CertificateVerdana-Italic', Path('C:/Windows/Fonts/verdanai.ttf')),
+        ('CertificateVerdana-BoldItalic', Path('C:/Windows/Fonts/verdanaz.ttf')),
+    )
+    registered = set(pdfmetrics.getRegisteredFontNames())
+    for font_name, font_path in font_specs:
+        if font_name in registered or not font_path.exists():
+            continue
+        try:
+            pdfmetrics.registerFont(ReportLabTTFont(font_name, str(font_path)))
+            registered.add(font_name)
+        except Exception:
+            return 'Helvetica-Oblique', 'Helvetica-BoldOblique'
+    if all(font_name in registered for font_name, _font_path in font_specs):
+        return font_specs[0][0], font_specs[1][0]
+    return 'Helvetica-Oblique', 'Helvetica-BoldOblique'
 
 
 def _preview_line_height(font: ImageFont.ImageFont) -> int:
@@ -1294,7 +1534,7 @@ def _certificate_course_display_name(payload: dict[str, Any]) -> str:
     ]
     cleaned = [_clean_text(candidate) for candidate in candidates if _clean_text(candidate)]
     if not cleaned:
-        return 'Curso de educación continua'
+        return 'Curso de Educación Continua'
     return max(cleaned, key=len)
 
 
@@ -1310,6 +1550,24 @@ def _certificate_cut_display_name(payload: dict[str, Any], course_name: str) -> 
     return raw_cut_name
 
 
+def _certificate_detail_label(template_type: str, cut_name: str) -> str:
+    clean_cut_name = _clean_text(cut_name)
+    if template_type == 'EDUCACION_CONTINUA':
+        return ''
+
+    detail_parts = ['programa académico']
+    if clean_cut_name:
+        detail_parts.append(clean_cut_name)
+    return ' · '.join(detail_parts)
+
+
+def _certificate_template_type_for_payload(payload: dict[str, Any]) -> str:
+    requested_type = _clean_text(payload.get('certificate_template_type')).upper()
+    if requested_type == 'EDUCACION_CONTINUA':
+        return requested_type
+    return certificate_template_type(payload.get('corte_id'))
+
+
 def _strip_certificate_cut_prefix(value: Any) -> str:
     text = _clean_text(value)
     if not text:
@@ -1321,21 +1579,260 @@ def _strip_certificate_cut_prefix(value: Any) -> str:
 
 
 def _approval_certificate_meta(payload: dict[str, Any]) -> str:
-    parts = []
+    return '\n'.join(_approval_certificate_meta_lines(payload))
+
+
+def _approval_certificate_narrative(payload: dict[str, Any]) -> str:
+    course_name = _certificate_course_display_name(payload)
+    start_date = _clean_text(payload.get('fecha_inicio'))
+    end_date = _clean_text(payload.get('fecha_fin'))
+    course_hours = _clean_text(payload.get('horas_curso') or payload.get('horas'))
+
+    if course_name.lower().startswith('diplomado'):
+        narrative = f'Por haber participado en el {course_name}'
+    else:
+        narrative = f'Por haber participado en el curso de {course_name}'
+    if start_date and end_date:
+        narrative += f' dado del {start_date} al {end_date}'
+    elif start_date:
+        narrative += f' dado del {start_date}'
+    elif end_date:
+        narrative += f' con finalización el {end_date}'
+    if course_hours:
+        hours_label = course_hours if 'hora' in course_hours.lower() else f'{course_hours} horas'
+        narrative += f' con una duración total de {hours_label}'
+    return narrative
+
+
+def _approval_certificate_meta_lines(payload: dict[str, Any]) -> list[str]:
+    timeline_parts = []
+    duration_parts = []
+    start_date = _clean_text(payload.get('fecha_inicio'))
+    end_date = _clean_text(payload.get('fecha_fin'))
+    course_hours = _clean_text(payload.get('horas_curso') or payload.get('horas'))
+    if start_date:
+        timeline_parts.append(f'Fecha de inicio: {start_date}')
+    if end_date:
+        timeline_parts.append(f'Finalización: {end_date}')
+    if course_hours:
+        hours_label = course_hours if 'hora' in course_hours.lower() else f'{course_hours} horas'
+        duration_parts.append(f'Duración: {hours_label}')
+    return [
+        ' · '.join(parts)
+        for parts in (timeline_parts, duration_parts)
+        if parts
+    ]
+
+
+def _approval_certificate_result_lines(payload: dict[str, Any]) -> list[str]:
+    result_parts = []
     grade = _clean_text(payload.get('nota_final'))
     attendance = _clean_text(payload.get('porcentaje_asistencia'))
     if grade:
-        parts.append(f'Nota final: {grade}')
+        grade_value = grade.split('/', 1)[0]
+        result_parts.append(f'Nota: {_compact_number_label(grade_value)}/10')
     if attendance:
-        parts.append(f'Asistencia: {attendance}')
-    return ' · '.join(parts)
+        attendance_value = attendance.removesuffix('%')
+        result_parts.append(f'Asistencia: {_compact_number_label(attendance_value)}%')
+    return [' · '.join(result_parts)] if result_parts else []
+
+
+def _compact_number_label(value: Any) -> str:
+    text = _clean_text(value)
+    try:
+        number = Decimal(text)
+    except (InvalidOperation, TypeError, ValueError):
+        return text
+    compact = format(number.normalize(), 'f')
+    return '0' if compact in {'-0', ''} else compact
 
 
 def _student_identity_label(payload: dict[str, Any]) -> str:
     cedula = _clean_text(payload.get('cedula'))
     if not cedula:
         return ''
-    return f'Estudiante con número de cédula de identidad: {cedula}'
+    return f'Estudiante con cédula de ciudadanía N°. {cedula}'
+
+
+def _fixed_signature_background_path() -> Path | None:
+    path = (
+        Path(settings.BASE_DIR)
+        / CERTIFICATE_TEMPLATE_DIR_NAME
+        / CERTIFICATE_BACKGROUND_DIR_NAME
+        / DEFAULT_BACKGROUND_FILE_NAME
+    )
+    return path if path.exists() else None
+
+
+def _reference_shapes_path() -> Path | None:
+    path = (
+        Path(settings.BASE_DIR)
+        / CERTIFICATE_TEMPLATE_DIR_NAME
+        / CERTIFICATE_BACKGROUND_DIR_NAME
+        / CERTIFICATE_REFERENCE_SHAPES_FILE_NAME
+    )
+    return path if path.exists() else None
+
+
+def _reference_intec_logo_path() -> Path | None:
+    path = (
+        Path(settings.BASE_DIR)
+        / CERTIFICATE_TEMPLATE_DIR_NAME
+        / CERTIFICATE_BACKGROUND_DIR_NAME
+        / CERTIFICATE_REFERENCE_LOGO_FILE_NAME
+    )
+    return path if path.exists() else None
+
+
+def _uses_reference_certificate_background(background_path: Path | None) -> bool:
+    fixed_background = _fixed_signature_background_path()
+    if not background_path or not fixed_background:
+        return False
+    try:
+        return background_path.resolve() == fixed_background.resolve()
+    except OSError:
+        return False
+
+
+def _reference_certificate_canvas(size: tuple[int, int]) -> Image.Image:
+    canvas = Image.new('RGB', size, 'white')
+    shapes_path = _reference_shapes_path()
+    if shapes_path:
+        try:
+            with Image.open(shapes_path) as source:
+                shapes = source.convert('RGBA')
+                target_width = max(1, round(size[0] * CERTIFICATE_REFERENCE_SHAPES_WIDTH_RATIO))
+                target_height = max(1, round(size[1] * (11610 / 11910)))
+                target_top = round(size[1] * (300 / 11910))
+                shapes = shapes.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                canvas.paste(shapes, (0, target_top), shapes)
+        except (OSError, ValueError, Image.DecompressionBombError):
+            pass
+    _draw_preview_reference_header_shape(canvas)
+    return canvas
+
+
+def _draw_preview_reference_header_shape(canvas: Image.Image) -> None:
+    width, height = canvas.size
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle(
+        (0, 0, width, round(height * CERTIFICATE_HEADER_CLEAR_BOTTOM_Y_RATIO)),
+        fill='white',
+    )
+    draw.polygon(
+        (
+            (0, 0),
+            (round(width * CERTIFICATE_HEADER_SHAPE_SHOULDER_X_RATIO), 0),
+            (
+                round(width * CERTIFICATE_HEADER_SHAPE_POINT_X_RATIO),
+                round(height * CERTIFICATE_HEADER_SHAPE_MIDDLE_Y_RATIO),
+            ),
+            (
+                round(width * CERTIFICATE_HEADER_SHAPE_SHOULDER_X_RATIO),
+                round(height * CERTIFICATE_HEADER_SHAPE_BOTTOM_Y_RATIO),
+            ),
+            (0, round(height * CERTIFICATE_HEADER_SHAPE_BOTTOM_Y_RATIO)),
+        ),
+        fill=CERTIFICATE_HEADER_SHAPE_COLOR,
+    )
+
+
+def _draw_pdf_reference_background(pdf, width: float, height: float) -> None:
+    pdf.saveState()
+    pdf.setFillColor(colors.white)
+    pdf.rect(0, 0, width, height, fill=1, stroke=0)
+    shapes_path = _reference_shapes_path()
+    if shapes_path:
+        target_width = width * CERTIFICATE_REFERENCE_SHAPES_WIDTH_RATIO
+        target_height = height * (11610 / 11910)
+        target_top = height * (300 / 11910)
+        pdf.drawImage(
+            str(shapes_path),
+            0,
+            height - target_top - target_height,
+            width=target_width,
+            height=target_height,
+            preserveAspectRatio=False,
+            mask='auto',
+        )
+    pdf.setFillColor(colors.white)
+    pdf.rect(
+        0,
+        height * (1.0 - CERTIFICATE_HEADER_CLEAR_BOTTOM_Y_RATIO),
+        width,
+        height * CERTIFICATE_HEADER_CLEAR_BOTTOM_Y_RATIO,
+        fill=1,
+        stroke=0,
+    )
+    pdf.setFillColor(colors.HexColor(CERTIFICATE_HEADER_SHAPE_COLOR))
+    header_shape = pdf.beginPath()
+    header_shape.moveTo(0, height)
+    header_shape.lineTo(width * CERTIFICATE_HEADER_SHAPE_SHOULDER_X_RATIO, height)
+    header_shape.lineTo(
+        width * CERTIFICATE_HEADER_SHAPE_POINT_X_RATIO,
+        height * (1.0 - CERTIFICATE_HEADER_SHAPE_MIDDLE_Y_RATIO),
+    )
+    header_shape.lineTo(
+        width * CERTIFICATE_HEADER_SHAPE_SHOULDER_X_RATIO,
+        height * (1.0 - CERTIFICATE_HEADER_SHAPE_BOTTOM_Y_RATIO),
+    )
+    header_shape.lineTo(0, height * (1.0 - CERTIFICATE_HEADER_SHAPE_BOTTOM_Y_RATIO))
+    header_shape.close()
+    pdf.drawPath(header_shape, fill=1, stroke=0)
+    pdf.restoreState()
+
+
+def _fixed_signature_footer_image(*, width: int | None = None, height: int | None = None) -> Image.Image | None:
+    """Return the institutional footer that permanently contains both authorised signatures."""
+    background_path = _fixed_signature_background_path()
+    if not background_path:
+        return None
+    try:
+        with Image.open(background_path) as source:
+            source = source.convert('RGB')
+            footer_top = round(source.height * (1.0 - CERTIFICATE_SIGNATURE_FOOTER_HEIGHT_RATIO))
+            footer = source.crop((0, footer_top, source.width, source.height)).convert('RGBA')
+            # Keep only the two signatures and their institutional captions.
+            # Removing the old white/pink background lets the reference artwork
+            # continue seamlessly behind this immutable overlay.
+            pixels = []
+            for red, green, blue, _alpha in footer.getdata():
+                luminance = (red * 0.299) + (green * 0.587) + (blue * 0.114)
+                overlay_alpha = max(0, min(255, round((215 - luminance) * 7)))
+                pixels.append((red, green, blue, overlay_alpha))
+            footer.putdata(pixels)
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return None
+
+    if width and height and footer.size != (width, height):
+        footer = footer.resize((width, height), Image.Resampling.LANCZOS)
+    return footer
+
+
+def _apply_preview_fixed_signature_footer(image: Image.Image) -> None:
+    footer_height = max(1, round(image.height * CERTIFICATE_SIGNATURE_FOOTER_HEIGHT_RATIO))
+    footer = _fixed_signature_footer_image(width=image.width, height=footer_height)
+    if footer:
+        image.paste(footer, (0, image.height - footer_height), footer)
+
+
+def _draw_pdf_fixed_signature_footer(pdf, width: float, height: float) -> None:
+    footer = _fixed_signature_footer_image()
+    if not footer:
+        return
+    footer_buffer = BytesIO()
+    footer.save(footer_buffer, format='PNG', optimize=True)
+    footer_buffer.seek(0)
+    footer_height = height * CERTIFICATE_SIGNATURE_FOOTER_HEIGHT_RATIO
+    pdf.drawImage(
+        ImageReader(footer_buffer),
+        0,
+        0,
+        width=width,
+        height=footer_height,
+        preserveAspectRatio=False,
+        mask='auto',
+    )
 
 
 def _certificate_background_path(payload: dict[str, Any]) -> Path | None:
@@ -2174,6 +2671,31 @@ def _certificate_storage_dir() -> Path:
     if custom_path:
         return Path(custom_path)
     return settings.BASE_DIR / CERTIFICATE_STORAGE_DIR_NAME
+
+
+def _certificate_storage_subpath(payload: dict[str, Any], filename: str) -> Path:
+    safe_filename = _safe_filename(filename)
+    if _clean_text(payload.get('source')) != 'admin_corte':
+        return Path(safe_filename)
+
+    student_code = _slug_part(payload.get('codigo_estud'))
+    identity = _slug_part(payload.get('cedula'))
+    enrollment = _slug_part(payload.get('matricula'))
+    student_name = _slug_part(payload.get('nombre'))
+    identifier = student_code or identity or enrollment or 'sin-identificador'
+    folder_name = f'{identifier}_{student_name}' if student_name else identifier
+    return Path('estudiantes') / folder_name / safe_filename
+
+
+def _safe_certificate_storage_subpath(value: Any, fallback_filename: str) -> Path:
+    text = _clean_text(value).replace('\\', '/')
+    if not text:
+        return Path(_safe_filename(fallback_filename))
+
+    candidate = Path(text)
+    if candidate.is_absolute() or '..' in candidate.parts:
+        return Path(_safe_filename(fallback_filename))
+    return candidate
 
 
 def _source_label(value: Any) -> str:

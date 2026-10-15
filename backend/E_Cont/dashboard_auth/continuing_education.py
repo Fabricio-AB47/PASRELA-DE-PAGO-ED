@@ -140,9 +140,7 @@ def configure_cut_in_complement(
     if numeric_corte_id <= 0:
         return _skipped_result('CorteId inválido para configurar educación continua.')
 
-    cupo = _safe_int(cupo_maximo, default=50)
-    if cupo <= 0:
-        cupo = 50
+    requested_cupo = _safe_int(cupo_maximo, default=0)
 
     if version == 'v5':
         primary_cut = _fetch_primary_one(
@@ -155,16 +153,28 @@ def configure_cut_in_complement(
                 CupoEsperado,
                 NombreCorte,
                 FechaInicio,
-                FechaFin
-            FROM dbo.CORTE_CURSO
-            WHERE CorteId = %s
+                FechaFin,
+                (
+                    SELECT COUNT(1)
+                    FROM dbo.CORTE_CURSO_ESTUDIANTE E
+                    WHERE E.CorteId = C.CorteId
+                      AND ISNULL(E.EstadoRegistro, 'A') = 'A'
+                      AND UPPER(ISNULL(E.EstadoParticipacion, 'INSCRITO')) NOT IN ('ANULADO', 'RETIRADO')
+                ) AS TotalEstudiantesActivos
+            FROM dbo.CORTE_CURSO C
+            WHERE C.CorteId = %s
             """,
             [numeric_corte_id],
         )
         if not primary_cut:
             return _skipped_result('La corte no existe en la base principal INTECBDD.')
 
-        effective_cupo = cupo or _safe_int(primary_cut.get('CupoEsperado'), default=50) or 50
+        effective_cupo = max(
+            50,
+            requested_cupo,
+            _safe_int(primary_cut.get('CupoEsperado'), default=0),
+            _safe_int(primary_cut.get('TotalEstudiantesActivos'), default=0),
+        )
         rows = _fetch_all(
             f"""
             MERGE {_qualified('edu', 'CorteCurso')} AS T
@@ -228,6 +238,7 @@ def configure_cut_in_complement(
             ],
         )
     else:
+        cupo = requested_cupo if requested_cupo > 0 else 50
         rows = _fetch_all(
             f"""
             EXEC {_qualified('edu', 'usp_ConfigurarCorteCurso')}

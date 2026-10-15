@@ -15,6 +15,7 @@ export default function StudentSchedulePanel() {
   const [dashboard, setDashboard] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
   const courses = useMemo(() => dashboard?.courses || [], [dashboard?.courses])
   const weeklySchedule = useMemo(() => buildWeeklySchedule(courses), [courses])
   const scheduleRows = useMemo(() => buildScheduleRows(weeklySchedule), [weeklySchedule])
@@ -55,7 +56,7 @@ export default function StudentSchedulePanel() {
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [reloadKey])
 
   if (isLoading) {
     return (
@@ -74,6 +75,9 @@ export default function StudentSchedulePanel() {
         <div>
           <h3>No se pudo cargar el horario</h3>
           <p>{error}</p>
+          <button type="button" className="ghost-button compact-button" onClick={() => setReloadKey((value) => value + 1)}>
+            Reintentar
+          </button>
         </div>
       </article>
     )

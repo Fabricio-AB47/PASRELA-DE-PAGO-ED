@@ -52,6 +52,24 @@ def lookup_registered_user_by_number(
 
     student = _find_datos_estud(clean_cedula)
     if student:
+        has_course_context = all(course_context.values())
+        if has_course_context:
+            enrollment = _find_course_enrollment(student.get('codigo_estud'), course_context)
+            if enrollment:
+                return _registered_response(
+                    clean_cedula,
+                    source='CORTE_CURSO_ESTUDIANTE',
+                    course_context=course_context,
+                )
+            return {
+                'exists': False,
+                'identity_exists': True,
+                'codigo_estud': _clean_text(student.get('codigo_estud')),
+                'cedula': clean_cedula,
+                'message': '',
+                **course_context,
+            }
+
         return _registered_response(
             clean_cedula,
             source='DATOS_ESTUD',
@@ -102,6 +120,40 @@ def _find_datos_estud(cedula: str) -> dict[str, Any] | None:
         ORDER BY codigo_estud DESC
     """
     return _fetch_one(query, [cedula, cedula])
+
+
+def _find_course_enrollment(
+    codigo_estud: Any,
+    course_context: dict[str, str],
+) -> dict[str, Any] | None:
+    query = """
+        SELECT TOP (1)
+            CAST(E.CorteEstudianteId AS varchar(50)) AS corte_estudiante_id,
+            CAST(E.CorteId AS varchar(50)) AS corte_id,
+            CAST(E.CodigoEstud AS varchar(50)) AS codigo_estud
+        FROM dbo.CORTE_CURSO_ESTUDIANTE E
+        INNER JOIN dbo.CORTE_CURSO C ON C.CorteId = E.CorteId
+        WHERE CAST(E.CodigoEstud AS varchar(50)) = %s
+          AND CAST(C.Cod_AnioBasica AS varchar(50)) = %s
+          AND (
+                CAST(C.CodigoMateria AS varchar(50)) = %s
+                OR CAST(C.CodCurso AS varchar(50)) = %s
+          )
+          AND CAST(C.CodigoPeriodo AS varchar(50)) = %s
+          AND ISNULL(E.EstadoRegistro, 'A') = 'A'
+          AND UPPER(ISNULL(E.EstadoParticipacion, 'INSCRITO')) NOT IN ('ANULADO', 'RETIRADO')
+        ORDER BY E.CorteEstudianteId DESC
+    """
+    return _fetch_one(
+        query,
+        [
+            _clean_text(codigo_estud),
+            course_context['cod_anio_basica'],
+            course_context['codigo_materia'],
+            course_context['codigo_materia'],
+            course_context['codigo_periodo'],
+        ],
+    )
 
 
 def _fetch_one(query: str, params: list[Any]) -> dict[str, Any] | None:

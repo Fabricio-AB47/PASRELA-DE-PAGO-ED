@@ -19,6 +19,7 @@ from .bulk_enrollment import (
 from .admin_certificates import (
     AdminCertificateError,
     download_admin_certificate,
+    download_admin_certificates_batch,
     generate_admin_certificates,
     list_admin_certificate_students,
 )
@@ -84,10 +85,12 @@ from .payments import (
     list_financial_payment_operations,
     reconcile_pending_all_digital_payments,
     search_payment_links_for_operations,
+    correct_continuing_education_payment,
     correct_continuing_education_discount,
     register_continuing_education_payment,
     register_continuing_education_discount,
     upload_continuing_education_invoice,
+    upload_continuing_education_payment_voucher,
 )
 from .notifications import list_notifications, mark_notifications_read, notification_storage_status
 from .list_exports import ListExportError, build_people_list_export
@@ -828,7 +831,9 @@ def admin_certificate_template_save_view(request):
 @never_cache
 def admin_certificate_template_preview_view(request):
     try:
-        content, filename = build_certificate_template_preview(request.GET.get('corte_id') or request.GET.get('CorteId'))
+        content, filename = build_certificate_template_preview(
+            request.GET.get('corte_id') or request.GET.get('CorteId')
+        )
     except CertificateTemplateError as exc:
         return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
     except InscriptionCertificateError as exc:
@@ -845,6 +850,7 @@ def admin_certificate_template_preview_view(request):
 
     response = HttpResponse(content, content_type=CERTIFICATE_CONTENT_TYPE)
     response['Content-Disposition'] = f'inline; filename="{filename}"'
+    response['X-Certificate-Version'] = 'unified-body-text-color-v89'
     return response
 
 
@@ -937,6 +943,41 @@ def admin_certificate_download_view(request):
         )
 
     response = HttpResponse(content, content_type=CERTIFICATE_CONTENT_TYPE)
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+@never_cache
+def admin_certificate_batch_download_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {'ok': False, 'message': 'El cuerpo de la solicitud no es JSON vÃ¡lido.'},
+            status=400,
+        )
+
+    try:
+        content, filename, content_type = download_admin_certificates_batch(
+            payload.get('corte_id') or payload.get('CorteId'),
+            payload.get('corte_estudiante_ids') or payload.get('students'),
+        )
+    except AdminCertificateError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error while downloading admin certificate batch.')
+        return JsonResponse(
+            {
+                'ok': False,
+                'message': 'OcurriÃ³ un error interno preparando la descarga de certificados.',
+            },
+            status=500,
+        )
+
+    response = HttpResponse(content, content_type=content_type)
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
@@ -2380,6 +2421,30 @@ def admin_payment_invoice_view(request):
 @csrf_exempt
 @require_POST
 @require_admin_session
+def admin_payment_voucher_upload_view(request):
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = upload_continuing_education_payment_voucher(
+            payload,
+            user_login=_dashboard_user_login(request),
+        )
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error uploading continuing education payment voucher.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible guardar el comprobante del pago.'}, status=500)
+    return JsonResponse(
+        {'ok': True, 'message': 'Comprobante guardado en INTECEDUCONTINUA.', 'result': result},
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
 def admin_payment_discount_view(request):
     try:
         payload = json.loads(request.body.decode('utf-8'))
@@ -2425,6 +2490,36 @@ def admin_payment_discount_correction_view(request):
         return JsonResponse({'ok': False, 'message': 'No fue posible corregir el descuento o beca.'}, status=500)
     return JsonResponse(
         {'ok': True, 'message': 'Descuento o beca corregido en INTECEDUCONTINUA.', 'result': result},
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_POST
+@require_admin_session
+def admin_payment_correction_view(request):
+    role = (getattr(request, 'dashboard_user', {}) or {}).get('role') or {}
+    if str(role.get('name') or '').strip().upper() != 'ADMINISTRADOR':
+        return JsonResponse(
+            {'ok': False, 'message': 'Solo el administrador puede corregir movimientos de pago.'},
+            status=403,
+        )
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'message': 'El cuerpo de la solicitud no es JSON válido.'}, status=400)
+    try:
+        result = correct_continuing_education_payment(
+            payload,
+            user_login=_dashboard_user_login(request),
+        )
+    except PaymentGatewayError as exc:
+        return JsonResponse({'ok': False, 'message': str(exc)}, status=400)
+    except Exception:
+        logger.exception('Unexpected error correcting continuing education payment.')
+        return JsonResponse({'ok': False, 'message': 'No fue posible corregir el movimiento de pago.'}, status=500)
+    return JsonResponse(
+        {'ok': True, 'message': 'Pago corregido y saldo recalculado en INTECEDUCONTINUA.', 'result': result},
         status=201,
     )
 
